@@ -27,7 +27,7 @@ export function generateGastoRows(n: number, today: string, seed = 42): unknown[
     const ts = `${periodo}-${day}T12:00:00.000Z`
     rows.push([`${periodo}-${day}`, Math.round(rand() * (usd ? 50 : 250) * 100) / 100 + 1, usd ? 'USD' : 'PEN', categoria, sub,
       `${sub} ${i + 1}`, MEDIOS[Math.floor(rand() * MEDIOS.length)], TIPOS[Math.floor(rand() * 3)], ambito, rand() < 0.1,
-      rand() < 0.03 ? 'Anulado' : 'Activo', 'demo', '', `demo-${String(i).padStart(6, '0')}-0000`, ts, ts])
+      rand() < 0.03 ? 'Anulado' : 'Activo', 'demo', '', `d0000000-0000-4000-8000-${String(i).padStart(12, '0')}`, ts, ts])
   }
   return rows
 }
@@ -47,7 +47,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
-      'Personal', false, 'Activo', 'demo', '', 'demo-historico-0001', `${today}T12:00:00.000Z`, `${today}T12:00:00.000Z`]] as unknown[][],
+      'Personal', false, 'Activo', 'demo', '', 'd0000000-0000-4000-8000-999999999999', `${today}T12:00:00.000Z`, `${today}T12:00:00.000Z`]] as unknown[][],
     catalogo: demoCatalogo(),
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
     cajas: [

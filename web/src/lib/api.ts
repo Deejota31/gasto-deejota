@@ -131,6 +131,26 @@ const toCaja = (r: [string, string, number, string, string, string, number]): Ca
 export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'>
 
 /** API de alto nivel usada por la app. El transporte puede ser HTTP real o el modo demo. */
+/** Mismo criterio que requireId_ en Code.gs: un ID que no cumple no se puede editar ni eliminar desde la app. */
+export const ID_VALIDO = /^[0-9a-fA-F-]{8,64}$/
+
+/**
+ * Marca gastos cuyo ID repetido o inválido (p. ej. escrito a mano en la hoja) impediría editarlos con seguridad:
+ * con un ID repetido, editar uno modificaría el otro. Cada fila recibe además una clave única para la interfaz.
+ */
+export function marcarIds(gastos: Gasto[]): Gasto[] {
+  const count = new Map<string, number>()
+  for (const g of gastos) count.set(g.id.toLowerCase(), (count.get(g.id.toLowerCase()) ?? 0) + 1)
+  const seen = new Map<string, number>()
+  return gastos.map(g => {
+    const k = g.id.toLowerCase()
+    const n = seen.get(k) ?? 0
+    seen.set(k, n + 1)
+    const problemaId = !ID_VALIDO.test(g.id) ? 'invalido' as const : (count.get(k) ?? 0) > 1 ? 'duplicado' as const : undefined
+    return { ...g, uid: n ? `${g.id}#${n}` : g.id, ...(problemaId ? { problemaId } : {}) }
+  })
+}
+
 export function createApi(t: Transport) {
   let inflight: Promise<AppData> | null = null
   return {
@@ -140,7 +160,7 @@ export function createApi(t: Transport) {
         const d = parse(dataSchema, raw)
         return {
           version: d.version, sheetUrl: d.sheetUrl, config: d.config,
-          gastos: d.gastos.map(rowToGasto),
+          gastos: marcarIds(d.gastos.map(rowToGasto)),
           catalogo: d.catalogo.map(toCatalogo),
           medios: d.medios.map(([nombre, activo]): Medio => ({ nombre, activo })),
           cajas: d.cajas.map(toCaja),

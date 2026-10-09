@@ -301,6 +301,24 @@ describe('backend Apps Script', () => {
     expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)
   })
 
+  it('repararIds: respalda y cambia solo los IDs repetidos, vacíos o inválidos (el primero conserva el suyo)', () => {
+    const sh = b.ss.getSheetByName('GASTOS')!
+    const row = (id: string, desc: string, monto: number) => ['2026-10-01', monto, 'PEN', 'Auto', 'Gas', desc, 'Plin', 'Variable', 'Personal', false, 'Activo', 'web', '', id, 't0', 't0']
+    sh.rows.push(row('5d1d6822-e84c-41f0-0b0d-aa2cf573c62A', 'Gas', 39.21), row('5d1d6822-e84c-41f0-0b0d-aa2cf573c62a', 'Enfamil', 187.2),
+      row('5d1d6822-e84c-41f0-0b0d-aa2cf573c62P', 'Doritos', 2), row('00488880-85fb-4805-a7f0-5962625e15b1', 'Papitas', 4))
+    const antes = sh.rows.map(r => r.filter((_, j) => j !== 13))
+    const cambios = b.g.repararIds() as unknown as string[]
+    expect(b.ss.copies).toHaveLength(1)
+    expect(cambios).toHaveLength(2)
+    expect(sh.rows[1][13]).toBe('5d1d6822-e84c-41f0-0b0d-aa2cf573c62A')          // primera aparición: igual
+    expect(sh.rows[2][13]).not.toBe('5d1d6822-e84c-41f0-0b0d-aa2cf573c62a')      // repetido (sin importar mayúsculas)
+    expect(sh.rows[3][13]).toMatch(/^[0-9a-f-]{36}$/)                            // inválido
+    expect(sh.rows[4][13]).toBe('00488880-85fb-4805-a7f0-5962625e15b1')
+    expect(sh.rows.map(r => r.filter((_, j) => j !== 13))).toEqual(antes)        // ningún otro dato cambió
+    expect(new Set(sh.rows.slice(1).map(r => String(r[13]).toLowerCase())).size).toBe(4)
+    expect(b.g.repararIds() as unknown as string[]).toHaveLength(0)              // idempotente
+  })
+
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {
     b.ss.getSheetByName('CAJAS')!.rows[0] = ['otra', 'cosa']
     expect(() => b.g.setup()).toThrow(/encabezados distintos/)

@@ -963,6 +963,43 @@ function actualizarCatalogo() {
 }
 
 /**
+ * Repara IDs de gastos (ejecútala a mano desde el editor). Primero crea un respaldo.
+ * Asigna un ID nuevo solo a filas cuyo ID está vacío, tiene caracteres no válidos o está REPETIDO
+ * (la primera aparición conserva el suyo). No cambia ningún otro dato: fecha, monto, descripción, estado y fechas
+ * de creación quedan igual. Sin esto, editar o eliminar uno de dos gastos con el mismo ID modificaría el otro.
+ */
+function repararIds() {
+  var ss = openSpreadsheet_(false);
+  var backup = backup_();
+  Logger.log('Respaldo creado: ' + backup.url);
+  var cambios = withLock_(function () {
+    var sh = ss.getSheetByName('GASTOS');
+    var n = Math.max(lastDataRow_(sh) - 1, 0);
+    if (!n) return [];
+    var rows = sh.getRange(2, 1, n, SHEETS.GASTOS.length).getValues();
+    var seen = {};
+    var out = [];
+    var ids = rows.map(function (r, i) {
+      var id = str_(r[G.ID]);
+      if (!hasContent_(r)) return [r[G.ID]];
+      var k = id.toLowerCase();
+      if (!id || !/^[0-9a-fA-F-]{8,64}$/.test(id) || seen[k]) {
+        var nuevo = Utilities.getUuid();
+        seen[nuevo.toLowerCase()] = true;
+        out.push('Fila ' + (i + 2) + ' (' + str_(r[G.DESC]) + ', ' + num_(r[G.MONTO]) + '): ' + (id || '(vacío)') + ' → ' + nuevo);
+        return [nuevo];
+      }
+      seen[k] = true;
+      return [r[G.ID]];
+    });
+    if (out.length) { sh.getRange(2, G.ID + 1, n, 1).setValues(ids); invalidateCache_(); }
+    return out;
+  });
+  Logger.log(cambios.length ? 'IDs reparados:\n' + cambios.join('\n') : 'Todos los IDs están bien. No se cambió nada.');
+  return cambios;
+}
+
+/**
  * Reparación opcional y explícita (ejecútala a mano desde el editor). Crea un respaldo y luego, en cada hoja:
  * quita las casillas de verificación que dejaban FALSE en filas vacías, mueve los registros reales al inicio
  * (fila 2 en adelante) conservando su orden, y asigna ID a los gastos escritos a mano que no lo tenían.
