@@ -330,6 +330,27 @@ function setup() {
   Logger.log('API_TOKEN: ' + props.getProperty('API_TOKEN'));
 }
 
+/**
+ * Muestra en el registro dónde está todo (ejecútala desde el editor): este proyecto de Apps Script,
+ * la hoja que usa la API y la URL /exec. No modifica nada.
+ */
+function misArchivos() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SPREADSHEET_ID');
+  Logger.log('Proyecto Apps Script: https://script.google.com/d/' + ScriptApp.getScriptId() + '/edit');
+  if (id) {
+    var ss = SpreadsheetApp.openById(id);
+    Logger.log('Hoja que usa la API: ' + ss.getName() + ' → ' + ss.getUrl());
+    Logger.log('SPREADSHEET_ID: ' + id);
+  } else {
+    Logger.log('Este proyecto todavía no tiene hoja: ejecuta setup() o define SPREADSHEET_ID en Propiedades del script.');
+  }
+  var url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { /* sin implementación */ }
+  Logger.log('URL de la API (/exec): ' + (url || 'sin implementación web todavía'));
+  Logger.log('Respaldos: busca "' + SPREADSHEET_NAME + ' - Respaldo" en Google Drive.');
+}
+
 function openSpreadsheet_(create) {
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty('SPREADSHEET_ID');
