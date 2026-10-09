@@ -214,3 +214,25 @@ test.describe('móvil', () => {
     await expect(list.getByRole('listitem')).toHaveCount(count)
   })
 })
+
+test('caso 10: Familia + Bebé + Yape → tabla y KPI muestran exactamente esos movimientos', async ({ page }) => {
+  await go(page, 'Gastos')
+  await page.getByRole('button', { name: 'Período', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este año' }).click()
+  await newGasto(page, { ambito: 'Familia', categoria: 'Bebé', sub: 'Pañales', monto: '100', medio: 'Yape', desc: 'Caso 10' })
+  await pickMulti(page, 'Ámbito', 'Familia')
+  await pickMulti(page, 'Categoría', 'Bebé')
+  await pickMulti(page, 'Medio de pago', 'Yape')
+  await page.getByLabel('Registros por página').selectOption('50')
+  const rows = page.locator('tbody tr')
+  const n = await rows.count()
+  expect(n).toBeGreaterThan(0)
+  let suma = 0
+  for (let i = 0; i < n; i++) {
+    const t = await rows.nth(i).innerText()
+    expect(t).toContain('Familia'); expect(t).toContain('Bebé'); expect(t).toContain('Yape')
+    suma += money(t.match(/S\/\s?[\d,.]+/)![0])
+  }
+  await go(page, 'Dashboard')
+  expect(await total(page)).toBeCloseTo(suma, 2)
+})

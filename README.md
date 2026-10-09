@@ -106,7 +106,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
 | `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 65) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (11). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (12). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas
@@ -115,7 +115,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 - **Integración del backend** (`backend.test.ts`): ejecuta el `Code.gs` real contra una simulación en memoria de SpreadsheetApp, CacheService, LockService y PropertiesService. Cubre el instalador idempotente, token, idempotencia de altas, edición, anulación, validaciones, inyección de fórmulas, caché e invalidación, lectura de una sola llamada por hoja, lock ocupado y upserts. Comprobé que las pruebas fallan si se quita la protección de duplicados o la de fórmulas.
 - **Cliente API** (`api.test.ts`): POST `text/plain`, máximo 3 reintentos solo para errores transitorios, sin reintentos para validación, permisos o cuota, timeout, respuesta HTML de un despliegue mal configurado, y deduplicación de lecturas simultáneas.
 - **Backend v1.1** (`backend.test.ts`): inserción en filas 2, 3, 4…; ninguna fila de relleno; hoja heredada con `FALSE` en 999 filas y datos en la 1001 → el nuevo registro va justo debajo sin tocar lo existente; `repararHojas` compacta, crea respaldo, asigna IDs y ordena medios; renombrar en cascada y rechazo de duplicados.
-- **E2E** (`e2e/app.spec.ts`): pestañas y ausencia de "Últimos 6 meses"; ⓘ en los 8 KPIs; multiselección, chips, filtros dependientes, limpiar y presets; fórmulas de cajas en pantalla; orden de medios sin opción en blanco; registrar, editar, clonar, eliminar y restaurar; paginación 5–50; crear subcategoría y usarla; renombrar categoría con cascada; móvil sin scroll horizontal y deslizar para ver acciones sin borrar por accidente.
+- **E2E** (`e2e/app.spec.ts`): pestañas y ausencia de "Últimos 6 meses"; ⓘ en los 8 KPIs; multiselección, chips, filtros dependientes, limpiar y presets; fórmulas de cajas en pantalla; orden de medios sin opción en blanco; registrar, editar, clonar, eliminar y restaurar; paginación 5–50; crear subcategoría y usarla; renombrar categoría con cascada; móvil sin scroll horizontal y deslizar para ver acciones sin borrar por accidente; caso 10 (Familia + Bebé + Yape) cuadra tabla y KPI.
 
 > Las pruebas de integración usan una simulación de Google, no Google real. La conexión real se verifica al desplegar: Configuración → *Diagnóstico* muestra filas por hoja, estado de caché y tiempo de lectura.
 
