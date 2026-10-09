@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import vm from 'node:vm'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { CATALOGO_INICIAL } from './lib/catalogo'
 
 type Cell = unknown
 class FakeSheet {
@@ -101,11 +102,38 @@ describe('backend Apps Script', () => {
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
     expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'PRESUPUESTOS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
-    expect(b.ss.getSheetByName('CATALOGO')!.rows.slice(1).map(r => r[0])).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
+    const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
+    expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
+    expect(cat.filter(r => r[2])).toHaveLength(178)
     b.g.setup()
     expect(b.created()).toBe(1)
-    expect(b.ss.getSheetByName('CATALOGO')!.rows).toHaveLength(6)
+    expect(b.ss.getSheetByName('CATALOGO')!.rows).toHaveLength(cat.length + 1)
     expect(b.ss.getSheetByName('GASTOS')!.frozen).toBe(1)
+  })
+
+  it('el catálogo del backend es idéntico al del frontend', () => {
+    const gs = (b.g as unknown as { CATALOGO_INICIAL: unknown }).CATALOGO_INICIAL
+    expect(JSON.parse(JSON.stringify(gs))).toEqual(CATALOGO_INICIAL)
+  })
+
+  it('las subcategorías dependen del ámbito y la categoría', () => {
+    const rows = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
+    const subs = (a: string, c: string) => rows.filter(r => r[0] === a && r[1] === c).map(r => r[2])
+    expect(subs('Familia', 'Bebé')).toContain('Pañales')
+    expect(subs('Personal', 'Bebé')).toEqual([])
+    expect(subs('Amigos', 'Transporte')).toEqual(['Taxi', 'Bus / Micro', 'Otros'])
+  })
+
+  it('volver a ejecutar setup agrega lo que falta sin reactivar lo desactivado ni borrar lo manual', () => {
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Auto', subcategoria: 'SOAT', activo: false })
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Mascotas', subcategoria: 'Veterinario', activo: true })
+    const sheet = b.ss.getSheetByName('CATALOGO')!
+    sheet.rows = sheet.rows.filter(r => !(r[1] === 'Suscripciones' && r[2] === 'Claude')) // simula una fila borrada
+    b.g.setup()
+    const rows = sheet.rows.slice(1)
+    expect(rows.find(r => r[1] === 'Auto' && r[2] === 'SOAT')![3]).toBe(false)
+    expect(rows.some(r => r[2] === 'Veterinario')).toBe(true)
+    expect(rows.filter(r => r[1] === 'Suscripciones' && r[2] === 'Claude')).toHaveLength(1)
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {
@@ -205,15 +233,15 @@ describe('backend Apps Script', () => {
   })
 
   it('catálogo, medios, cajas, presupuestos y configuración hacen upsert sin duplicar', () => {
-    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Comida', subcategoria: 'Almuerzo', activo: true })
-    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Comida', subcategoria: 'Almuerzo', activo: false })
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', activo: true })
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', activo: false })
     b.post('saveMedio', { nombre: 'yape', activo: false })
     b.post('saveCaja', { id: 'auto', nombre: 'Caja Auto', presupuesto: 500, filtroCampo: 'Categoría', filtroValor: 'Auto', color: '#64748b', orden: 2 })
     b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 300 })
     b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 350 })
     b.post('saveConfig', { clave: 'tipo_cambio_USD', valor: '3.75' })
     const d = b.post('data').data
-    expect(d.catalogo.filter((c: unknown[]) => c[2] === 'Almuerzo')).toEqual([['Personal', 'Comida', 'Almuerzo', false]])
+    expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false]])
     expect(d.medios.find((m: unknown[]) => String(m[0]).toLowerCase() === 'yape')[1]).toBe(false)
     expect(d.medios).toHaveLength(6)
     expect(d.cajas.find((c: unknown[]) => c[0] === 'auto')[2]).toBe(500)

@@ -40,6 +40,7 @@ export default function GastoModal({ store, gasto, open, onClose, onSaved }: { s
   const [saving, setSaving] = useState(false)
   const set = (p: Partial<Form>) => setForm(f => ({ ...f, ...p }))
   const opts = catalogOptions(store, form.ambito, form.categoria)
+  const subOptions = form.categoria ? opts.subcategorias : []
   const medios = (store.data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
   const monedas = (store.data?.config.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   // Al editar, conserva valores que ya no estén activos en el catálogo.
@@ -50,6 +51,10 @@ export default function GastoModal({ store, gasto, open, onClose, onSaved }: { s
     const parsed = schema.safeParse({ ...form, monto: form.montoText.trim() === '' ? undefined : Number(form.montoText.replace(',', '.')) })
     if (!parsed.success) {
       setErrors(Object.fromEntries(parsed.error.issues.map(i => [String(i.path[0]), i.message])))
+      return
+    }
+    if (subOptions.length && !parsed.data.subcategoria) {
+      setErrors({ subcategoria: 'Elige una subcategoría' })
       return
     }
     setErrors({})
@@ -69,31 +74,48 @@ export default function GastoModal({ store, gasto, open, onClose, onSaved }: { s
   return (
     <Modal open={open} onClose={onClose} title={gasto ? 'Editar gasto' : 'Nuevo gasto'}>
       <form onSubmit={submit} className="grid grid-cols-2 gap-3" noValidate>
-        <Field label="Ámbito" error={errors.ambito}>
-          <Select label="Ámbito" value={form.ambito} onChange={ambito => set({ ambito, categoria: '', subcategoria: '' })} options={withCurrent(opts.ambitos, form.ambito)} placeholder="Elige…" />
+        {/* Orden jerárquico: el ámbito define las categorías y la categoría define las subcategorías. */}
+        <fieldset className="col-span-2">
+          <legend className="mb-1 text-xs font-medium text-muted">Ámbito</legend>
+          <div role="radiogroup" aria-label="Ámbito" className="flex flex-wrap gap-1.5">
+            {withCurrent(opts.ambitos, form.ambito).map(a => (
+              <button key={a} type="button" role="radio" aria-checked={form.ambito === a}
+                onClick={() => form.ambito !== a && set({ ambito: a, categoria: '', subcategoria: '' })}
+                className={`rounded-full border px-3 py-1 text-sm font-medium transition ${form.ambito === a ? 'border-navy bg-navy text-white' : 'border-line text-ink hover:bg-bg'}`}>
+                {a}
+              </button>
+            ))}
+          </div>
+          {errors.ambito && <span className="text-xs text-red-600">{errors.ambito}</span>}
+        </fieldset>
+        <Field label="Categoría" error={errors.categoria}>
+          <select aria-label="Categoría" className={inputCls} disabled={!form.ambito} value={form.categoria} onChange={e => set({ categoria: e.target.value, subcategoria: '' })}>
+            <option value="">{form.ambito ? 'Elige…' : 'Primero elige un ámbito'}</option>
+            {withCurrent(opts.categorias, form.categoria).map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
         </Field>
-        <Field label="Fecha" error={errors.fecha}><input type="date" className={inputCls} value={form.fecha} onChange={e => set({ fecha: e.target.value })} /></Field>
-        <Field label="Moneda" error={errors.moneda}><Select label="Moneda" value={form.moneda} onChange={moneda => set({ moneda })} options={withCurrent(monedas, form.moneda)} /></Field>
+        <Field label="Subcategoría" error={errors.subcategoria}>
+          <select aria-label="Subcategoría" className={inputCls} disabled={!form.categoria} value={form.subcategoria} onChange={e => set({ subcategoria: e.target.value })}>
+            <option value="">{form.categoria ? 'Elige…' : 'Primero elige una categoría'}</option>
+            {withCurrent(subOptions, form.subcategoria).map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </Field>
         <Field label="Monto" error={errors.monto}>
-          <input type="text" inputMode="decimal" className={`${inputCls} tabular`} placeholder="0.00" autoFocus value={form.montoText} onChange={e => set({ montoText: e.target.value })} />
+          <input type="text" inputMode="decimal" className={`${inputCls} tabular`} placeholder="0.00" value={form.montoText} onChange={e => set({ montoText: e.target.value })} />
         </Field>
+        <Field label="Moneda" error={errors.moneda}><Select label="Moneda" value={form.moneda} onChange={moneda => set({ moneda })} options={withCurrent(monedas, form.moneda)} /></Field>
+        <Field label="Fecha" error={errors.fecha}><input type="date" className={inputCls} value={form.fecha} onChange={e => set({ fecha: e.target.value })} /></Field>
         <Field label="Medio de pago" error={errors.medioPago}>
           <Select label="Medio de pago" value={form.medioPago} onChange={medioPago => set({ medioPago })} options={withCurrent(medios, form.medioPago)} placeholder="Elige…" />
         </Field>
         <Field label="Tipo de gasto"><Select label="Tipo de gasto" value={form.tipoGasto} onChange={v => set({ tipoGasto: v as Form['tipoGasto'] })} options={[...TIPOS_GASTO]} /></Field>
-        <Field label="Categoría" error={errors.categoria}>
-          <Select label="Categoría" value={form.categoria} onChange={categoria => set({ categoria, subcategoria: '' })} options={withCurrent(opts.categorias, form.categoria)} placeholder="Elige…" />
-        </Field>
-        <Field label="Subcategoría" error={errors.subcategoria}>
-          <Select label="Subcategoría" value={form.subcategoria} onChange={subcategoria => set({ subcategoria })} options={withCurrent(opts.subcategorias, form.subcategoria)} placeholder="(ninguna)" />
-        </Field>
         <div className="col-span-2">
           <Field label="Descripción" error={errors.descripcion}><input className={inputCls} maxLength={200} value={form.descripcion} onChange={e => set({ descripcion: e.target.value })} /></Field>
         </div>
         <label className="col-span-2 flex items-center gap-2 text-sm text-ink">
           <input type="checkbox" checked={form.esRecurrente} onChange={e => set({ esRecurrente: e.target.checked })} /> Es recurrente
         </label>
-        {!opts.categorias.length && <p className="col-span-2 text-xs text-muted">No hay categorías para este ámbito. Agrégalas en la pestaña Categorías.</p>}
+        {form.ambito && !opts.categorias.length && <p className="col-span-2 text-xs text-muted">No hay categorías para este ámbito. Agrégalas en la pestaña Categorías.</p>}
         {serverError && <div className="col-span-2"><ErrorBox message={serverError} /></div>}
         <div className="col-span-2 flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>

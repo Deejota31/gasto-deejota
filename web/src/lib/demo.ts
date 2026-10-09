@@ -1,15 +1,11 @@
 import { shiftMonth } from './dates'
 import type { Transport } from './api'
+import { CATALOGO_INICIAL } from './catalogo'
 
 /** Modo demostración: backend en memoria con datos sintéticos. Se usa sin URL configurada, en pruebas E2E y en mediciones. */
 
-const DEMO_CATALOGO: [string, string, string][] = [
-  ['Personal', 'Comida', 'Almuerzo'], ['Personal', 'Comida', 'Supermercado'], ['Personal', 'Transporte', 'Taxi'],
-  ['Personal', 'Salud', 'Farmacia'], ['Familia', 'Auto', 'Gasolina'], ['Familia', 'Auto', 'Mantenimiento'],
-  ['Familia', 'Bebé', 'Pañales'], ['Familia', 'Bebé', 'Leche'], ['Familia', 'Plan Nube', 'Suscripción'],
-  ['Pareja', 'Salidas', 'Cine'], ['Pareja', 'Salidas', 'Restaurante'], ['Trabajo', 'Oficina', 'Útiles'],
-  ['Amigos', 'Reuniones', 'Cumpleaños'],
-]
+const DEMO_CATALOGO: [string, string, string][] = Object.entries(CATALOGO_INICIAL)
+  .flatMap(([a, cats]) => Object.entries(cats).flatMap(([c, subs]) => subs.map((sub): [string, string, string] => [a, c, sub])))
 const MEDIOS = ['Efectivo', 'Tarjeta de débito', 'Tarjeta de crédito', 'Yape', 'Plin', 'Transferencia']
 const TIPOS = ['Fijo', 'Variable', 'Extraordinario']
 
@@ -38,7 +34,7 @@ export function generateGastoRows(n: number, today: string, seed = 42): unknown[
 export function demoTransport(today: string, n = 400, latencyMs = 250): Transport {
   const db = {
     gastos: generateGastoRows(n, today),
-    catalogo: [...['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'].map(a => [a, '', '', true]), ...DEMO_CATALOGO.map(r => [...r, true])] as unknown[][],
+    catalogo: [...Object.keys(CATALOGO_INICIAL).map(a => [a, '', '', true]), ...DEMO_CATALOGO.map(r => [...r, true])] as unknown[][],
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
     cajas: [
       ['general', 'Caja general', 7000, 'Todos', '', '#1e3a8a', 1],

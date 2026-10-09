@@ -23,10 +23,253 @@ var SHEETS = {
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
   RECURRENTE: 9, ESTADO: 10, ORIGEN: 11, URL: 12, ID: 13, CREADO: 14, ACTUALIZADO: 15 };
 
-var AMBITOS_INICIALES = ['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'];
-
-// Catálogo completo pendiente de recibir del usuario: no se inventa. Formato: [ámbito, categoría, subcategoría].
-var CATALOGO_INICIAL = [];
+// Catálogo inicial: ámbito → categoría → subcategorías. Es la misma lista que web/src/lib/catalogo.ts.
+var CATALOGO_INICIAL = {
+  "Personal": {
+    "Alimentación": [
+      "Desayuno",
+      "Almuerzo",
+      "Cena",
+      "Delivery",
+      "Antojos",
+      "Bebidas",
+      "Otros"
+    ],
+    "Auto": [
+      "Gasolina",
+      "Gas",
+      "Car Wash",
+      "Estacionamiento",
+      "Mantenimiento",
+      "Repuestos",
+      "Seguro Vehicular",
+      "SOAT",
+      "Revisión Técnica",
+      "Multas",
+      "Otros"
+    ],
+    "Transporte": [
+      "Taxi",
+      "Bus / Micro",
+      "Viajes Nacionales",
+      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Suscripciones": [
+      "Juegos",
+      "ChatGPT",
+      "Claude",
+      "Cluely",
+      "Google",
+      "Spotify",
+      "Netflix",
+      "HBO Max",
+      "Prime Video",
+      "Crunchyroll",
+      "Otros"
+    ],
+    "Compras": [
+      "Tecnología",
+      "Perfumes",
+      "Accesorios",
+      "Ropa",
+      "Calzado",
+      "Regalos",
+      "Electrodomésticos",
+      "Muebles",
+      "Otros"
+    ],
+    "Educación": [
+      "Maestría",
+      "Matrícula",
+      "Libros",
+      "Certificaciones",
+      "Plataformas Educativas",
+      "Cursos",
+      "Otros"
+    ],
+    "Otros": [
+      "Imprevistos",
+      "Trámites",
+      "Por Clasificar",
+      "Otros"
+    ]
+  },
+  "Trabajo": {
+    "Alimentación": [
+      "Desayuno",
+      "Almuerzo",
+      "Cena",
+      "Delivery",
+      "Antojos",
+      "Bebidas",
+      "Otros"
+    ],
+    "Transporte": [
+      "Taxi",
+      "Bus / Micro",
+      "Viajes Nacionales",
+      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Otros": [
+      "Imprevistos",
+      "Trámites",
+      "Por Clasificar",
+      "Otros"
+    ]
+  },
+  "Pareja": {
+    "Alimentación": [
+      "Desayuno",
+      "Almuerzo",
+      "Cena",
+      "Delivery",
+      "Antojos",
+      "Bebidas",
+      "Otros"
+    ],
+    "Plan Nube": [
+      "Hospedaje",
+      "Cuidado Íntimo",
+      "Salida Juntos",
+      "Otros"
+    ],
+    "Transporte": [
+      "Taxi",
+      "Bus / Micro",
+      "Viajes Nacionales",
+      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Regalos": [
+      "Detalle Mensual",
+      "Fecha Especial",
+      "Aniversario",
+      "Otros"
+    ],
+    "Compras": [
+      "Tecnología",
+      "Perfumes",
+      "Accesorios",
+      "Ropa",
+      "Calzado",
+      "Regalos",
+      "Electrodomésticos",
+      "Muebles",
+      "Otros"
+    ],
+    "Otros": [
+      "Imprevistos",
+      "Trámites",
+      "Por Clasificar",
+      "Otros"
+    ]
+  },
+  "Familia": {
+    "Alimentación": [
+      "Desayuno",
+      "Almuerzo",
+      "Cena",
+      "Delivery",
+      "Antojos",
+      "Bebidas",
+      "Otros"
+    ],
+    "Bebé": [
+      "Leche",
+      "Pañales",
+      "Pañitos",
+      "Ropa",
+      "Alimentación",
+      "Juguetes",
+      "Accesorios",
+      "Consultas Médicas",
+      "Medicamentos",
+      "Otros"
+    ],
+    "Hogar": [
+      "Supermercado",
+      "Limpieza",
+      "Reparaciones",
+      "Mantenimiento",
+      "Electrodomésticos",
+      "Otros"
+    ],
+    "Servicios": [
+      "Luz",
+      "Agua",
+      "Gas",
+      "Internet",
+      "Línea Celular",
+      "Otros"
+    ],
+    "Transporte": [
+      "Taxi",
+      "Bus / Micro",
+      "Viajes Nacionales",
+      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Compras": [
+      "Tecnología",
+      "Perfumes",
+      "Accesorios",
+      "Ropa",
+      "Calzado",
+      "Regalos",
+      "Electrodomésticos",
+      "Muebles",
+      "Otros"
+    ],
+    "Familia": [
+      "Padre",
+      "Madre",
+      "Pareja",
+      "Hija",
+      "Hermanos",
+      "Apoyo Familiar",
+      "Regalo Familiar",
+      "Otros"
+    ],
+    "Educación": [
+      "Maestría",
+      "Matrícula",
+      "Libros",
+      "Certificaciones",
+      "Plataformas Educativas",
+      "Cursos",
+      "Otros"
+    ],
+    "Otros": [
+      "Imprevistos",
+      "Trámites",
+      "Por Clasificar",
+      "Otros"
+    ]
+  },
+  "Amigos": {
+    "Alimentación": [
+      "Desayuno",
+      "Almuerzo",
+      "Cena",
+      "Delivery",
+      "Antojos",
+      "Bebidas",
+      "Otros"
+    ],
+    "Transporte": [
+      "Taxi",
+      "Bus / Micro",
+      "Otros"
+    ],
+    "Otros": [
+      "Imprevistos",
+      "Trámites",
+      "Por Clasificar"
+    ]
+  }
+};
 
 var MEDIOS_INICIALES = ['Efectivo', 'Tarjeta de débito', 'Tarjeta de crédito', 'Yape', 'Plin', 'Transferencia'];
 
@@ -62,8 +305,7 @@ function setup() {
   var ss = openSpreadsheet_(true);
   Object.keys(SHEETS).forEach(function (name) { ensureSheet_(ss, name, SHEETS[name]); });
 
-  seedIfEmpty_(ss, 'CATALOGO', AMBITOS_INICIALES.map(function (a) { return [a, '', '', true]; })
-    .concat(CATALOGO_INICIAL.map(function (r) { return [r[0], r[1], r[2], true]; })));
+  seedCatalogo_(ss);
   seedIfEmpty_(ss, 'MEDIOS_PAGO', MEDIOS_INICIALES.map(function (m) { return [m, true]; }));
   seedIfEmpty_(ss, 'CAJAS', CAJAS_INICIALES);
   seedIfEmpty_(ss, 'CONFIG', CONFIG_INICIAL);
@@ -106,6 +348,30 @@ function ensureSheet_(ss, name, headers) {
   }
   sh.setFrozenRows(1);
   return sh;
+}
+
+// Agrega solo lo que falte (por ámbito|categoría|subcategoría): no duplica, no reactiva lo que desactivaste
+// y respeta lo que agregaste a mano. Se puede volver a ejecutar sin riesgo.
+function seedCatalogo_(ss) {
+  var sh = ss.getSheetByName('CATALOGO');
+  var existing = {};
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) {
+      existing[r.map(str_).join('|').toLowerCase()] = true;
+    });
+  }
+  var rows = [];
+  var add = function (a, c, s) {
+    var key = [a, c, s].join('|').toLowerCase();
+    if (!existing[key]) { existing[key] = true; rows.push([a, c, s, true]); }
+  };
+  Object.keys(CATALOGO_INICIAL).forEach(function (a) {
+    add(a, '', '');
+    Object.keys(CATALOGO_INICIAL[a]).forEach(function (c) {
+      CATALOGO_INICIAL[a][c].forEach(function (s) { add(a, c, s); });
+    });
+  });
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 4).setValues(rows); // una sola escritura
 }
 
 function seedIfEmpty_(ss, name, rows) {

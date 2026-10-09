@@ -9,6 +9,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 
 ## Arquitectura en una línea por pieza
 
+- **Registro jerárquico**: en el formulario primero se elige el ámbito; las categorías dependen del ámbito y las subcategorías de la categoría. La subcategoría es obligatoria cuando la categoría tiene opciones.
 - **Hoja `GASTOS`** (16 columnas exactas): única fuente de movimientos. Además, solo `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS` y `CONFIG`.
 - **API**: `POST` con cuerpo `text/plain` JSON `{token, action, payload}`. Así el token nunca viaja en la URL y no hay preflight CORS. `GET` solo responde un ping de salud sin datos.
 - **Lectura**: una sola llamada `data` lee cada hoja una vez (`getValues` por bloque). El resultado se guarda en `CacheService` por 10 minutos, en trozos. "Actualizar" pide `fresh` y salta la caché.
@@ -20,7 +21,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 | Prompt | Hecho | Por qué |
 |---|---|---|
 | Next.js + shadcn/ui | Vite + React, componentes propios pequeños | La app solo habla con Apps Script desde el navegador: el servidor de Next.js no aporta nada y suma peso y costo de hosting. |
-| Catálogo completo | Solo los 5 ámbitos | El catálogo no venía en el contexto y el prompt pide no inventarlo. Se carga desde la pestaña Categorías o en `CATALOGO_INICIAL` de `Code.gs`. |
+| Catálogo completo | 5 ámbitos, 28 categorías, 178 subcategorías | Cargado por `setup` desde `CATALOGO_INICIAL` (`Code.gs`), idéntico a `web/src/lib/catalogo.ts` (una prueba lo verifica). Volver a ejecutar `setup` agrega solo lo que falte, sin reactivar lo desactivado. |
 | Identidad de las capturas | Paleta del texto del prompt | Las capturas no se adjuntaron. |
 | Medios de pago | Se crean 6 por defecto (Efectivo, Débito, Crédito, Yape, Plin, Transferencia) | Editables en Configuración. |
 
@@ -68,8 +69,8 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 |---|---|
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
-| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 45) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (7). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 48) |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (8). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas
@@ -77,7 +78,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 - **Unitarias** (`engine.test.ts`): céntimos, porcentajes con divisor cero, conversión de moneda, fechas en Lima, KPIs, filtros, anulación y restauración, cajas, presupuestos con override, proyección, meses "sin datos" frente a cero, y reconciliación (la suma de cada gráfico es igual al total).
 - **Integración del backend** (`backend.test.ts`): ejecuta el `Code.gs` real contra una simulación en memoria de SpreadsheetApp, CacheService, LockService y PropertiesService. Cubre el instalador idempotente, token, idempotencia de altas, edición, anulación, validaciones, inyección de fórmulas, caché e invalidación, lectura de una sola llamada por hoja, lock ocupado y upserts. Comprobé que las pruebas fallan si se quita la protección de duplicados o la de fórmulas.
 - **Cliente API** (`api.test.ts`): POST `text/plain`, máximo 3 reintentos solo para errores transitorios, sin reintentos para validación, permisos o cuota, timeout, respuesta HTML de un despliegue mal configurado, y deduplicación de lecturas simultáneas.
-- **E2E** (`e2e/app.spec.ts`): navegación, Dashboard y filtros, alta, edición, anulación y restauración, búsqueda, orden y CSV, categorías, tema oscuro, validación de conexión, y que no haya scroll horizontal a 375 px.
+- **E2E** (`e2e/app.spec.ts`): formulario jerárquico (ámbito → categoría → subcategoría), navegación, Dashboard y filtros, alta, edición, anulación y restauración, búsqueda, orden y CSV, categorías, tema oscuro, validación de conexión, y que no haya scroll horizontal a 375 px.
 
 > Las pruebas de integración usan una simulación de Google, no Google real. La conexión real se verifica al desplegar: Configuración → *Diagnóstico* muestra filas por hoja, estado de caché y tiempo de lectura.
 
@@ -115,6 +116,5 @@ Presupuestos aplicados: agregación < 100 ms (verificado en `npm run perf`); sin
 
 ## Pendiente de tu parte
 
-1. **Catálogo de categorías y subcategorías**: pásamelo o cárgalo en la pestaña Categorías.
-2. **Capturas de referencia** si quieres ajustar el diseño al original.
-3. Ejecutar `setup`, desplegar y conectar (sección Despliegue).
+1. **Capturas de referencia** si quieres ajustar el diseño al original.
+2. Ejecutar `setup`, desplegar y conectar (sección Despliegue).
