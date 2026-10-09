@@ -1,0 +1,14 @@
+# Netlify lee este archivo al conectar el repo: no hace falta escribir nada en la configuración.
+[build]
+  base = "web"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Una sola página (las pestañas usan #hash): cualquier ruta sirve index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
