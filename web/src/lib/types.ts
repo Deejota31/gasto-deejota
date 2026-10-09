@@ -25,8 +25,14 @@ export interface Gasto {
   problemaId?: 'duplicado' | 'invalido'
 }
 
-/** Plantilla de gasto frecuente: solo clasificación + descripción. No es un movimiento ni suma en nada. */
-export interface Plantilla { id: string; ambito: string; categoria: string; subcategoria: string; descripcion: string; creadoEn: string; actualizadoEn: string }
+/** Plantilla de gasto frecuente: configuración reutilizable. No es un movimiento ni suma en nada. */
+export interface Plantilla {
+  id: string; ambito: string; categoria: string; subcategoria: string; descripcion: string; creadoEn: string; actualizadoEn: string
+  /** Monto predeterminado (null = sin definir). */
+  monto: number | null; moneda: string; medioPago: string
+  /** Orden manual (arrastrar y soltar); null en plantillas antiguas sin orden. */
+  orden: number | null
+}
 
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
 export interface Medio { nombre: string; activo: boolean }
@@ -49,6 +55,8 @@ export interface AppData {
   cajas: Caja[]
   presupuestos: Presupuesto[]
   config: Record<string, string>
+  /** Orden personalizado de la tabla de Gastos: [id, orden]. Se guarda aparte para no recalcular el dashboard. */
+  ordenGastos?: [string, number][]
   sheetUrl: string
   version: string
 }

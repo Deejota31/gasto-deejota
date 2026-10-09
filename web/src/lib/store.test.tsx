@@ -95,3 +95,35 @@ describe('operaciones con Google Sheets sin bloquear', () => {
     act(() => { hook.result.current.toasts.forEach(t => dismiss(t.id)) })
   })
 })
+
+describe('orden personalizado (v1.4)', () => {
+  const rank = (m: Map<string, number>, ids: string[]) => ids.map(id => m.get(id))
+
+  it('dos reordenamientos seguidos: el segundo espera al primero y se guarda; un fallo vuelve al último confirmado', async () => {
+    const { be, hook } = setup()
+    await act(async () => { be.calls[0].resolve(base()) })
+    const st = () => hook.result.current.store
+    act(() => { st().reorderGastos(['a', 'b', 'c']) })
+    act(() => { st().reorderGastos(['b', 'a', 'c']) })
+    expect(rank(st().ordenGastos, ['a', 'b', 'c'])).toEqual([2, 1, 3])               // se ve al instante
+    expect(be.calls.filter(c => c.action === 'reorderGastos')).toHaveLength(1)        // el segundo queda en cola
+    await act(async () => { be.calls.at(-1)!.resolve({}) })
+    await waitFor(() => expect(be.calls.filter(c => c.action === 'reorderGastos')).toHaveLength(2))
+    expect(be.calls.at(-1)!.payload.ids).toEqual(['b', 'a', 'c'])                    // se envía el más reciente
+    // una lectura completa que termina mientras tanto no pisa el orden local
+    act(() => { void st().refresh() })
+    const lectura = be.calls.at(-1)!
+    expect(lectura.action).toBe('data')
+    await act(async () => { be.calls.find(c => c.action === 'reorderGastos' && (c.payload.ids as string[])[0] === 'b')!.resolve({}) })
+    await act(async () => { lectura.resolve({ ...base(), ordenGastos: [['a', 1], ['b', 2], ['c', 3]] }) })
+    expect(rank(st().ordenGastos, ['a', 'b', 'c'])).toEqual([2, 1, 3])
+    await waitFor(() => expect(st().pending.size).toBe(0))
+    // fallo: vuelve al último orden confirmado (b, a, c)
+    act(() => { st().reorderGastos(['c', 'b', 'a']) })
+    expect(rank(st().ordenGastos, ['a', 'b', 'c'])).toEqual([3, 2, 1])
+    await act(async () => { be.calls.at(-1)!.reject(new Error('Sin conexión')) })
+    await waitFor(() => expect(rank(st().ordenGastos, ['a', 'b', 'c'])).toEqual([2, 1, 3]))
+    expect(hook.result.current.toasts.some(t => t.kind === 'error' && t.message.includes('Se restauró el anterior'))).toBe(true)
+    hook.result.current.toasts.forEach(t => dismiss(t.id))
+  })
+})

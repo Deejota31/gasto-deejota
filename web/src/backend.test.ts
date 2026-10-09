@@ -116,7 +116,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -351,8 +351,83 @@ describe('backend Apps Script', () => {
     expect(b.post('plantillas').data).toEqual([])
     expect(b.post('diagnose').ok).toBe(true)
     b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-555555555555', mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Internet', descripcion: 'Internet' })
-    expect(b.ss.getSheetByName('PLANTILLAS_MENSUALES')!.rows[0]).toEqual(['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en'])
+    expect(b.ss.getSheetByName('PLANTILLAS_MENSUALES')!.rows[0]).toEqual(['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en', 'Monto', 'Moneda', 'Medio de pago', 'Orden'])
     expect(b.post('plantillas').data).toHaveLength(1)
+  })
+
+  it('plantillas v1.4: monto, moneda y medio; copia justo después de la original; reordenar en una escritura', () => {
+    const id = (n: number) => `pl-11111111-2222-4333-8444-${String(n).padStart(12, '0')}`
+    const base = { ambito: 'Familia', categoria: 'Servicios', descripcion: '', moneda: 'PEN', medioPago: 'Yape' }
+    const mk = (n: number, sub: string, monto: number | '', extra: Record<string, unknown> = {}) =>
+      b.post('savePlantilla', { id: id(n), mode: 'create', ...base, subcategoria: sub, descripcion: sub, monto, ...extra })
+    expect(mk(1, 'Luz', 120).data.slice(7)).toEqual([120, 'PEN', 'Yape', 1])
+    mk(2, 'Agua', 60); mk(3, 'Internet', 100)
+    expect(mk(4, 'Gas', '').data[7]).toBe('')                                     // monto vacío permitido
+    expect(b.post('savePlantilla', { id: id(5), mode: 'create', ...base, subcategoria: 'Luz', descripcion: 'Luz', monto: -1 }).error.code).toBe('VALIDATION')
+    // duplicado exacto de las 7 propiedades → mensaje claro; con otro monto sí se permite
+    expect(b.post('savePlantilla', { id: id(5), mode: 'create', ...base, subcategoria: 'Agua', descripcion: 'agua', monto: 60 }).error.message).toMatch(/ya existe/)
+    // clonar Agua con otro medio: queda justo después de Agua
+    const clon = b.post('savePlantilla', { id: id(6), mode: 'create', ...base, subcategoria: 'Agua', descripcion: 'Agua', monto: 60, medioPago: 'Plin', afterId: id(2) })
+    expect(clon.ok).toBe(true)
+    const nombres = () => b.post('plantillas').data.map((r: unknown[]) => `${r[4]}/${r[9]}`)
+    expect(nombres()).toEqual(['Luz/Yape', 'Agua/Yape', 'Agua/Plin', 'Internet/Yape', 'Gas/Yape'])
+    const sh = b.ss.getSheetByName('PLANTILLAS_MENSUALES')!
+    const w = sh.writes
+    b.post('reorderPlantillas', { ids: [id(3), id(1), id(2), id(6), id(4)] })
+    expect(sh.writes - w).toBe(1)                                                 // una sola escritura
+    expect(nombres()).toEqual(['Internet/Yape', 'Luz/Yape', 'Agua/Yape', 'Agua/Plin', 'Gas/Yape'])
+    // editar conserva el orden
+    b.post('savePlantilla', { id: id(1), mode: 'update', ...base, subcategoria: 'Luz', descripcion: 'Luz', monto: 130 })
+    expect(b.post('plantillas').data[1].slice(7)).toEqual([130, 'PEN', 'Yape', 2])
+  })
+
+  it('plantillas: una hoja de la versión anterior (7 columnas) se amplía sin perder datos', () => {
+    const sh = b.ss.getSheetByName('PLANTILLAS_MENSUALES')!
+    sh.rows = [['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en'],
+      ['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't']]
+    expect(b.post('plantillas').data[0]).toEqual(['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't', '', 'PEN', '', ''])
+    b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-000000000002', mode: 'create', ambito: 'Personal', categoria: 'Suscripciones', subcategoria: 'Spotify', descripcion: 'Spotify', monto: 25, moneda: 'PEN', medioPago: 'Yape' })
+    expect(sh.rows[0]).toHaveLength(11)
+    expect(sh.rows[1].slice(0, 5)).toEqual(['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT'])
+    expect(b.post('plantillas').data.map((r: unknown[]) => r[4])).toEqual(['ChatGPT', 'Spotify'])
+  })
+
+  it('saveGastosBatch: valida todo antes de escribir, respeta el orden, una escritura e idempotente', () => {
+    const gid = (n: number) => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
+    const g = (n: number, desc: string, monto: number) => ({ ...gasto({ id: gid(n), descripcion: desc, monto }), mode: undefined })
+    const sh = b.ss.getSheetByName('GASTOS')!
+    // un gasto inválido → no se inserta ninguno y el error dice cuál
+    const malo = b.post('saveGastosBatch', { loteId: 'lote-00000000-0000-4000-8000-000000000001', gastos: [g(1, 'Luz', 120), g(2, 'Agua', 0)] })
+    expect(malo.error.code).toBe('VALIDATION')
+    expect(malo.error.message).toMatch(/Gasto 2 \(Agua\)/)
+    expect(sh.getLastRow()).toBe(1)
+    const lote = { loteId: 'lote-00000000-0000-4000-8000-000000000002', gastos: [g(1, 'Luz', 120), g(2, 'Agua', 60), g(3, 'Internet', 110)] }
+    const w = sh.writes
+    const r = b.post('saveGastosBatch', lote).data
+    expect(sh.writes - w).toBe(1)
+    expect(r).toMatchObject({ estado: 'confirmado', solicitados: 3, confirmados: 3, nuevos: 3, ids: [gid(1), gid(2), gid(3)] })
+    expect(sh.rows.slice(1, 4).map(x => x[5])).toEqual(['Luz', 'Agua', 'Internet'])  // orden recibido
+    // reintento del mismo lote (respuesta perdida): no duplica
+    expect(b.post('saveGastosBatch', lote).data).toMatchObject({ confirmados: 3, nuevos: 0, yaExistian: 3 })
+    expect(sh.getLastRow()).toBe(4)
+    // reintento con un monto editado: la hoja no cambia y la respuesta trae lo que realmente quedó guardado
+    const editado = { ...lote, gastos: [g(1, 'Luz', 999), g(4, 'Gas', 45)] }
+    const r2 = b.post('saveGastosBatch', editado).data
+    expect(r2).toMatchObject({ nuevos: 1, yaExistian: 1 })
+    expect(r2.gastos.map((x: unknown[]) => [x[5], x[1]])).toEqual([['Luz', 120], ['Gas', 45]])
+    expect(sh.getLastRow()).toBe(5)
+    expect(b.post('saveGastosBatch', { loteId: 'x', gastos: [] }).error.code).toBe('VALIDATION')
+  })
+
+  it('reorderGastos: guarda el orden en su propia hoja sin tocar GASTOS', () => {
+    b.post('saveGasto', gasto())
+    const antes = JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)
+    const a = '11111111-2222-4333-8444-555555555555', c = 'cccccccc-0000-4000-8000-000000000001'
+    b.post('reorderGastos', { ids: [c, a] })
+    b.post('reorderGastos', { ids: [a, c] })
+    expect(b.post('data', { fresh: true }).data.ordenGastos).toEqual([[c, 2], [a, 1]])
+    expect(JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)).toBe(antes)
+    expect(b.post('reorderGastos', { ids: ['pl-x'] }).error.code).toBe('VALIDATION')
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {

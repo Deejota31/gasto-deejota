@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.4.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -18,11 +18,14 @@ var SHEETS = {
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
   CONFIG: ['Clave', 'Valor'],
   // Plantillas de gastos frecuentes: solo configuración reutilizable, nunca movimientos ni montos.
-  PLANTILLAS_MENSUALES: ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en']
+  PLANTILLAS_MENSUALES: ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en',
+    'Monto', 'Moneda', 'Medio de pago', 'Orden'],
+  // Orden personalizado de la tabla de Gastos (por ID). Hoja aparte: reordenar nunca mueve ni reescribe GASTOS.
+  ORDEN_GASTOS: ['ID', 'Orden']
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -611,7 +614,8 @@ function getData_(fresh) {
     medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
     cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6])]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
-    config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {})
+    config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {}),
+    ordenGastos: ss.getSheetByName('ORDEN_GASTOS') ? readRows_(ss, 'ORDEN_GASTOS').map(function (r) { return [str_(r[0]), num_(r[1])]; }) : []
   };
   writeCache_(data, gen);
   data.cache = false;
@@ -702,7 +706,7 @@ function invalidateCache_() {
 
 var READ_ONLY = { data: true, diagnose: true, backup: true, plantillas: true };
 // Escrituras que no cambian los datos del dashboard: no invalidan su caché.
-var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true };
+var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true, reorderPlantillas: true };
 
 var ACTIONS = {
   data: function (p) { return getData_(p.fresh === true); },
@@ -718,7 +722,10 @@ var ACTIONS = {
   backup: backup_,
   plantillas: listPlantillas_,
   savePlantilla: savePlantilla_,
-  deletePlantilla: deletePlantilla_
+  deletePlantilla: deletePlantilla_,
+  reorderPlantillas: reorderPlantillas_,
+  saveGastosBatch: saveGastosBatch_,
+  reorderGastos: reorderGastos_
 };
 
 function saveGasto_(p) {
@@ -912,23 +919,48 @@ function renameCatalogo_(p) {
 
 /* ===================== Plantillas de gastos mensuales ===================== */
 // Lectura liviana: solo la hoja de plantillas (no toca GASTOS ni la caché del dashboard).
+// Columnas: 0 ID, 1-4 clasificación y descripción, 5-6 marcas de tiempo, 7 Monto, 8 Moneda, 9 Medio de pago, 10 Orden.
 
 var PL_ID = /^pl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+var PL_COLS = 11;
 
 function plantillaRow_(r) {
   var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
-  return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), ts(r[5]), ts(r[6])];
+  var opt = function (v) { return str_(v) === '' ? '' : num_(v); };
+  return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), ts(r[5]), ts(r[6]),
+    opt(r[7]), str_(r[8]) || 'PEN', str_(r[9]).replace(/^'/, ''), opt(r[10])];
+}
+
+// Orden estable: por la columna Orden; las filas sin orden (versión anterior) quedan después, en orden de creación.
+function plantillasOrdenadas_(rows) {
+  return rows.map(function (r, i) { return { r: r, i: i, o: str_(r[10]) === '' ? Infinity : num_(r[10]) }; })
+    .sort(function (a, b) { return (a.o - b.o) || (a.i - b.i); });
 }
 
 function listPlantillas_() {
   var ss = openSpreadsheet_(false);
   if (!ss.getSheetByName('PLANTILLAS_MENSUALES')) return []; // se crea con la primera plantilla
-  return readRows_(ss, 'PLANTILLAS_MENSUALES').map(plantillaRow_);
+  return plantillasOrdenadas_(readRows_(ss, 'PLANTILLAS_MENSUALES')).map(function (x) { return plantillaRow_(x.r); });
 }
 
 function plantillasSheet_() {
   var ss = openSpreadsheet_(false);
-  return ss.getSheetByName('PLANTILLAS_MENSUALES') || ensureSheet_(ss, 'PLANTILLAS_MENSUALES', SHEETS.PLANTILLAS_MENSUALES);
+  var sh = ss.getSheetByName('PLANTILLAS_MENSUALES');
+  // Hoja de la versión anterior (7 columnas): se agregan Monto, Moneda, Medio de pago y Orden sin tocar los datos.
+  return ensureSheet_(ss, 'PLANTILLAS_MENSUALES', SHEETS.PLANTILLAS_MENSUALES) || sh;
+}
+
+function leerPlantillas_(sh) {
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  return n ? sh.getRange(2, 1, n, PL_COLS).getValues() : [];
+}
+
+// Reescribe la columna Orden (1..n) en una sola escritura, según la lista de índices de fila ya ordenada.
+function escribirOrdenPlantillas_(sh, rows, indicesOrdenados) {
+  if (!rows.length) return;
+  var orden = rows.map(function (r) { return [r[10]]; });
+  indicesOrdenados.forEach(function (idx, pos) { orden[idx] = [pos + 1]; });
+  sh.getRange(2, 11, rows.length, 1).setValues(orden);
 }
 
 function savePlantilla_(p) {
@@ -938,29 +970,57 @@ function savePlantilla_(p) {
   var categoria = text_(p.categoria, 'Categoría', 60, true);
   var sub = text_(p.subcategoria, 'Subcategoría', 60, true);
   var desc = text_(p.descripcion, 'Descripción', 200, true);
+  var monto = (p.monto === '' || p.monto === null || p.monto === undefined) ? '' : amount_(p.monto, true); // vacío o >= 0
+  var moneda = str_(p.moneda) || 'PEN';
+  if (!/^[A-Z]{3}$/.test(moneda)) throw appError_('VALIDATION', 'Moneda inválida.');
+  var medio = text_(p.medioPago, 'Medio de pago', 40, false);
   var sh = plantillasSheet_();
-  var n = Math.max(lastDataRow_(sh) - 1, 0);
-  var rows = n ? sh.getRange(2, 1, n, SHEETS.PLANTILLAS_MENSUALES.length).getValues() : [];
+  var rows = leerPlantillas_(sh);
   var plain = function (v) { return norm_(str_(v).replace(/^'/, '')); }; // ignora el apóstrofo anti-fórmulas
-  var key = [plain(ambito), plain(categoria), plain(sub), plain(desc)].join('|');
+  var montoKey = function (v) { return str_(v) === '' ? '' : String(Math.round(num_(v) * 100)); };
+  var key = [plain(ambito), plain(categoria), plain(sub), plain(desc), montoKey(monto), plain(moneda), plain(medio)].join('|');
   var idx = -1;
   for (var i = 0; i < rows.length; i++) {
     if (str_(rows[i][0]) === id) { idx = i; continue; }
-    if (str_(rows[i][0]) && [plain(rows[i][1]), plain(rows[i][2]), plain(rows[i][3]), plain(rows[i][4])].join('|') === key) {
-      throw appError_('VALIDATION', 'Ya existe una plantilla igual.');
-    }
+    var k = [plain(rows[i][1]), plain(rows[i][2]), plain(rows[i][3]), plain(rows[i][4]), montoKey(rows[i][7]), plain(str_(rows[i][8]) || 'PEN'), plain(rows[i][9])].join('|');
+    if (str_(rows[i][0]) && k === key) throw appError_('VALIDATION', 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.');
   }
   var now = new Date().toISOString();
-  if (idx >= 0) {
-    var prev = plantillaRow_(rows[idx]);
-    var upd = [id, ambito, categoria, sub, desc, prev[5], now];
-    sh.getRange(idx + 2, 1, 1, upd.length).setValues([upd]);
+  if (idx >= 0) { // edición (o reintento de un alta ya guardada): conserva creación y orden
+    var prev = rows[idx];
+    var upd = [id, ambito, categoria, sub, desc, plantillaRow_(prev)[5], now, monto, moneda, medio, prev[10]];
+    sh.getRange(idx + 2, 1, 1, PL_COLS).setValues([upd]);
     return plantillaRow_(upd);
   }
   if (p.mode === 'update') throw appError_('NOT_FOUND', 'La plantilla ya no existe.');
-  var row = [id, ambito, categoria, sub, desc, now, now];
+  var row = [id, ambito, categoria, sub, desc, now, now, monto, moneda, medio, ''];
   appendRows_(sh, [row]);
+  // Nueva al final; una copia (afterId), justo después de la original. Se renumera en una sola escritura.
+  rows.push(row);
+  var orden = plantillasOrdenadas_(rows).map(function (x) { return x.i; }).filter(function (i) { return i !== rows.length - 1 && str_(rows[i][0]); });
+  var after = str_(p.afterId);
+  var pos = orden.length;
+  if (after) { for (var j = 0; j < orden.length; j++) if (str_(rows[orden[j]][0]) === after) pos = j + 1; }
+  orden.splice(pos, 0, rows.length - 1);
+  escribirOrdenPlantillas_(sh, rows, orden);
+  row[10] = pos + 1;
   return plantillaRow_(row);
+}
+
+// Guarda el orden manual (arrastrar y soltar) en una sola escritura de la columna Orden.
+function reorderPlantillas_(p) {
+  var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
+  if (!ids.length || ids.some(function (x) { return !PL_ID.test(x); })) throw appError_('VALIDATION', 'Orden de plantillas inválido.');
+  var sh = openSpreadsheet_(false).getSheetByName('PLANTILLAS_MENSUALES');
+  if (!sh) throw appError_('NOT_FOUND', 'No hay plantillas.');
+  var rows = leerPlantillas_(sh);
+  var pos = {};
+  rows.forEach(function (r, i) { pos[str_(r[0])] = i; });
+  var orden = [];
+  ids.forEach(function (x) { if (pos[x] !== undefined && orden.indexOf(pos[x]) < 0) orden.push(pos[x]); });
+  plantillasOrdenadas_(rows).forEach(function (x) { if (str_(x.r[0]) && orden.indexOf(x.i) < 0) orden.push(x.i); }); // las no enviadas, al final
+  escribirOrdenPlantillas_(sh, rows, orden);
+  return { ok: true, total: orden.length };
 }
 
 // Elimina solo la fila de la plantilla. No toca gastos, presupuestos ni cajas.
@@ -972,6 +1032,78 @@ function deletePlantilla_(p) {
   if (!row) return { id: id, eliminada: false }; // ya no estaba: el resultado es el mismo
   sh.deleteRow(row);
   return { id: id, eliminada: true };
+}
+
+/* ===================== Registro de varios gastos en una sola petición ===================== */
+
+/**
+ * Valida TODO el lote antes de escribir; si un gasto no es válido no se inserta ninguno y el error dice cuál.
+ * Inserta las filas nuevas en el orden recibido con una sola escritura (setValues sobre un rango contiguo).
+ * Idempotente: cada gasto trae su ID generado en el navegador; si el lote se reintenta, los que ya existen
+ * no se vuelven a insertar. Sheets no tiene transacciones: si la escritura falla a mitad, reintentar el mismo
+ * lote completa lo que falte sin duplicar.
+ */
+function saveGastosBatch_(p) {
+  var loteId = str_(p.loteId);
+  if (!/^lote-[0-9a-f-]{36}$/.test(loteId)) throw appError_('VALIDATION', 'ID de lote inválido.');
+  var lista = Array.isArray(p.gastos) ? p.gastos : [];
+  if (!lista.length || lista.length > 100) throw appError_('VALIDATION', 'El lote debe tener entre 1 y 100 gastos.');
+  var vistos = {};
+  var gastos = lista.map(function (x, i) {
+    try {
+      var g = validateGasto_(x);
+      if (vistos[g.id.toLowerCase()]) throw appError_('VALIDATION', 'ID repetido en el lote.');
+      vistos[g.id.toLowerCase()] = true;
+      return g;
+    } catch (e) {
+      throw appError_('VALIDATION', 'Gasto ' + (i + 1) + ' (' + (str_(x && x.descripcion) || 'sin descripción') + '): ' + e.message);
+    }
+  });
+  var sh = openSpreadsheet_(false).getSheetByName('GASTOS');
+  var last = lastDataRow_(sh);
+  var existentes = {}; // id → número de fila
+  if (last > 1) sh.getRange(2, G.ID + 1, last - 1, 1).getValues().forEach(function (r, i) { existentes[str_(r[0]).toLowerCase()] = i + 2; });
+  var now = new Date().toISOString();
+  var nuevas = [];
+  var filas = gastos.map(function (g) {
+    var fila = existentes[g.id.toLowerCase()];
+    // Reintento de un lote ya escrito: no se duplica ni se modifica; se devuelve lo que realmente está en la hoja.
+    if (fila) return sh.getRange(fila, 1, 1, SHEETS.GASTOS.length).getValues()[0];
+    var row = gastoToRow_(g, 'Activo', 'web', now, now);
+    nuevas.push(row);
+    return row;
+  });
+  appendRows_(sh, nuevas); // una sola escritura
+  return {
+    estado: 'confirmado', loteId: loteId, solicitados: gastos.length, confirmados: gastos.length,
+    nuevos: nuevas.length, yaExistian: gastos.length - nuevas.length,
+    ids: gastos.map(function (g) { return g.id; }),
+    gastos: filas.map(function (r) { return normalizeGastoRow_(r, 'America/Lima'); }),
+    mensaje: 'Se registraron ' + gastos.length + ' gastos.'
+  };
+}
+
+/* ===================== Orden personalizado de la tabla de Gastos ===================== */
+
+// Recibe los IDs del conjunto reordenado, en su nuevo orden. Escribe solo la hoja ORDEN_GASTOS:
+// actualiza en bloque los que ya tenían orden y agrega al final los que no (máximo dos escrituras).
+function reorderGastos_(p) {
+  var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
+  if (!ids.length || ids.length > 5000 || ids.some(function (x) { return !/^[0-9a-fA-F-]{8,64}$/.test(x); })) throw appError_('VALIDATION', 'Orden inválido.');
+  var ss = openSpreadsheet_(false);
+  var sh = ss.getSheetByName('ORDEN_GASTOS') || ensureSheet_(ss, 'ORDEN_GASTOS', SHEETS.ORDEN_GASTOS);
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  var rows = n ? sh.getRange(2, 1, n, 2).getValues() : [];
+  var idx = {};
+  rows.forEach(function (r, i) { idx[str_(r[0]).toLowerCase()] = i; });
+  var nuevos = [];
+  ids.forEach(function (id, pos) {
+    var k = id.toLowerCase();
+    if (idx[k] !== undefined) rows[idx[k]][1] = pos + 1; else nuevos.push([id, pos + 1]);
+  });
+  if (n) sh.getRange(2, 1, n, 2).setValues(rows);
+  appendRows_(sh, nuevos);
+  return { ok: true, total: ids.length };
 }
 
 /**

@@ -137,7 +137,7 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
 }
 
 export function Modal({ open, onClose, title, subtitle, icon, children, footer, size = 'md' }: {
-  open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg'
+  open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl'
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useModalLayer(open)
@@ -147,7 +147,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
     if (open && !d.open) d.showModal()
     if (!open && d.open) d.close()
   }, [open])
-  const w = { sm: 'w-[min(26rem,calc(100vw-1.5rem))]', md: 'w-[min(36rem,calc(100vw-1.5rem))]', lg: 'w-[min(44rem,calc(100vw-1.5rem))]' }[size]
+  const w = { sm: 'w-[min(26rem,calc(100vw-1.5rem))]', md: 'w-[min(36rem,calc(100vw-1.5rem))]', lg: 'w-[min(44rem,calc(100vw-1.5rem))]', xl: 'w-[min(64rem,calc(100vw-1.5rem))]' }[size]
   return (
     <dialog ref={ref} onClose={onClose} className={`m-auto max-h-[calc(100dvh-2rem)] ${w} overflow-hidden rounded-2xl border border-line bg-card p-0 text-ink shadow-2xl`}>
       {open && (

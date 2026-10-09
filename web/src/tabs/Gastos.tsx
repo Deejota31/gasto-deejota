@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, CalendarDays, ChevronDown, ChevronUp, GripVertical, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
 import { formatMoney, toCents } from '../lib/money'
-import { matchesDims } from '../lib/engine'
+import { hasDimFilters, matchesDims } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook } from '../lib/visual'
 import type { ModalMode } from '../components/GastoModal'
 import { Pagination, SwipeRow } from '../components/table'
@@ -16,7 +16,7 @@ const ID_AVISO = {
   invalido: 'El ID tiene caracteres no válidos. Ejecuta repararIds en Apps Script para poder editarlo.',
 }
 
-type SortKey = 'fecha' | 'monto' | 'descripcion' | 'categoria'
+type SortKey = 'fecha' | 'monto' | 'descripcion' | 'categoria' | 'personalizado'
 type EstadoFiltro = 'Activo' | 'Anulado' | 'todos'
 
 const CSV_COLS: [string, (g: Gasto) => string | number | boolean][] = [
@@ -50,8 +50,9 @@ function useDebounced<T>(value: T, ms = 250): T {
   return v
 }
 
-export default function Gastos({ store, openGasto, filters, setFilters, today }: {
+export default function Gastos({ store, openGasto, filters, setFilters, today, onGastosMensuales }: {
   store: AppStore; openGasto: (mode: ModalMode, gasto: Gasto | null) => void; filters: Filters; setFilters: (f: Filters) => void; today: string
+  onGastosMensuales: () => void
 }) {
   const cfg = store.data?.config ?? {}
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
@@ -71,13 +72,24 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
     const list = (store.data?.gastos ?? []).filter(g =>
       g.fecha >= filters.desde && g.fecha <= filters.hasta && (estado === 'todos' || g.estado === estado) && matchesDims(g, filters) &&
       (!term || `${g.descripcion} ${g.categoria} ${g.subcategoria} ${g.medioPago} ${g.ambito} ${g.monto}`.toLowerCase().includes(term)))
-    const val = (g: Gasto) => sort.key === 'monto' ? toCents(g.monto) : sort.key === 'categoria' ? `${g.categoria} ${g.subcategoria}` : g[sort.key]
+    if (sort.key === 'personalizado') {
+      // Orden personalizado: los que tienen posición guardada, por esa posición; los nuevos (sin posición) arriba,
+      // del más reciente al más antiguo. Así un gasto nuevo nunca reordena los anteriores.
+      const pos = (g: Gasto) => store.ordenGastos.get(g.id.toLowerCase())
+      return list.sort((a, b) => {
+        const pa = pos(a), pb = pos(b)
+        if (pa === undefined || pb === undefined) return (pa === undefined ? 0 : 1) - (pb === undefined ? 0 : 1) || b.creadoEn.localeCompare(a.creadoEn) || a.id.localeCompare(b.id)
+        return pa - pb || b.creadoEn.localeCompare(a.creadoEn)
+      })
+    }
+    const key = sort.key
+    const val = (g: Gasto) => key === 'monto' ? toCents(g.monto) : key === 'categoria' ? `${g.categoria} ${g.subcategoria}` : g[key]
     // Orden estable: a igualdad, el registro más reciente primero.
     return list.sort((a, b) => {
       const x = val(a), y = val(b)
       return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || b.creadoEn.localeCompare(a.creadoEn) || a.id.localeCompare(b.id)
     })
-  }, [store.data, filters, q, estado, sort])
+  }, [store.data, store.ordenGastos, filters, q, estado, sort])
 
   // Al cambiar filtros, búsqueda, orden o tamaño, volver a la primera página.
   useEffect(() => { setPage(0) }, [filters, q, estado, sort, pageSize])
@@ -85,6 +97,24 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
   const current = Math.min(page, pages - 1)
   const visible = rows.slice(current * pageSize, current * pageSize + pageSize)
   const totalCents = rows.reduce((s, g) => s + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0)
+
+  // Reordenar solo con el conjunto completo a la vista: orden personalizado, sin búsqueda ni filtros de
+  // clasificación/medio, solo activos y todo en una página. Así nunca se mueve algo que no estás viendo.
+  const personal = sort.key === 'personalizado'
+  const bloqueo = !personal ? '' : q.trim() || hasDimFilters(filters) ? 'Quita la búsqueda y los filtros de ámbito, categoría o medio para reordenar.'
+    : estado !== 'Activo' ? 'Muestra solo “Activos” para reordenar.' : rows.length > pageSize ? `Muestra ${rows.length > 50 ? 'menos movimientos (elige un período más corto)' : 'todos en una página (Por página: 50)'} para reordenar.`
+    : rows.some(g => g.problemaId) ? 'Hay movimientos con “ID por reparar” en este período: repáralos (función repararIds en Apps Script) para poder reordenar.' : ''
+  const puedeOrdenar = personal && !bloqueo && rows.length > 1
+  const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null)
+  function mover(id: string, destino: string | null, delta = 0) {
+    const ids = rows.map(g => g.id)
+    const from = ids.indexOf(id)
+    const to = destino ? ids.indexOf(destino) : from + delta
+    if (from < 0 || to < 0 || to >= ids.length || to === from) return
+    ids.splice(from, 1)
+    ids.splice(to, 0, id)
+    store.reorderGastos(ids)
+  }
 
   const toggleSort = (key: SortKey) => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === 'fecha' || key === 'monto' ? -1 : 1 }))
 
@@ -152,8 +182,16 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
           </div>
           <Button variant="outline" onClick={() => store.refresh()} loading={store.loading}><RefreshCw className="size-4" /> <span className="hidden sm:inline">Actualizar</span></Button>
           <Button variant="outline" onClick={() => downloadCsv(rows, `gastos-${filters.desde}_${filters.hasta}.csv`)} disabled={!rows.length}><Download className="size-4" /> CSV</Button>
+          <Button variant={personal ? 'soft' : 'outline'} onClick={() => setSort(personal ? { key: 'fecha', dir: -1 } : { key: 'personalizado', dir: 1 })} aria-pressed={personal} aria-label="Orden personalizado"
+            title="Ordena la tabla a tu manera arrastrando las filas"><ListOrdered className="size-4" /> <span className="hidden sm:inline">Orden personalizado</span></Button>
           <Button onClick={() => open('create', null)} disabled={!store.data}><Plus className="size-4" /> Nuevo gasto</Button>
+          <Button variant="soft" onClick={onGastosMensuales} disabled={!store.data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
         </div>
+        {personal && (
+          <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${bloqueo ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-primary-soft text-navy'}`}>
+            {bloqueo || 'Orden personalizado: arrastra ⋮⋮ (o usa ↑ ↓) para mover un movimiento. Se guarda al soltar; no cambia fechas ni montos, ni el orden de tu hoja.'}
+          </p>
+        )}
 
         {!store.data ? <Skeleton className="h-64" /> : !rows.length ? (
           <Empty icon={<Receipt className="size-5" />} title="No hay gastos con estos filtros">Prueba otro período, quita filtros o registra un nuevo gasto.</Empty>
@@ -164,6 +202,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
               <table className="w-full min-w-[880px] text-sm">
                 <thead className="text-[11px] tracking-wide text-muted uppercase">
                   <tr className="border-y border-line bg-bg/60">
+                    {personal && <th scope="col" className="w-8 px-1"><span className="sr-only">Mover</span></th>}
                     <SortTh k="fecha">Fecha</SortTh><SortTh k="descripcion">Descripción</SortTh><SortTh k="categoria">Categoría / Subcategoría</SortTh>
                     <th scope="col" className="px-3 py-2.5 text-left font-medium">Ámbito</th>
                     <th scope="col" className="px-3 py-2.5 text-left font-medium">Medio de pago</th>
@@ -176,7 +215,20 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
                     const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                     const off = g.estado === 'Anulado'
                     return (
-                      <tr key={g.uid ?? g.id} className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${off ? 'opacity-60' : ''}`}>
+                      <tr key={g.uid ?? g.id} data-id={g.id}
+                        draggable={puedeOrdenar && drag?.from === g.id}
+                        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.id) }}
+                        onDragOver={e => { if (drag) { e.preventDefault(); if (drag.over !== g.id) setDrag({ ...drag, over: g.id }) } }}
+                        onDrop={e => { e.preventDefault(); if (drag && drag.from !== g.id) mover(drag.from, g.id); setDrag(null) }}
+                        onDragEnd={() => setDrag(null)}
+                        className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${off ? 'opacity-60' : ''} ${drag?.over === g.id && drag.from !== g.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === g.id ? 'opacity-50' : ''}`}>
+                        {personal && (
+                          <td className="px-1">
+                            <button type="button" aria-label={`Arrastrar ${g.descripcion || g.subcategoria}`} disabled={!puedeOrdenar}
+                              onPointerDown={() => puedeOrdenar && setDrag({ from: g.id, over: null })} onPointerUp={() => setDrag(d => (d && !d.over ? null : d))}
+                              className="grid h-8 w-6 cursor-grab place-items-center rounded text-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-30"><GripVertical className="size-4" /></button>
+                          </td>
+                        )}
                         <td className="tabular px-3 py-2.5 whitespace-nowrap text-muted">{formatDate(g.fecha, cfg.formato_fecha)}</td>
                         <td className="max-w-60 px-3 py-2.5">
                           <p className={`truncate font-medium ${off ? 'line-through' : ''}`} title={g.descripcion}>{g.descripcion || <span className="font-normal text-muted">Sin descripción</span>}</p>
@@ -208,7 +260,14 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
                 const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                 const off = g.estado === 'Anulado'
                 return (
-                  <li key={g.uid ?? g.id} className="rounded-2xl border border-line">
+                  <li key={g.uid ?? g.id} className="relative rounded-2xl border border-line">
+                    {/* Móvil: subir/bajar en lugar de arrastrar (mismas reglas y la misma petición única) */}
+                    {puedeOrdenar && (
+                      <div className="absolute top-1/2 left-1 z-10 flex -translate-y-1/2 flex-col">
+                        <button type="button" aria-label={`Subir ${g.descripcion}`} disabled={rows[0]?.id === g.id} onClick={() => mover(g.id, null, -1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronUp className="size-4" /></button>
+                        <button type="button" aria-label={`Bajar ${g.descripcion}`} disabled={rows[rows.length - 1]?.id === g.id} onClick={() => mover(g.id, null, 1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronDown className="size-4" /></button>
+                      </div>
+                    )}
                     <SwipeRow width={off ? 120 : 168} actions={g.problemaId ? (
                       <span className="flex flex-1 items-center justify-center gap-1 bg-[#FEF3C7] px-2 text-center text-[11px] text-[#92400E]"><AlertTriangle className="size-4 shrink-0" />ID por reparar</span>
                     ) : isBusy(g) ? (
@@ -220,7 +279,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
                       <button type="button" onClick={() => open('clone', g)} className="flex flex-1 flex-col items-center justify-center gap-1 bg-morado-soft text-xs font-medium text-morado"><Copy className="size-4" />Clonar</button>
                       <button type="button" onClick={() => setConfirm(g)} className="flex flex-1 flex-col items-center justify-center gap-1 bg-coral-soft text-xs font-medium text-coral"><Trash2 className="size-4" />Eliminar</button>
                     </>)}>
-                      <div className={`flex items-center gap-3 p-3 ${off ? 'opacity-60' : ''}`}>
+                      <div className={`flex items-center gap-3 p-3 ${puedeOrdenar ? 'pl-8' : ''} ${off ? 'opacity-60' : ''}`}>
                         <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: `${cl.color}1F`, color: cl.color }}><cl.Icon className="size-5" /></span>
                         <div className="min-w-0 flex-1">
                           <p className={`truncate text-sm font-semibold ${off ? 'line-through' : ''}`}>{g.descripcion || g.subcategoria || g.categoria}</p>

@@ -105,9 +105,19 @@ const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color 
 })
 
 // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado]
-const plantillaRow = z.tuple([str, str, str, str, str, str, str])
-const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn]: z.infer<typeof plantillaRow>): Plantilla =>
-  ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn })
+// [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto?, moneda?, medio?, orden?] (v1.3 envía solo 7)
+const plantillaRow = z.tuple([str, str, str, str, str, str, str]).rest(z.union([str, z.number()]))
+const optNum = (v: unknown) => (v === '' || v === undefined || v === null || !Number.isFinite(Number(v)) ? null : Number(v))
+const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto, moneda, medioPago, orden]: z.infer<typeof plantillaRow>): Plantilla =>
+  ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto: optNum(monto), moneda: String(moneda || 'PEN'), medioPago: String(medioPago ?? ''), orden: optNum(orden) })
+
+/** Lo que se envía para crear o editar una plantilla. `afterId`: al clonar, la copia queda justo después de la original. */
+export type PlantillaInput = Pick<Plantilla, 'id' | 'ambito' | 'categoria' | 'subcategoria' | 'descripcion' | 'monto' | 'moneda' | 'medioPago'>
+
+const loteSchema = z.object({
+  estado: str, loteId: str, solicitados: z.number(), confirmados: z.number(), nuevos: z.number(), yaExistian: z.number().default(0),
+  ids: z.array(str), gastos: z.array(gastoRow), mensaje: str,
+})
 
 const dataSchema = z.object({
   version: str,
@@ -118,6 +128,7 @@ const dataSchema = z.object({
   cajas: z.array(z.tuple([str, str, z.number(), str, str, str, z.number()])),
   presupuestos: z.array(z.tuple([str, str, z.number()])),
   config: z.record(str, str),
+  ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
 })
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -170,6 +181,7 @@ export function createApi(t: Transport) {
           medios: d.medios.map(([nombre, activo]): Medio => ({ nombre, activo })),
           cajas: d.cajas.map(toCaja),
           presupuestos: d.presupuestos.map(([periodo, cajaId, monto]): Presupuesto => ({ periodo, cajaId, monto })),
+          ordenGastos: d.ordenGastos ?? [],
         }
       }).finally(() => { inflight = null })
       return inflight
@@ -205,8 +217,21 @@ export function createApi(t: Transport) {
     async getPlantillas(): Promise<Plantilla[]> {
       return parse(z.array(plantillaRow), await t('plantillas', {})).map(toPlantilla)
     },
-    async savePlantilla(p: Omit<Plantilla, 'creadoEn' | 'actualizadoEn'>, mode: 'create' | 'update'): Promise<Plantilla> {
-      return toPlantilla(parse(plantillaRow, await t('savePlantilla', { ...p, mode })))
+    async savePlantilla(p: PlantillaInput, mode: 'create' | 'update', afterId?: string): Promise<Plantilla> {
+      return toPlantilla(parse(plantillaRow, await t('savePlantilla', { ...p, monto: p.monto ?? '', mode, ...(afterId ? { afterId } : {}) })))
+    },
+    /** Guarda el orden manual de todas las plantillas en una sola petición. */
+    async reorderPlantillas(ids: string[]): Promise<void> {
+      await t('reorderPlantillas', { ids })
+    },
+    /** Registra varios gastos en UNA petición. Idempotente por los IDs de cada gasto. */
+    async saveGastosBatch(loteId: string, gastos: GastoInput[]) {
+      const r = parse(loteSchema, await t('saveGastosBatch', { loteId, gastos }))
+      return { ...r, gastos: r.gastos.map(rowToGasto) }
+    },
+    /** Orden personalizado de la tabla de Gastos (solo la hoja ORDEN_GASTOS). */
+    async reorderGastos(ids: string[]): Promise<void> {
+      await t('reorderGastos', { ids })
     },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })

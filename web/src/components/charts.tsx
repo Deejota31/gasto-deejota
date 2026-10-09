@@ -1,27 +1,26 @@
 import { useState } from 'react'
 import {
-  Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Sankey,
-  Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
+  Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { ChartNoAxesColumn } from 'lucide-react'
 import { formatMoney } from '../lib/money'
 import { formatDate } from '../lib/dates'
 import type { Aggregates, Item, SubItem } from '../lib/engine'
-import { ambitoLook, categoriaLook, medioLook, type Look } from '../lib/visual'
+import { ambitoLook, type Look } from '../lib/visual'
 import type { CatalogoItem } from '../lib/types'
 import { Empty } from './ui'
 
 const axis = { stroke: 'var(--muted)', fontSize: 11, tickLine: false, axisLine: false }
 
-function compact(cents: number, currency: string) {
+export function compact(cents: number, currency: string) {
   const v = cents / 100
   const sym = currency === 'PEN' ? 'S/' : `${currency} `
   return Math.abs(v) >= 1000 ? `${sym}${(v / 1000).toFixed(1)}k` : `${sym}${v.toFixed(0)}`
 }
 
-const pct = (part: number, total: number) => (total ? `${(Math.round((part / total) * 1000) / 10).toLocaleString('es-PE')}%` : '0%')
+export const pct = (part: number, total: number) => (total ? `${(Math.round((part / total) * 1000) / 10).toLocaleString('es-PE')}%` : '0%')
 
-function TipBox({ title, rows }: { title: string; rows: { label: string; value: string; color?: string; dashed?: boolean }[] }) {
+export function TipBox({ title, rows }: { title: string; rows: { label: string; value: string; color?: string; dashed?: boolean }[] }) {
   return (
     <div className="min-w-44 rounded-xl border border-line bg-card px-3 py-2 text-xs shadow-lg">
       <p className="mb-1 font-semibold text-ink">{title}</p>
@@ -200,91 +199,4 @@ export function BarList<T extends Item>({ items, total, currency, lookFor, selec
 
 export function SubLabel({ it }: { it: SubItem }) {
   return <span className="flex min-w-0 flex-col leading-tight"><span className="truncate">{it.subcategoria}</span><span className="truncate text-[11px] font-normal text-muted">{it.categoria}</span></span>
-}
-
-export function SankeyChart({ a, currency, catalogo }: { a: Aggregates; currency: string; catalogo: CatalogoItem[] }) {
-  if (!a.sankey.links.length) return empty
-  const nMedios = new Set(a.sankey.links.map(l => l.source)).size
-  const colorOf = (i: number, name: string) => (i < nMedios ? medioLook(name).color : ambitoLook(name, catalogo).color)
-  return (
-    <div className="h-80" role="img" aria-label="Flujo del gasto desde cada medio de pago hacia cada ámbito">
-      <ResponsiveContainer>
-        <Sankey data={a.sankey} nodePadding={18} nodeWidth={12} margin={{ top: 8, right: 120, left: 8, bottom: 8 }}
-          link={{ stroke: '#8B97AD', strokeOpacity: 0.28 }}
-          node={({ x, y, width, height, index, payload }: { x: number; y: number; width: number; height: number; index: number; payload: { name: string; value?: number } }) => (
-            <g>
-              <rect x={x} y={y} width={width} height={height} fill={colorOf(index, payload.name)} rx={3} />
-              <text x={x + width + 6} y={y + height / 2 - 6} dominantBaseline="middle" fontSize={11} fontWeight={600} fill="var(--ink)">{payload.name}</text>
-              <text x={x + width + 6} y={y + height / 2 + 8} dominantBaseline="middle" fontSize={10} fill="var(--muted)">{compact(payload.value ?? 0, currency)}</text>
-            </g>
-          )}>
-          <Tooltip content={({ payload }) => {
-            const p = payload?.[0]?.payload as { source?: { name: string }; target?: { name: string }; value?: number; name?: string } | undefined
-            if (!p) return null
-            return <TipBox title={p.source ? `${p.source.name} → ${p.target?.name}` : (p.name ?? '')} rows={[{ label: 'Monto', value: formatMoney(Number(p.value ?? payload?.[0]?.value ?? 0), currency) }]} />
-          }} />
-        </Sankey>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-export function FrecuenciaChart({ a, currency, catalogo, onPick }: { a: Aggregates; currency: string; catalogo: CatalogoItem[]; onPick: (cat: string) => void }) {
-  if (!a.frecuencia.length) return empty
-  return (
-    <div className="h-72" role="img" aria-label="Cantidad de movimientos frente a monto total por categoría">
-      <ResponsiveContainer>
-        <ScatterChart margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-          <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" />
-          <XAxis type="number" dataKey="count" name="Movimientos" {...axis} allowDecimals={false} label={{ value: 'Movimientos', position: 'insideBottom', offset: -4, fontSize: 11, fill: 'var(--muted)' }} />
-          <YAxis type="number" dataKey="cents" name="Monto" {...axis} width={64} tickFormatter={v => compact(v, currency)} />
-          <ZAxis range={[140, 140]} />
-          <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ payload }) => {
-            const p = payload?.[0]?.payload as { name: string; count: number; cents: number } | undefined
-            return p ? <TipBox title={p.name} rows={[{ label: 'Movimientos', value: String(p.count) }, { label: 'Monto', value: formatMoney(p.cents, currency) }, { label: 'Promedio', value: formatMoney(Math.round(p.cents / p.count), currency) }]} /> : null
-          }} />
-          <Scatter data={a.frecuencia} cursor="pointer" onClick={d => { const n = (d as unknown as { payload?: { name?: string }; name?: string }).payload?.name ?? (d as unknown as { name?: string }).name; if (n) onPick(n) }}>
-            {a.frecuencia.map(f => <Cell key={f.name} fill={categoriaLook(f.name, catalogo).color} stroke="var(--card)" strokeWidth={2} />)}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-export function Jerarquia({ a, currency, catalogo }: { a: Aggregates; currency: string; catalogo: CatalogoItem[] }) {
-  if (!a.jerarquia.length) return empty
-  return (
-    <div className="space-y-2 text-sm">
-      {a.jerarquia.map(amb => {
-        const look = ambitoLook(amb.name, catalogo)
-        return (
-          <details key={amb.name} className="group rounded-xl border border-line" open={a.jerarquia.length === 1}>
-            <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 font-medium">
-              <span className="grid size-7 place-items-center rounded-lg" style={{ background: `${look.color}1F`, color: look.color }}><look.Icon className="size-3.5" /></span>
-              <span className="flex-1">{amb.name}</span>
-              <span className="tabular text-muted">{formatMoney(amb.cents, currency)} · {pct(amb.cents, a.total)}</span>
-            </summary>
-            <ul className="space-y-2 px-3 pb-3">
-              {amb.children.map(cat => {
-                const cl = categoriaLook(cat.name, catalogo, amb.name)
-                return (
-                  <li key={cat.name}>
-                    <div className="flex items-center gap-2">
-                      <cl.Icon className="size-3.5" style={{ color: cl.color }} />
-                      <span className="flex-1 font-medium text-ink">{cat.name}</span>
-                      <span className="tabular text-muted">{formatMoney(cat.cents, currency)}</span>
-                    </div>
-                    <ul className="mt-1 ml-1.5 space-y-0.5 border-l-2 pl-3 text-xs text-muted" style={{ borderColor: `${cl.color}55` }}>
-                      {cat.children.map(s => <li key={s.name} className="flex justify-between"><span>{s.name}</span><span className="tabular">{formatMoney(s.cents, currency)}</span></li>)}
-                    </ul>
-                  </li>
-                )
-              })}
-            </ul>
-          </details>
-        )
-      })}
-    </div>
-  )
 }

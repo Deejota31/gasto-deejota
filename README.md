@@ -25,8 +25,27 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 | Identidad de las capturas | Paleta del texto del prompt | Las capturas no se adjuntaron. |
 | Medios de pago | 6 por defecto, en este orden: Yape, Plin, Sodexo, Transferencia, Efectivo, Otros | Editables en Configuración. Los que agregues aparecen después. |
 
-**Excluido por diseño:** cualquier lógica de Gastos mensuales (plantillas, control mensual, lotes, vínculos). `Es recurrente` es solo un atributo del movimiento.
+**Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
+
+## Novedades v1.4.0
+
+| Punto | Qué cambió |
+|---|---|
+| Plantillas con valores | Cada plantilla guarda **Monto predeterminado** (opcional, ≥ 0), **Moneda** (de las monedas de Configuración, PEN por defecto) y **Medio de pago predeterminado**. "Usar" abre Nuevo gasto con esos valores. Las plantillas se mantienen de un mes a otro. |
+| Gastos mensuales en tabla | Modal ancho con fecha de registro (hoy en Lima por defecto), búsqueda, filtro por ámbito, casillas por fila, "Seleccionar todas / visibles / Limpiar selección" (la selección sobrevive a los filtros) y edición en línea de monto, moneda y medio. **Esos cambios son temporales**: solo valen para el registro y nunca modifican la plantilla. Cabecera y resumen fijos; la lista hace scroll. |
+| Registro masivo | Resumen fijo con cantidad, totales separados por moneda (calculados en céntimos), detalle desplegable y "Registrar N gastos". Una sola solicitud (`saveGastosBatch`): valida todo antes de escribir (si un gasto falla, no se inserta ninguno), inserta en el orden global de la lista con una sola escritura y es idempotente (IDs fijos por plantilla + `loteId`): reintentar no duplica. Al confirmar se limpian solo los registrados. |
+| Orden de plantillas | Arrastrar ⋮⋮ (o Subir/Bajar en el menú "⋯") con una solicitud por cambio (`reorderPlantillas`, una escritura de columna). Bloqueado con búsqueda o filtro activos. Si falla, vuelve al orden anterior. |
+| Clonar plantilla | Mismo formulario con los datos de la original; ID nuevo y se inserta justo debajo. Un duplicado exacto de las 7 propiedades se rechaza: "La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia." |
+| Ajustar caja | "Solo para [mes]" viene activado cada vez que se abre el modal. |
+| Pestaña Gastos | Botón "Gastos mensuales" (mismo modal) y **Orden personalizado**: arrastrar o ↑ ↓ en móvil, una solicitud por cambio (`reorderGastos`). Se guarda aparte en `ORDEN_GASTOS` (ID, Orden): no mueve filas ni toca GASTOS. Solo con todo el listado a la vista (sin búsqueda ni filtros). Los gastos nuevos aparecen arriba hasta que los ubiques. El orden se numera dentro del período que estás viendo: si ordenas septiembre y octubre por separado y luego miras ambos juntos, se intercalan. Bloqueado si el período tiene IDs por reparar. |
+| Análisis detallado | Encabezado con período, rango de fechas, movimientos, monedas y filtros. Pestañas más claras (navegables con flechas). **Jerarquía** con barras de peso, % por nivel, expandir/contraer (se recuerda en la sesión) y resaltado. **Flujo de medios de pago** propio en SVG: al pasar el mouse por un medio, ámbito o conexión se resaltan sus enlaces y se atenúa el resto; tooltip con monto, movimientos y %, y en conexiones el % dentro del medio y del ámbito; resumen con primer/último movimiento, día de mayor gasto y medio dominante. **Frecuencia vs monto** con burbujas grandes (tamaño = monto), transparencia, borde, separación de puntos superpuestos, líneas de promedio, etiquetas y resaltado por ámbito. Se eliminó "Por medio de pago". Todo sale de los datos ya cargados: no hay consultas nuevas. |
+
+### Migración a v1.4.0
+
+1. Reemplaza `Code.gs` en Apps Script y guarda. No hace falta ejecutar nada: `PLANTILLAS_MENSUALES` agrega sola las columnas Monto, Moneda, Medio de pago y Orden (las plantillas existentes quedan sin monto, en PEN y en su orden actual) y `ORDEN_GASTOS` se crea con el primer reordenamiento.
+2. **Implementar → Gestionar implementaciones → ✏️ → Nueva versión → Implementar.**
+3. La web se publica al fusionar en `main`.
 
 ## Novedades v1.3.0
 
@@ -147,7 +166,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
 | `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 103) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (26), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (32), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas
@@ -156,6 +175,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 - **Integración del backend** (`backend.test.ts`): ejecuta el `Code.gs` real contra una simulación en memoria de SpreadsheetApp, CacheService, LockService y PropertiesService. Cubre el instalador idempotente, token, idempotencia de altas, edición, anulación, validaciones, inyección de fórmulas, caché e invalidación, lectura de una sola llamada por hoja, lock ocupado y upserts. Comprobé que las pruebas fallan si se quita la protección de duplicados o la de fórmulas.
 - **Cliente API** (`api.test.ts`): POST `text/plain`, máximo 3 reintentos solo para errores transitorios, sin reintentos para validación, permisos o cuota, timeout, respuesta HTML de un despliegue mal configurado, y deduplicación de lecturas simultáneas.
 - **Backend v1.1** (`backend.test.ts`): inserción en filas 2, 3, 4…; ninguna fila de relleno; hoja heredada con `FALSE` en 999 filas y datos en la 1001 → el nuevo registro va justo debajo sin tocar lo existente; `repararHojas` compacta, crea respaldo, asigna IDs y ordena medios; renombrar en cascada y rechazo de duplicados.
+- **Análisis** (`components/analisis.test.tsx`): solo 3 pestañas, encabezado de contexto, % de jerarquía por nivel, estado vacío en las 3 vistas, disposición del Sankey (enlaces dentro de sus nodos) y separación de burbujas.
 - **E2E** (`e2e/app.spec.ts`): pestañas y ausencia de "Últimos 6 meses"; ⓘ en los 8 KPIs; multiselección, chips, filtros dependientes, limpiar y presets; fórmulas de cajas en pantalla; orden de medios sin opción en blanco; registrar, editar, clonar, eliminar y restaurar; paginación 5–50; crear subcategoría y usarla; renombrar categoría con cascada; móvil sin scroll horizontal y deslizar para ver acciones sin borrar por accidente; caso 10 (Familia + Bebé + Yape) cuadra tabla y KPI.
 
 > Las pruebas de integración usan una simulación de Google, no Google real. La conexión real se verifica al desplegar: Configuración → *Diagnóstico* muestra filas por hoja, estado de caché y tiempo de lectura.

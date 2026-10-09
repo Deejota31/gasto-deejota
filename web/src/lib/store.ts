@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createApi, httpTransport, type Api, type Connection, type GastoInput } from './api'
+import { createApi, httpTransport, type Api, type Connection, type GastoInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { AppData, Caja, CatalogoItem, Gasto, Medio, Plantilla, Presupuesto } from './types'
@@ -7,7 +7,24 @@ import { sortCatalogo } from './orden'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
 /** El catálogo siempre se entrega ordenado ("Otros" al final de cada grupo), venga de la hoja o de un cambio local. */
-const normalize = (d: AppData): AppData => ({ ...d, catalogo: sortCatalogo(d.catalogo) })
+// El orden personalizado de Gastos se separa de `data`: reordenar no debe recalcular KPIs ni gráficos.
+const normalize = (d: AppData): AppData => { const { ordenGastos: _o, ...rest } = d; return { ...rest, catalogo: sortCatalogo(d.catalogo) } }
+const ordenMap = (d: AppData | null) => new Map((d?.ordenGastos ?? []).map(([id, o]) => [id.toLowerCase(), o]))
+const aplicarRangos = (m: Map<string, number>, ids: string[]) => { const n = new Map(m); ids.forEach((id, i) => n.set(id.toLowerCase(), i + 1)); return n }
+const aplicarOrden = (items: Plantilla[], ids: string[]) => {
+  const byId = new Map(items.map(x => [x.id, x]))
+  return [...ids.map(id => byId.get(id)!).filter(Boolean), ...items.filter(x => !ids.includes(x.id))].map((x, i) => ({ ...x, orden: i + 1 }))
+}
+
+/** Preparación de un registro masivo desde plantillas. Vive en memoria mientras la app está abierta (sobrevive a cerrar el modal). */
+export interface LoteState {
+  fecha: string                                   // '' = hoy
+  seleccion: string[]                             // IDs de plantillas marcadas
+  valores: Record<string, { monto?: string; moneda?: string; medioPago?: string }> // cambios temporales (no tocan la plantilla)
+  gastoIds: Record<string, string>                // ID de gasto fijo por plantilla: un reintento no duplica
+  loteId: string
+}
+const nuevoLote = (): LoteState => ({ fecha: '', seleccion: [], valores: {}, gastoIds: {}, loteId: `lote-${crypto.randomUUID()}` })
 
 export interface OpMessages { pending: string; ok: string; error: string }
 
@@ -42,6 +59,16 @@ export function buildApi(conn: Connection | null): Api {
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const api = useMemo(() => apiOverride ?? buildApi(conn), [conn, apiOverride])
   const [data, setData] = useState<AppData | null>(() => { const s = readSnapshot(conn); return s && normalize(s) })
+  const [ordenGastos, setOrdenGastos] = useState<Map<string, number>>(() => ordenMap(readSnapshot(conn)))
+  // Sube con cada reordenamiento local y con cada respuesta de reordenamiento: una lectura iniciada antes no lo pisa.
+  const ordenVersion = useRef(0)
+  const ordenRef = useRef(ordenGastos)
+  ordenRef.current = ordenGastos
+  // Último orden que se vio en la interfaz mientras otro se estaba guardando: se envía al terminar (gana el más reciente).
+  const colaOrden = useRef<Record<string, string[] | undefined>>({})
+  const gastosConfirmado = useRef<Map<string, number>>(new Map())
+  const plantillasConfirmado = useRef<string[]>([])
+  const [lote, setLote] = useState<LoteState>(nuevoLote)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<Date | null>(null)
@@ -56,6 +83,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const [plantillas, setPlantillas] = useState<{ items: Plantilla[]; loading: boolean; error: string | null; loaded: boolean }>(
     { items: [], loading: false, error: null, loaded: false })
   const plantillasReq = useRef<Promise<void> | null>(null)
+  const plantillasRef = useRef(plantillas.items)
+  plantillasRef.current = plantillas.items
   const plantillasLoaded = useRef(false)
   const apiRef = useRef(api)
   useEffect(() => {
@@ -76,13 +105,16 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     setPlantillas(p => ({ ...p, loaded: false }))
     setLoading(true)
     setError(null)
+    const ordenAlEmpezar = ordenVersion.current
     try {
       const raw = await api.getData(fresh)
-      const d = normalize(journal.current.reduce((acc, fn) => fn(acc), raw))
+      const merged = journal.current.reduce((acc, fn) => fn(acc), raw)
       journal.current = []
-      setData(d)
+      setData(normalize(merged))
+      const ordenVigente = ordenVersion.current === ordenAlEmpezar && !inflight.current.has('gastos:orden')
+      if (ordenVigente) setOrdenGastos(ordenMap(raw))
       setLastSync(new Date())
-      writeSnapshot(conn, d)
+      writeSnapshot(conn, ordenVigente ? merged : { ...merged, ordenGastos: [...ordenRef.current] })
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -94,6 +126,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   useEffect(() => {
     const s = readSnapshot(conn)
     setData(s && normalize(s))
+    setOrdenGastos(ordenMap(s))
     void refresh(false)
   }, [refresh, conn])
 
@@ -102,7 +135,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     setData(prev => {
       if (!prev) return prev
       const next = normalize(fn(prev))
-      writeSnapshot(conn, next)
+      writeSnapshot(conn, { ...next, ordenGastos: [...ordenRef.current] })
       return next
     })
   }, [conn])
@@ -178,6 +211,30 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     return true
   }, [])
 
+  /**
+   * Guarda un orden con una sola petición. Si ya hay uno guardándose, no se descarta el nuevo: queda en cola
+   * (solo el más reciente) y se envía al terminar. Si una petición falla, la interfaz vuelve al último orden confirmado.
+   */
+  const guardarOrden = useCallback((key: string, ids: string[], msg: OpMessages, send: (ids: string[]) => Promise<unknown>,
+    onOk: (ids: string[]) => void, onFail: () => void) => {
+    if (inflight.current.has(key)) { colaOrden.current[key] = ids; return }
+    track(key, msg, async () => {
+      let next: string[] | undefined = ids
+      try {
+        while (next) {
+          colaOrden.current[key] = undefined
+          await send(next)
+          onOk(next)
+          next = colaOrden.current[key]
+        }
+      } catch (e) {
+        colaOrden.current[key] = undefined
+        onFail()
+        throw e
+      }
+    }, { retry: false })
+  }, [track])
+
   const loadPlantillas = useCallback((force = false): Promise<void> => {
     if (plantillasReq.current) return plantillasReq.current // ya hay una lectura en curso
     if (plantillasLoaded.current && !force) return Promise.resolve() // ya están en memoria
@@ -195,17 +252,58 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   }, [api])
 
   const plantillaActions = useMemo(() => ({
-    async save(p: Omit<Plantilla, 'creadoEn' | 'actualizadoEn'>, mode: 'create' | 'update') {
-      const s = await api.savePlantilla(p, mode)
-      setPlantillas(st => ({ ...st, items: st.items.some(x => x.id === s.id) ? st.items.map(x => (x.id === s.id ? s : x)) : [...st.items, s] }))
+    /** Crea o edita. Una plantilla nueva va al final; una copia (afterId), justo después de la original. */
+    async save(p: PlantillaInput, mode: 'create' | 'update', afterId?: string) {
+      const s = await api.savePlantilla(p, mode, afterId)
+      setPlantillas(st => {
+        if (st.items.some(x => x.id === s.id)) return { ...st, items: st.items.map(x => (x.id === s.id ? { ...s, orden: x.orden } : x)) }
+        const items = [...st.items]
+        const pos = afterId ? items.findIndex(x => x.id === afterId) + 1 || items.length : items.length
+        items.splice(pos, 0, s)
+        return { ...st, items: items.map((x, i) => ({ ...x, orden: i + 1 })) }
+      })
+    },
+    /** Reordenar: se ve al instante y se guarda en una sola petición; si falla, vuelve al último orden confirmado. */
+    reorder(ids: string[]) {
+      const key = 'plantillas:orden'
+      if (!inflight.current.has(key)) plantillasConfirmado.current = plantillasRef.current.map(x => x.id)
+      setPlantillas(st => ({ ...st, items: aplicarOrden(st.items, ids) }))
+      guardarOrden(key, ids, { pending: 'Guardando el orden…', ok: 'Orden guardado.', error: 'No se pudo guardar el orden de las plantillas. Se restauró el anterior.' },
+        x => api.reorderPlantillas(x), x => { plantillasConfirmado.current = x },
+        () => setPlantillas(st => ({ ...st, items: aplicarOrden(st.items, plantillasConfirmado.current) })))
     },
     async remove(id: string) {
       await api.deletePlantilla(id)
       setPlantillas(st => ({ ...st, items: st.items.filter(x => x.id !== id) }))
     },
-  }), [api])
+  }), [api, guardarOrden])
 
-  return { data, loading, error, lastSync, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions, isDemo: !conn && !apiOverride }
+  /** Registra un lote de gastos en una sola petición e incorpora los confirmados sin releer el histórico. */
+  const registrarLote = useCallback(async (loteId: string, gastos: GastoInput[]) => {
+    const r = await api.saveGastosBatch(loteId, gastos)
+    patch(d => {
+      const ids = new Set(r.gastos.map(g => g.id))
+      return { ...d, gastos: [...d.gastos.filter(g => !ids.has(g.id)), ...r.gastos] }
+    })
+    return r
+  }, [api, patch])
+
+  /** Orden personalizado de la tabla de Gastos: optimista, una petición, y vuelta atrás si falla. */
+  const reorderGastos = useCallback((ids: string[]) => {
+    const key = 'gastos:orden'
+    ordenVersion.current++
+    if (!inflight.current.has(key)) gastosConfirmado.current = ordenRef.current
+    setOrdenGastos(m => aplicarRangos(m, ids))
+    guardarOrden(key, ids, { pending: 'Guardando el orden…', ok: 'Orden guardado.', error: 'No se pudo guardar el orden. Se restauró el anterior.' },
+      x => api.reorderGastos(x),
+      x => { ordenVersion.current++; gastosConfirmado.current = aplicarRangos(gastosConfirmado.current, x) },
+      () => { ordenVersion.current++; setOrdenGastos(gastosConfirmado.current) })
+  }, [api, guardarOrden])
+
+  return {
+    data, loading, error, lastSync, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions,
+    lote, setLote, nuevoLote, registrarLote, ordenGastos, reorderGastos, isDemo: !conn && !apiOverride,
+  }
 }
 
 export type AppStore = ReturnType<typeof useAppData>

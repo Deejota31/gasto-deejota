@@ -160,10 +160,19 @@ describe('motor de agregación', () => {
     const sum = (xs: { cents: number }[]) => xs.reduce((s, x) => s + x.cents, 0)
     expect(sum(a.porAmbito)).toBe(a.total)
     expect(sum(a.porCategoria)).toBe(a.total)
-    expect(sum(a.porMedio)).toBe(a.total)
+    expect(sum(a.sankey.medios)).toBe(a.total)
+    expect(sum(a.sankey.ambitos)).toBe(a.total)
+    expect(sum(a.frecuencia)).toBe(a.total)
     expect(sum(a.jerarquia)).toBe(a.total)
     expect(sum(a.porSubcategoria)).toBe(a.total)
-    expect(a.sankey.links.reduce((s, l) => s + l.value, 0)).toBe(a.total)
+    expect(sum(a.sankey.links)).toBe(a.total)
+    const cnt = (xs: { count: number }[]) => xs.reduce((s, x) => s + x.count, 0)
+    expect(cnt(a.sankey.links)).toBe(a.count)
+    expect(cnt(a.sankey.medios)).toBe(a.count)
+    expect(cnt(a.jerarquia)).toBe(a.count)
+    // Cada enlace suma a su medio y a su ámbito.
+    for (const m of a.sankey.medios) expect(sum(a.sankey.links.filter(l => l.medio === m.name))).toBe(m.cents)
+    for (const x of a.sankey.ambitos) expect(sum(a.sankey.links.filter(l => l.ambito === x.name))).toBe(x.cents)
     expect(a.dias.filter(d => d.acumulado !== null).at(-1)!.acumulado).toBe(a.total)
   })
 
@@ -217,6 +226,19 @@ describe('motor de agregación', () => {
     expect(a.promedioMovimiento).toBe(0)
     expect(a.promedioDiario).toBe(0)
     expect(a.max).toBeNull()
+    expect(a.resumen).toEqual({ primerFecha: null, ultimaFecha: null, diaMax: null, medioDominante: null, monedas: [] })
+    expect(a.sankey.links).toEqual([])
+  })
+
+  it('resumen del período para el análisis: fechas, día de mayor gasto, medio dominante y monedas', () => {
+    const a = aggregate(data, f(), ctx())
+    expect(a.resumen.primerFecha).toBe('2026-10-01')
+    expect(a.resumen.ultimaFecha).toBe('2026-10-04')
+    expect(a.resumen.diaMax).toEqual({ date: '2026-10-01', cents: 10000 })
+    expect(a.resumen.medioDominante?.name).toBe(a.sankey.medios[0].name)
+    expect(a.resumen.monedas).toEqual(['PEN', 'USD'])   // EUR sin tipo de cambio queda fuera
+    const auto = a.frecuencia.find(x => x.name === 'Auto')!
+    expect(auto).toMatchObject({ count: 1, cents: 5050, ambitos: ['Familia'] })
   })
 
   it('top subcategorías limita a 10', () => {

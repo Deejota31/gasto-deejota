@@ -30,7 +30,7 @@ export type GastoDraft = Omit<GastoInput, 'monto'> & { montoText: string }
 type Form = GastoDraft
 
 /** Datos precargados desde una plantilla de "Gastos mensuales" (solo clasificación y descripción). */
-export type GastoPreset = Clasif & { descripcion: string }
+export type GastoPreset = Clasif & { descripcion: string; monto?: number | null; moneda?: string; medioPago?: string }
 
 function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft, preset?: GastoPreset): Form {
   if (draft) return draft // reabrir tras un error: se conservan los datos que ingresaste
@@ -44,9 +44,9 @@ function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: Gast
   }
   return {
     id: crypto.randomUUID(), // generado al abrir: si la red falla y se reintenta, el backend no duplica
-    fecha: todayIn(cfg.zona_horaria || 'America/Lima'), montoText: '', moneda: cfg.moneda || 'PEN',
+    fecha: todayIn(cfg.zona_horaria || 'America/Lima'), montoText: preset?.monto ? String(preset.monto) : '', moneda: preset?.moneda || cfg.moneda || 'PEN',
     ambito: preset?.ambito ?? 'Personal', categoria: preset?.categoria ?? '', subcategoria: preset?.subcategoria ?? '', descripcion: preset?.descripcion ?? '',
-    medioPago: '', tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
+    medioPago: preset?.medioPago ?? '', tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
   }
 }
 

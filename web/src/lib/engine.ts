@@ -42,6 +42,17 @@ export interface CajasResumen {
   subcajas: SubcajaResumen[]
 }
 
+export interface FlowLink { medio: string; ambito: string; cents: number; count: number }
+export interface FrecuenciaPunto extends Item { ambitos: string[] }
+export interface ResumenPeriodo {
+  primerFecha: string | null
+  ultimaFecha: string | null
+  diaMax: { date: string; cents: number } | null
+  medioDominante: Item | null
+  /** Monedas originales de los movimientos considerados (antes de convertir a la moneda base). */
+  monedas: string[]
+}
+
 export interface Aggregates {
   total: number
   count: number
@@ -56,10 +67,11 @@ export interface Aggregates {
   porAmbito: Item[]
   porCategoria: Item[]
   porSubcategoria: SubItem[]
-  porMedio: Item[]
-  jerarquia: { name: string; cents: number; children: { name: string; cents: number; children: Item[] }[] }[]
-  sankey: { nodes: { name: string }[]; links: { source: number; target: number; value: number }[] }
-  frecuencia: { name: string; count: number; cents: number }[]
+  jerarquia: { name: string; cents: number; count: number; children: { name: string; cents: number; count: number; children: Item[] }[] }[]
+  /** Flujo medio de pago → ámbito. Nodos ordenados de mayor a menor monto. */
+  sankey: { medios: Item[]; ambitos: Item[]; links: FlowLink[] }
+  frecuencia: FrecuenciaPunto[]
+  resumen: ResumenPeriodo
   dias: DayPoint[]
   estado: 'pasado' | 'en-curso' | 'futuro'
   cajas: CajasResumen
@@ -119,7 +131,10 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const amb = new Map<string, Item>(), cat = new Map<string, Item>(), med = new Map<string, Item>()
   const sub = new Map<string, SubItem>()
   const hier = new Map<string, Map<string, Map<string, Item>>>()
-  const flow = new Map<string, number>()
+  const flow = new Map<string, FlowLink>()
+  const catAmb = new Map<string, Map<string, number>>()
+  const monedas = new Set<string>()
+  let primerFecha: string | null = null, ultimaFecha: string | null = null
   const ordered = [...ctx.cajas].sort((a, b) => a.orden - b.orden)
   const general = ordered.find(c => c.filtroCampo === 'Todos') ?? null
   const subcajas = ordered.filter(c => c !== general)
@@ -154,7 +169,14 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     a.set(g.categoria, c)
     bump(c, subName, cents)
     const fk = `${g.medioPago}\u0000${g.ambito}`
-    flow.set(fk, (flow.get(fk) ?? 0) + cents)
+    const fl = flow.get(fk)
+    if (fl) { fl.cents += cents; fl.count++ } else flow.set(fk, { medio: g.medioPago, ambito: g.ambito, cents, count: 1 })
+    const ca = catAmb.get(g.categoria) ?? new Map<string, number>()
+    catAmb.set(g.categoria, ca)
+    ca.set(g.ambito, (ca.get(g.ambito) ?? 0) + cents)
+    monedas.add(g.moneda)
+    if (!primerFecha || g.fecha < primerFecha) primerFecha = g.fecha
+    if (!ultimaFecha || g.fecha > ultimaFecha) ultimaFecha = g.fecha
   }
 
   // Cajas (P, R, Gs, Gl). El exceso de una subcaja sobre su asignación se descuenta del saldo libre.
@@ -194,12 +216,10 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     })
   }
 
-  const ambitoNames = [...amb.keys()]
-  const medioNames = [...med.keys()]
-  const links = [...flow.entries()].map(([k, value]) => {
-    const [m, a] = k.split('\u0000')
-    return { source: medioNames.indexOf(m), target: medioNames.length + ambitoNames.indexOf(a), value }
-  })
+  const medios = [...med.values()].sort(sortDesc)
+  const ambitos = [...amb.values()].sort(sortDesc)
+  let diaMax: ResumenPeriodo['diaMax'] = null
+  daily.forEach((c, i) => { if (c > 0 && (!diaMax || c > diaMax.cents)) diaMax = { date: addDays(f.desde, i), cents: c } })
 
   return {
     total, count, max, maxCents,
@@ -209,16 +229,18 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     porAmbito: [...amb.values()].sort(sortDesc),
     porCategoria: [...cat.values()].sort(sortDesc),
     porSubcategoria: [...sub.values()].sort(sortDesc).slice(0, 10),
-    porMedio: [...med.values()].sort(sortDesc),
     jerarquia: [...hier.entries()].map(([name, cats]) => {
       const children = [...cats.entries()].map(([cn, subs]) => {
         const items = [...subs.values()].sort(sortDesc)
-        return { name: cn, cents: items.reduce((s, x) => s + x.cents, 0), children: items }
-      }).sort((x, y) => y.cents - x.cents)
-      return { name, cents: children.reduce((s, x) => s + x.cents, 0), children }
-    }).sort((x, y) => y.cents - x.cents),
-    sankey: { nodes: [...medioNames, ...ambitoNames].map(name => ({ name })), links },
-    frecuencia: [...cat.values()].map(c => ({ name: c.name, count: c.count, cents: c.cents })),
+        return { name: cn, cents: items.reduce((s, x) => s + x.cents, 0), count: items.reduce((s, x) => s + x.count, 0), children: items }
+      }).sort((x, y) => y.cents - x.cents || x.name.localeCompare(y.name))
+      return { name, cents: children.reduce((s, x) => s + x.cents, 0), count: children.reduce((s, x) => s + x.count, 0), children }
+    }).sort((x, y) => y.cents - x.cents || x.name.localeCompare(y.name)),
+    sankey: { medios, ambitos, links: [...flow.values()].sort((x, y) => y.cents - x.cents) },
+    frecuencia: [...cat.values()].sort(sortDesc).map(c => ({
+      ...c, ambitos: [...(catAmb.get(c.name) ?? new Map<string, number>()).entries()].sort((x, y) => y[1] - x[1]).map(([n]) => n),
+    })),
+    resumen: { primerFecha, ultimaFecha, diaMax, medioDominante: medios[0] ?? null, monedas: [...monedas].sort() },
     dias, estado, cajas,
   }
 }
