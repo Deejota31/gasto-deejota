@@ -9,20 +9,36 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
-  --color-navy: #1e3a8a;
-  --color-turquesa: #0d9488;
-  --color-lima: #65a30d;
-  --color-morado: #8b5cf6;
-  --color-bebe: #ec4899;
-  --color-auto: #64748b;
+  --color-navy: var(--primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-turquesa: #16A085;
+  --color-verde: #16A085;
+  --color-verde-soft: var(--green-soft);
+  --color-lima: #16A085;
+  --color-morado: #8B7CF6;
+  --color-morado-soft: var(--violet-soft);
+  --color-coral: #E8664F;
+  --color-coral-soft: var(--coral-soft);
+  --color-celeste: #0EA5C6;
+  --color-celeste-soft: var(--sky-soft);
+  --color-rosa-soft: var(--pink-soft);
+  --color-bebe: #EC6FA9;
+  --color-auto: #64748B;
 }
 
 :root {
-  --bg: #eef2f7;
-  --card: #ffffff;
-  --ink: #0f172a;
-  --muted: #64748b;
-  --line: #e2e8f0;
+  --bg: #F4F7FB;
+  --card: #FFFFFF;
+  --ink: #1E293B;
+  --muted: #64748B;
+  --line: #E2E8F0;
+  --primary: #294690;
+  --primary-soft: #E8F0FF;
+  --green-soft: #E6F7F1;
+  --violet-soft: #F0ECFF;
+  --coral-soft: #FFF0EA;
+  --sky-soft: #E6F6FB;
+  --pink-soft: #FCEAF2;
   /* Paleta categórica validada (orden fijo; el color sigue a la entidad, no al ranking). */
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
@@ -30,11 +46,18 @@
 }
 
 [data-theme="dark"] {
-  --bg: #0b1220;
-  --card: #131c2e;
-  --ink: #e2e8f0;
-  --muted: #94a3b8;
-  --line: #24314a;
+  --bg: #0E1525;
+  --card: #151E31;
+  --ink: #E2E8F0;
+  --muted: #94A3B8;
+  --line: #26334D;
+  --primary: #8FA9F0;
+  --primary-soft: #1D2B4D;
+  --green-soft: #12332C;
+  --violet-soft: #26213F;
+  --coral-soft: #3A2420;
+  --sky-soft: #10303A;
+  --pink-soft: #3A1E2C;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   color-scheme: dark;
@@ -47,5 +70,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-dialog::backdrop { background: rgb(15 23 42 / 0.45); }
+dialog::backdrop { background: rgb(15 23 42 / 0.45); backdrop-filter: blur(2px); }
 .tabular { font-variant-numeric: tabular-nums; }
+.bar-grow { transition: width 0.45s cubic-bezier(.2, .8, .2, 1); }
+@media (prefers-reduced-motion: reduce) { .bar-grow, * { transition: none !important; animation: none !important; } }
+/* Sombra discreta para la tabla con scroll horizontal: indica que hay más columnas. */
+.scroll-hint { background:
+  linear-gradient(to right, var(--card) 30%, transparent) left / 24px 100% no-repeat local,
+  linear-gradient(to left, var(--card) 30%, transparent) right / 24px 100% no-repeat local,
+  radial-gradient(farthest-side at 0 50%, rgb(15 23 42 / .12), transparent) left / 10px 100% no-repeat scroll,
+  radial-gradient(farthest-side at 100% 50%, rgb(15 23 42 / .12), transparent) right / 10px 100% no-repeat scroll; }

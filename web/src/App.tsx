@@ -1,8 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { FileSpreadsheet, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
+import { emptyFilters } from './components/shared'
+import { todayIn } from './lib/dates'
+import type { Filters } from './lib/types'
 import Gastos from './tabs/Gastos'
 import Categorias from './tabs/Categorias'
 import Configuracion from './tabs/Configuracion'
@@ -23,6 +26,10 @@ export default function App({ api }: { api?: Api }) {
   const store = useAppData(conn, api)
   const [tab, setTab] = useState<TabId>(() => (TABS.some(t => `#${t.id}` === location.hash) ? (location.hash.slice(1) as TabId) : 'dashboard'))
   const [toast, setToast] = useState('')
+  const tz = store.data?.config.zona_horaria || 'America/Lima'
+  const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
+  // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
+  const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
 
   useEffect(() => { history.replaceState(null, '', `#${tab}`) }, [tab])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
@@ -44,7 +51,7 @@ export default function App({ api }: { api?: Api }) {
           <nav className="order-last -mx-1 flex w-full gap-1 overflow-x-auto sm:order-none sm:mx-0 sm:w-auto" aria-label="Secciones">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${tab === id ? 'bg-navy text-white' : 'text-muted hover:bg-bg hover:text-ink'}`}>
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${tab === id ? 'bg-navy text-white dark:text-[#0E1525]' : 'text-muted hover:bg-bg hover:text-ink'}`}>
                 <Icon className="size-4" />{label}
               </button>
             ))}
@@ -69,8 +76,8 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} /></Suspense>}
-        {tab === 'gastos' && <Gastos store={store} notify={notify} />}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} /></Suspense>}
+        {tab === 'gastos' && <Gastos store={store} notify={notify} filters={filters} setFilters={setFilters} today={today} />}
         {tab === 'categorias' && <Categorias store={store} notify={notify} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}
       </main>

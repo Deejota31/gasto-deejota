@@ -13,7 +13,11 @@ class FakeSheet {
   filter: object | null = null
   writes = 0
   constructor(public name: string) {}
-  getLastRow() { return this.rows.length }
+  // Como Sheets: la última fila con cualquier valor (un FALSE de casilla cuenta, una celda vacía no).
+  getLastRow() {
+    for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i]?.some(v => v !== '' && v !== undefined)) return i + 1
+    return 0
+  }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0) }
   getMaxRows() { return Math.max(1000, this.rows.length) }
   setFrozenRows(n: number) { this.frozen = n }
@@ -35,6 +39,11 @@ class FakeRange {
     return this
   }
   setValue(x: Cell) { return this.setValues([[x]]) }
+  clearDataValidations() { return this }
+  clearContent() {
+    for (let i = 0; i < this.nr; i++) { const row = this.s.rows[this.r - 1 + i]; if (row) for (let j = 0; j < this.nc; j++) row[this.c - 1 + j] = '' }
+    return this
+  }
   setNumberFormat() { return this }
   insertCheckboxes() { return this }
   setFontWeight() { return this }
@@ -50,7 +59,8 @@ class FakeSpreadsheet {
   getSheets() { return [...this.sheets.values()] }
   deleteSheet(s: FakeSheet) { this.sheets.delete(s.name) }
   setSpreadsheetTimeZone() {}
-  copy(name: string) { return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } }
+  copies: string[] = []
+  copy(name: string) { this.copies.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } }
 }
 
 function load() {
@@ -95,6 +105,11 @@ const gasto = (over: Record<string, unknown> = {}) => ({
   esRecurrente: false, comprobanteUrl: '', mode: 'create', ...over,
 })
 
+// Simula una hoja creada con la versión anterior: casillas en toda la columna (FALSE hasta la fila 1000).
+function legacyCheckboxes(sheet: FakeSheet, col: number) {
+  for (let r = 1; r < 1000; r++) { const row = (sheet.rows[r] ??= []); if (row[col] === undefined || row[col] === '') row[col] = false }
+}
+
 describe('backend Apps Script', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
@@ -134,6 +149,72 @@ describe('backend Apps Script', () => {
     expect(rows.find(r => r[1] === 'Auto' && r[2] === 'SOAT')![3]).toBe(false)
     expect(rows.some(r => r[2] === 'Veterinario')).toBe(true)
     expect(rows.filter(r => r[1] === 'Suscripciones' && r[2] === 'Claude')).toHaveLength(1)
+  })
+
+  it('caso 1-2: el primer gasto va en la fila 2 y los siguientes en 3 y 4', () => {
+    for (let i = 1; i <= 3; i++) b.post('saveGasto', gasto({ id: `bbbbbbbb-0000-4000-8000-00000000000${i}` }))
+    const rows = b.ss.getSheetByName('GASTOS')!.rows
+    expect(rows[1][13]).toBe('bbbbbbbb-0000-4000-8000-000000000001')
+    expect(rows[2][13]).toBe('bbbbbbbb-0000-4000-8000-000000000002')
+    expect(rows[3][13]).toBe('bbbbbbbb-0000-4000-8000-000000000003')
+    expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(4)
+  })
+
+  it('setup ya no crea casillas que llenen 999 filas', () => {
+    expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(1)
+    expect(b.ss.getSheetByName('MEDIOS_PAGO')!.getLastRow()).toBe(7)
+  })
+
+  it('caso 3: con la hoja antigua (FALSE hasta la fila 1000 y datos en 1001) no sobrescribe e inserta después del último registro', () => {
+    const sh = b.ss.getSheetByName('GASTOS')!
+    legacyCheckboxes(sh, 9)
+    for (let i = 0; i < 4; i++) sh.rows[1000 + i] = ['2026-10-09', 10 + i, 'PEN', 'Alimentación', 'Almuerzo', '', 'Efectivo', 'Variable', 'Personal', false, 'Activo', 'web', '', `cccccccc-0000-4000-8000-00000000000${i}`, '', '']
+    legacyCheckboxes(b.ss.getSheetByName('MEDIOS_PAGO')!, 1)
+    b.post('saveGasto', gasto())
+    expect(sh.rows[1004][13]).toBe(gasto().id)
+    for (let i = 0; i < 4; i++) expect(sh.rows[1000 + i][13]).toBe(`cccccccc-0000-4000-8000-00000000000${i}`)
+    const d = b.post('data', { fresh: true }).data
+    expect(d.gastos).toHaveLength(5)
+    expect(d.medios.map((m: unknown[]) => m[0])).toEqual(['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Otros'])
+  })
+
+  it('repararHojas: respalda, compacta desde la fila 2, conserva todo y asigna ID a filas manuales', () => {
+    const sh = b.ss.getSheetByName('GASTOS')!
+    legacyCheckboxes(sh, 9)
+    for (let i = 0; i < 3; i++) sh.rows[1000 + i] = ['2026-10-09', 10 + i, 'PEN', 'Alimentación', 'Almuerzo', `g${i}`, 'Efectivo', 'Variable', 'Personal', false, 'Activo', 'web', '', `cccccccc-0000-4000-8000-00000000000${i}`, '', '']
+    sh.rows[1005] = ['2026-10-08', 7, 'PEN', 'Otros', 'Otros', 'a mano', 'Yape', 'Variable', 'Trabajo', false, '', '', '', '', '', '']
+    const med = b.ss.getSheetByName('MEDIOS_PAGO')!
+    med.rows = [['Nombre', 'Activo'], ['Efectivo', true], ['Tarjeta de crédito', true], ['Yape', true], ['Plin', true]]
+    const res = b.g.repararHojas() as unknown as { url: string }
+    expect(res.url).toMatch(/^https:\/\/copy\//)
+    expect(b.ss.copies).toHaveLength(1)
+    expect(sh.getLastRow()).toBe(5)
+    expect(sh.rows.slice(1, 5).map(r => r[5])).toEqual(['g0', 'g1', 'g2', 'a mano'])
+    expect(String(sh.rows[4][13])).toMatch(/^[0-9a-f-]{36}$/)
+    expect(sh.rows[4][11]).toBe('manual')
+    expect(med.rows.slice(1, med.getLastRow()).map(r => r[0])).toEqual(['Yape', 'Plin', 'Efectivo', 'Tarjeta de crédito', 'Sodexo', 'Transferencia', 'Otros'])
+    b.post('saveGasto', gasto())
+    expect(sh.rows[5][13]).toBe(gasto().id)
+  })
+
+  it('renombrar una categoría actualiza catálogo y gastos de ese ámbito, no los de otros', () => {
+    b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Pañales' }))
+    b.post('saveGasto', gasto({ id: '22222222-2222-4333-8444-555555555555', ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo' }))
+    const r = b.post('renameCatalogo', { nivel: 'categoria', ambito: 'Familia', categoria: 'Bebé', nuevo: 'Hija' }).data
+    expect(r.gastos).toBe(1)
+    expect(r.catalogo).toBe(10) // las 10 subcategorías de Bebé
+    const d = b.post('data', { fresh: true }).data
+    expect(d.gastos.map((g: unknown[]) => g[3])).toEqual(['Hija', 'Alimentación'])
+    expect(d.catalogo.some((c: unknown[]) => c[0] === 'Familia' && c[1] === 'Bebé')).toBe(false)
+    expect(b.post('renameCatalogo', { nivel: 'categoria', ambito: 'Familia', categoria: 'Hija', nuevo: 'Hogar' }).error.code).toBe('VALIDATION')
+  })
+
+  it('guarda icono y color sin perderlos al desactivar', () => {
+    b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Bebé', subcategoria: '', icono: 'baby', color: '#f472b6' })
+    b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Bebé', subcategoria: '', activo: false })
+    const row = b.post('data', { fresh: true }).data.catalogo.find((c: unknown[]) => c[0] === 'Familia' && c[1] === 'Bebé' && c[2] === '')
+    expect(row).toEqual(['Familia', 'Bebé', '', false, 'baby', '#f472b6'])
+    expect(b.post('saveCatalogo', { ambito: 'X', icono: 'Bad Icon!' }).error.code).toBe('VALIDATION')
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {
@@ -241,9 +322,10 @@ describe('backend Apps Script', () => {
     b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 350 })
     b.post('saveConfig', { clave: 'tipo_cambio_USD', valor: '3.75' })
     const d = b.post('data').data
-    expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false]])
+    expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false, '', '']])
     expect(d.medios.find((m: unknown[]) => String(m[0]).toLowerCase() === 'yape')[1]).toBe(false)
     expect(d.medios).toHaveLength(6)
+    expect(d.medios[0][0]).toBe('Yape')
     expect(d.cajas.find((c: unknown[]) => c[0] === 'auto')[2]).toBe(500)
     expect(d.presupuestos).toEqual([['2026-10', 'auto', 350]])
     expect(d.config.tipo_cambio_USD).toBe('3.75')

@@ -97,11 +97,16 @@ export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
   }
 }
 
+// [ámbito, categoría, subcategoría, activo, icono?, color?] — un backend 1.0 envía solo las 4 primeras.
+const catRow = z.tuple([str, str, str, z.boolean()]).rest(str)
+const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color = '']: z.infer<typeof catRow>): CatalogoItem =>
+  ({ ambito, categoria, subcategoria, activo, icono, color })
+
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
   gastos: z.array(gastoRow),
-  catalogo: z.array(z.tuple([str, str, str, z.boolean()])),
+  catalogo: z.array(catRow),
   medios: z.array(z.tuple([str, z.boolean()])),
   cajas: z.array(z.tuple([str, str, z.number(), str, str, str, z.number()])),
   presupuestos: z.array(z.tuple([str, str, z.number()])),
@@ -134,7 +139,7 @@ export function createApi(t: Transport) {
         return {
           version: d.version, sheetUrl: d.sheetUrl, config: d.config,
           gastos: d.gastos.map(rowToGasto),
-          catalogo: d.catalogo.map(([ambito, categoria, subcategoria, activo]): CatalogoItem => ({ ambito, categoria, subcategoria, activo })),
+          catalogo: d.catalogo.map(toCatalogo),
           medios: d.medios.map(([nombre, activo]): Medio => ({ nombre, activo })),
           cajas: d.cajas.map(toCaja),
           presupuestos: d.presupuestos.map(([periodo, cajaId, monto]): Presupuesto => ({ periodo, cajaId, monto })),
@@ -149,8 +154,11 @@ export function createApi(t: Transport) {
       return parse(z.object({ actualizadoEn: str }), await t('setEstado', { id, estado }))
     },
     async saveCatalogo(item: CatalogoItem): Promise<CatalogoItem> {
-      const [ambito, categoria, subcategoria, activo] = parse(z.tuple([str, str, str, z.boolean()]), await t('saveCatalogo', item))
-      return { ambito, categoria, subcategoria, activo }
+      return toCatalogo(parse(catRow, await t('saveCatalogo', item)))
+    },
+    /** Renombra en el catálogo y en todos los gastos que usan ese nombre (dentro del mismo ámbito/categoría). */
+    async renameCatalogo(p: { nivel: 'ambito' | 'categoria' | 'subcategoria'; ambito: string; categoria?: string; subcategoria?: string; nuevo: string }) {
+      return parse(z.object({ catalogo: z.number(), gastos: z.number() }), await t('renameCatalogo', p))
     },
     async saveMedio(m: Medio): Promise<Medio> {
       const [nombre, activo] = parse(z.tuple([str, z.boolean()]), await t('saveMedio', m))

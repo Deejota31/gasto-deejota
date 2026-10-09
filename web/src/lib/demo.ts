@@ -6,7 +6,7 @@ import { CATALOGO_INICIAL } from './catalogo'
 
 const DEMO_CATALOGO: [string, string, string][] = Object.entries(CATALOGO_INICIAL)
   .flatMap(([a, cats]) => Object.entries(cats).flatMap(([c, subs]) => subs.map((sub): [string, string, string] => [a, c, sub])))
-const MEDIOS = ['Efectivo', 'Tarjeta de débito', 'Tarjeta de crédito', 'Yape', 'Plin', 'Transferencia']
+const MEDIOS = ['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Otros']
 const TIPOS = ['Fijo', 'Variable', 'Extraordinario']
 
 /** Generador determinista (mismos datos en cada ejecución) para pruebas reproducibles. */
@@ -34,7 +34,7 @@ export function generateGastoRows(n: number, today: string, seed = 42): unknown[
 export function demoTransport(today: string, n = 400, latencyMs = 250): Transport {
   const db = {
     gastos: generateGastoRows(n, today),
-    catalogo: [...Object.keys(CATALOGO_INICIAL).map(a => [a, '', '', true]), ...DEMO_CATALOGO.map(r => [...r, true])] as unknown[][],
+    catalogo: [...Object.keys(CATALOGO_INICIAL).map(a => [a, '', '', true, '', '']), ...DEMO_CATALOGO.map(r => [...r, true, '', ''])] as unknown[][],
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
     cajas: [
       ['general', 'Caja general', 7000, 'Todos', '', '#1e3a8a', 1],
@@ -73,7 +73,22 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       row[15] = new Date().toISOString()
       return { id: p.id, estado: p.estado, actualizadoEn: row[15] }
     },
-    saveCatalogo: p => upsert(db.catalogo, 3, [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false]),
+    saveCatalogo: p => {
+      const key = [p.ambito, p.categoria ?? '', p.subcategoria ?? ''].join('|').toLowerCase()
+      const prev = db.catalogo.find(r => r.slice(0, 3).join('|').toLowerCase() === key)
+      return upsert(db.catalogo, 3, [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false,
+        p.icono === undefined ? (prev?.[4] ?? '') : p.icono, p.color === undefined ? (prev?.[5] ?? '') : p.color])
+    },
+    renameCatalogo: p => {
+      const col = { ambito: 0, categoria: 1, subcategoria: 2 }[String(p.nivel) as 'ambito']
+      const match = (a: unknown, c: unknown, s: unknown) => a === p.ambito && (p.nivel === 'ambito' || c === p.categoria) && (p.nivel !== 'subcategoria' || s === p.subcategoria)
+      let catalogo = 0, gastos = 0
+      for (const r of db.catalogo) if (match(r[0], r[1], r[2])) { r[col] = p.nuevo; catalogo++ }
+      const gcol = [8, 3, 4][col]
+      for (const r of db.gastos) if (match(r[8], r[3], r[4])) { r[gcol] = p.nuevo; gastos++ }
+      if (!catalogo) throw fail('NOT_FOUND', 'La opción ya no existe en el catálogo.')
+      return { catalogo, gastos }
+    },
     saveMedio: p => upsert(db.medios, 1, [p.nombre, p.activo !== false]),
     saveCaja: p => upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor, p.color, Number(p.orden)]),
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),

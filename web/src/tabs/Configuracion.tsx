@@ -5,8 +5,9 @@ import type { Caja, FiltroCampo } from '../lib/types'
 import { saveConnection, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select } from '../components/ui'
 import { toCsv } from './Gastos'
+import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '1.1.0'
 const FILTROS: FiltroCampo[] = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago']
 
 export default function Configuracion({ store, conn, onConnect, notify, goCategorias }: {
@@ -151,7 +152,8 @@ function CajaRow({ caja, busy, onSave }: { caja: Caja; busy: boolean; onSave: (c
 
 function MediosEditor({ store, onError, notify }: { store: AppStore; onError: (m: string) => void; notify: (m: string) => void }) {
   const [nuevo, setNuevo] = useState('')
-  const medios = store.data?.medios ?? []
+  const raw = store.data?.medios ?? []
+  const medios = sortMedios(raw.map(m => m.nombre)).map(n => raw.find(m => m.nombre === n)!).filter(m => m && m.nombre.trim())
   const save = async (nombre: string, activo: boolean) => {
     try { await store.actions.saveMedio({ nombre, activo }); notify('Medio de pago guardado') } catch (e) { onError((e as Error).message) }
   }
@@ -160,7 +162,9 @@ function MediosEditor({ store, onError, notify }: { store: AppStore; onError: (m
       <div className="flex flex-wrap gap-1">
         {medios.map(m => (
           <button key={m.nombre} onClick={() => save(m.nombre, !m.activo)} title={m.activo ? 'Desactivar' : 'Reactivar'}
-            className={`rounded-full px-2.5 py-1 text-xs ${m.activo ? 'bg-navy/10 text-navy dark:text-blue-300' : 'bg-bg text-muted line-through'}`}>{m.nombre}</button>
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${m.activo ? '' : 'bg-bg text-muted line-through'}`}
+            style={m.activo ? { background: `${medioLook(m.nombre).color}1A`, color: medioLook(m.nombre).color } : undefined}>
+            {(() => { const { Icon } = medioLook(m.nombre); return <Icon className="size-3.5" /> })()}{m.nombre}</button>
         ))}
       </div>
       <form className="flex gap-2" onSubmit={e => { e.preventDefault(); if (nuevo.trim()) { void save(nuevo.trim(), true); setNuevo('') } }}>

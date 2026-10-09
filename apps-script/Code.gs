@@ -5,19 +5,22 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.0.0';
+var APP_VERSION = '1.1.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
   GASTOS: ['Fecha', 'Monto', 'Moneda', 'Categoría', 'Subcategoría', 'Descripción', 'Medio de pago',
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
     'Creado en', 'Actualizado en'],
-  CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo'],
+  CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color'],
   MEDIOS_PAGO: ['Nombre', 'Activo'],
   CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
   CONFIG: ['Clave', 'Valor']
 };
+
+// Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -271,7 +274,8 @@ var CATALOGO_INICIAL = {
   }
 };
 
-var MEDIOS_INICIALES = ['Efectivo', 'Tarjeta de débito', 'Tarjeta de crédito', 'Yape', 'Plin', 'Transferencia'];
+// Orden de presentación de los medios de pago (es el orden de las filas en MEDIOS_PAGO).
+var MEDIOS_INICIALES = ['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Otros'];
 
 var CAJAS_INICIALES = [
   ['general', 'Caja general', 0, 'Todos', '', '#1e3a8a', 1],
@@ -306,17 +310,16 @@ function setup() {
   Object.keys(SHEETS).forEach(function (name) { ensureSheet_(ss, name, SHEETS[name]); });
 
   seedCatalogo_(ss);
-  seedIfEmpty_(ss, 'MEDIOS_PAGO', MEDIOS_INICIALES.map(function (m) { return [m, true]; }));
+  seedMedios_(ss);
   seedIfEmpty_(ss, 'CAJAS', CAJAS_INICIALES);
   seedIfEmpty_(ss, 'CONFIG', CONFIG_INICIAL);
 
   var g = ss.getSheetByName('GASTOS');
   g.getRange('A:A').setNumberFormat('@');            // fechas ISO como texto: sin desfases de zona horaria
   g.getRange('B:B').setNumberFormat('#,##0.00');
-  g.getRange('J2:J').insertCheckboxes();
+  // Sin casillas de verificación: insertCheckboxes() escribe FALSE en las 999 filas vacías y getLastRow()
+  // pasa a ser 1000, por eso los registros se insertaban desde la fila 1001.
   if (!g.getFilter()) g.getRange(1, 1, g.getMaxRows(), SHEETS.GASTOS.length).createFilter();
-  ss.getSheetByName('CATALOGO').getRange('D2:D').insertCheckboxes();
-  ss.getSheetByName('MEDIOS_PAGO').getRange('B2:B').insertCheckboxes();
   ss.getSheetByName('PRESUPUESTOS').getRange('A:A').setNumberFormat('@');
   ss.setSpreadsheetTimeZone('America/Lima');
   var def = ss.getSheetByName('Sheet1') || ss.getSheetByName('Hoja 1');
@@ -340,7 +343,9 @@ function openSpreadsheet_(create) {
 function ensureSheet_(ss, name, headers) {
   var sh = ss.getSheetByName(name) || ss.insertSheet(name);
   var current = sh.getLastColumn() ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0] : [];
-  if (!current.join('')) {
+  var isPrefix = current.length < headers.length && current.join('|') === headers.slice(0, current.length).join('|');
+  if (!current.join('') || isPrefix) {
+    // Hoja nueva, o versión anterior con menos columnas: se agregan solo los encabezados que faltan.
     sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#e2e8f0');
   } else if (current.slice(0, headers.length).join('|') !== headers.join('|')) {
     // No sobrescribir datos ajenos: el instalador se detiene si la estructura no coincide.
@@ -363,7 +368,7 @@ function seedCatalogo_(ss) {
   var rows = [];
   var add = function (a, c, s) {
     var key = [a, c, s].join('|').toLowerCase();
-    if (!existing[key]) { existing[key] = true; rows.push([a, c, s, true]); }
+    if (!existing[key]) { existing[key] = true; rows.push([a, c, s, true, '', '']); }
   };
   Object.keys(CATALOGO_INICIAL).forEach(function (a) {
     add(a, '', '');
@@ -371,13 +376,48 @@ function seedCatalogo_(ss) {
       CATALOGO_INICIAL[a][c].forEach(function (s) { add(a, c, s); });
     });
   });
-  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 4).setValues(rows); // una sola escritura
+  appendRows_(sh, rows); // una sola escritura
+}
+
+// Medios en el orden pedido. Agrega los que falten y respeta los existentes (no reactiva desactivados).
+function seedMedios_(ss) {
+  var sh = ss.getSheetByName('MEDIOS_PAGO');
+  var existing = {};
+  readRows_(ss, 'MEDIOS_PAGO').forEach(function (r) { existing[str_(r[0]).toLowerCase()] = true; });
+  appendRows_(sh, MEDIOS_INICIALES.filter(function (m) { return !existing[m.toLowerCase()]; })
+    .map(function (m) { return [m, true]; }));
 }
 
 function seedIfEmpty_(ss, name, rows) {
   var sh = ss.getSheetByName(name);
-  if (sh.getLastRow() > 1 || !rows.length) return;
-  sh.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  if (readRows_(ss, name).length || !rows.length) return;
+  appendRows_(sh, rows);
+}
+
+/* ===================== Filas: detección y escritura seguras ===================== */
+
+// Una celda tiene contenido si no está vacía y no es el FALSE que deja una casilla sin marcar.
+function hasContent_(r) {
+  for (var i = 0; i < r.length; i++) if (r[i] !== '' && r[i] !== false && r[i] !== null) return true;
+  return false;
+}
+
+// Última fila con contenido real (1 si solo hay encabezados). Una sola lectura del área usada.
+function lastDataRow_(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return 1;
+  var values = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+  for (var i = values.length - 1; i >= 0; i--) if (hasContent_(values[i])) return i + 2;
+  return 1;
+}
+
+// Escribe las filas justo después del último registro real, en un bloque. Las filas que siguen
+// solo pueden tener residuos (vacíos o FALSE), nunca datos, así que nada legítimo se sobrescribe.
+function appendRows_(sh, rows) {
+  if (!rows.length) return 0;
+  var start = lastDataRow_(sh) + 1;
+  sh.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+  return start;
 }
 
 /* ===================== HTTP ===================== */
@@ -449,8 +489,8 @@ function getData_(fresh) {
     version: APP_VERSION,
     sheetUrl: ss.getUrl(),
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
-    catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false]; }),
-    medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false]; }),
+    catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5])]; }),
+    medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
     cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6])]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
     config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {})
@@ -464,8 +504,9 @@ function readRows_(ss, name) {
   var sh = ss.getSheetByName(name);
   var last = sh.getLastRow();
   if (last < 2) return [];
+  var key = KEY_COL[name];
   return sh.getRange(2, 1, last - 1, SHEETS[name].length).getValues().filter(function (r) {
-    return r.join('') !== '';
+    return str_(r[key]) !== ''; // filas sin clave (vacías o con FALSE residual) no son registros
   });
 }
 
@@ -548,6 +589,7 @@ var ACTIONS = {
   saveGasto: saveGasto_,
   setEstado: setEstado_,
   saveCatalogo: saveCatalogo_,
+  renameCatalogo: renameCatalogo_,
   saveMedio: saveMedio_,
   saveCaja: saveCaja_,
   savePresupuesto: savePresupuesto_,
@@ -569,7 +611,7 @@ function saveGasto_(p) {
       return normalizeGastoRow_(sh.getRange(rowIndex, 1, 1, SHEETS.GASTOS.length).getValues()[0], 'America/Lima');
     }
     var row = gastoToRow_(g, 'Activo', 'web', now, now);
-    sh.appendRow(row);
+    appendRows_(sh, [row]);
     return normalizeGastoRow_(row, 'America/Lima');
   }
   if (p.mode === 'update') {
@@ -601,17 +643,24 @@ function saveCatalogo_(p) {
   var sub = text_(p.subcategoria, 'Subcategoría', 60, false);
   if (sub && !categoria) throw appError_('VALIDATION', 'Una subcategoría necesita categoría.');
   var activo = p.activo !== false;
+  var icono = p.icono === undefined ? null : str_(p.icono);
+  var color = p.color === undefined ? null : str_(p.color);
+  if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
+  if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) throw appError_('VALIDATION', 'Color inválido.');
   var sh = openSpreadsheet_(false).getSheetByName('CATALOGO');
-  var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : [];
+  var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 6).getValues() : [];
   var key = [ambito, categoria, sub].join('|').toLowerCase();
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i].map(str_).join('|').toLowerCase() === key) {
-      sh.getRange(i + 2, 4).setValue(activo);
-      return [ambito, categoria, sub, activo];
+    if (rows[i].slice(0, 3).map(str_).join('|').toLowerCase() === key) {
+      // null = no cambiar el icono/color guardado
+      var row = [rows[i][0], rows[i][1], rows[i][2], activo, icono === null ? str_(rows[i][4]) : icono, color === null ? str_(rows[i][5]) : color];
+      sh.getRange(i + 2, 4, 1, 3).setValues([row.slice(3)]);
+      return [str_(row[0]), str_(row[1]), str_(row[2]), activo, row[4], row[5]];
     }
   }
-  sh.appendRow([ambito, categoria, sub, activo]);
-  return [ambito, categoria, sub, activo];
+  var nuevo = [ambito, categoria, sub, activo, icono || '', color || ''];
+  appendRows_(sh, [nuevo]);
+  return nuevo;
 }
 
 function saveMedio_(p) {
@@ -619,7 +668,7 @@ function saveMedio_(p) {
   var activo = p.activo !== false;
   var sh = openSpreadsheet_(false).getSheetByName('MEDIOS_PAGO');
   var row = findRowByValue_(sh, 1, nombre);
-  if (row) sh.getRange(row, 2).setValue(activo); else sh.appendRow([nombre, activo]);
+  if (row) sh.getRange(row, 2).setValue(activo); else appendRows_(sh, [[nombre, activo]]);
   return [nombre, activo];
 }
 
@@ -634,7 +683,7 @@ function saveCaja_(p) {
     /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden)];
   var sh = openSpreadsheet_(false).getSheetByName('CAJAS');
   var idx = findRowByValue_(sh, 1, id);
-  if (idx) sh.getRange(idx, 1, 1, row.length).setValues([row]); else sh.appendRow(row);
+  if (idx) sh.getRange(idx, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
   return row;
 }
 
@@ -650,7 +699,7 @@ function savePresupuesto_(p) {
       return [p.periodo, cajaId, monto];
     }
   }
-  sh.appendRow([p.periodo, cajaId, monto]);
+  appendRows_(sh, [[p.periodo, cajaId, monto]]);
   return [p.periodo, cajaId, monto];
 }
 
@@ -660,7 +709,7 @@ function saveConfig_(p) {
   var valor = text_(p.valor, 'Valor', 200, false);
   var sh = openSpreadsheet_(false).getSheetByName('CONFIG');
   var idx = findRowByValue_(sh, 1, p.clave);
-  if (idx) sh.getRange(idx, 2).setValue(valor); else sh.appendRow([p.clave, valor]);
+  if (idx) sh.getRange(idx, 2).setValue(valor); else appendRows_(sh, [[p.clave, valor]]);
   return [p.clave, valor];
 }
 
@@ -677,6 +726,108 @@ function backup_() {
   var name = SPREADSHEET_NAME + ' - Respaldo ' + Utilities.formatDate(new Date(), 'America/Lima', 'yyyy-MM-dd HH:mm');
   var copy = ss.copy(name);
   return { nombre: name, url: copy.getUrl() };
+}
+
+// Renombra un ámbito, categoría o subcategoría en el catálogo y en los gastos que la usan,
+// para que el historial siga clasificado igual. Lee GASTOS una vez y escribe solo las columnas afectadas.
+function renameCatalogo_(p) {
+  var nivel = p.nivel;
+  if (['ambito', 'categoria', 'subcategoria'].indexOf(nivel) < 0) throw appError_('VALIDATION', 'Nivel inválido.');
+  var ambito = text_(p.ambito, 'Ámbito', 40, true);
+  var categoria = nivel === 'ambito' ? '' : text_(p.categoria, 'Categoría', 60, true);
+  var sub = nivel === 'subcategoria' ? text_(p.subcategoria, 'Subcategoría', 60, true) : '';
+  var nuevo = text_(p.nuevo, 'Nuevo nombre', nivel === 'ambito' ? 40 : 60, true);
+  var col = { ambito: 0, categoria: 1, subcategoria: 2 }[nivel];
+  var actual = [ambito, categoria, sub][col];
+  if (actual === nuevo) return { catalogo: 0, gastos: 0 };
+  var ss = openSpreadsheet_(false);
+
+  var cat = ss.getSheetByName('CATALOGO');
+  var n = Math.max(cat.getLastRow() - 1, 0);
+  var crow = n ? cat.getRange(2, 1, n, 3).getValues() : [];
+  var match = function (a, c, s2) {
+    return a === ambito && (nivel === 'ambito' || c === categoria) && (nivel !== 'subcategoria' || s2 === sub);
+  };
+  var dup = crow.some(function (r) {
+    var x = r.map(str_);
+    return x[0] === (nivel === 'ambito' ? nuevo : ambito) && (nivel === 'ambito' || x[1] === (nivel === 'categoria' ? nuevo : categoria)) &&
+      (nivel !== 'subcategoria' || x[2] === nuevo);
+  });
+  if (dup) throw appError_('VALIDATION', 'Ya existe una opción con ese nombre.');
+  var catChanged = 0;
+  crow.forEach(function (r) { if (match(str_(r[0]), str_(r[1]), str_(r[2]))) { r[col] = nuevo; catChanged++; } });
+  if (!catChanged) throw appError_('NOT_FOUND', 'La opción ya no existe en el catálogo.');
+  cat.getRange(2, 1, n, 3).setValues(crow);
+
+  var gs = ss.getSheetByName('GASTOS');
+  var gn = Math.max(gs.getLastRow() - 1, 0);
+  var changed = 0;
+  if (gn) {
+    var de = gs.getRange(2, G.CAT + 1, gn, 2).getValues();   // Categoría, Subcategoría
+    var amb = gs.getRange(2, G.AMBITO + 1, gn, 1).getValues();
+    for (var i = 0; i < gn; i++) {
+      if (match(str_(amb[i][0]), str_(de[i][0]), str_(de[i][1]))) {
+        if (col === 0) amb[i][0] = nuevo; else de[i][col - 1] = nuevo;
+        changed++;
+      }
+    }
+    if (changed) {
+      if (col === 0) gs.getRange(2, G.AMBITO + 1, gn, 1).setValues(amb);
+      else gs.getRange(2, G.CAT + 1, gn, 2).setValues(de);
+    }
+  }
+  return { catalogo: catChanged, gastos: changed };
+}
+
+/**
+ * Reparación opcional y explícita (ejecútala a mano desde el editor). Crea un respaldo y luego, en cada hoja:
+ * quita las casillas de verificación que dejaban FALSE en filas vacías, mueve los registros reales al inicio
+ * (fila 2 en adelante) conservando su orden, y asigna ID a los gastos escritos a mano que no lo tenían.
+ * No borra ningún registro con contenido.
+ */
+function repararHojas() {
+  var ss = openSpreadsheet_(false);
+  var backup = backup_();
+  Logger.log('Respaldo creado: ' + backup.url);
+  withLock_(function () {
+    Object.keys(SHEETS).forEach(function (name) { ensureSheet_(ss, name, SHEETS[name]); }); // agrega Icono/Color si faltan
+    Object.keys(SHEETS).forEach(function (name) {
+      var sh = ss.getSheetByName(name);
+      var last = sh.getLastRow();
+      var width = Math.max(SHEETS[name].length, sh.getLastColumn());
+      var rows = last > 1 ? sh.getRange(2, 1, last - 1, width).getValues().filter(hasContent_) : [];
+      var ids = 0;
+      if (name === 'GASTOS') {
+        var now = new Date().toISOString();
+        rows.forEach(function (r) {
+          if (!str_(r[G.ID]) && str_(r[G.FECHA]) && str_(r[G.MONTO])) {
+            r[G.ID] = Utilities.getUuid();
+            r[G.ESTADO] = str_(r[G.ESTADO]) || 'Activo';
+            r[G.ORIGEN] = str_(r[G.ORIGEN]) || 'manual';
+            r[G.CREADO] = r[G.CREADO] || now;
+            r[G.ACTUALIZADO] = now;
+            ids++;
+          }
+        });
+      }
+      if (name === 'MEDIOS_PAGO') {
+        // Orden pedido: primero la lista definida, luego los demás tal como estaban.
+        var pos = function (r) { var i = MEDIOS_INICIALES.map(function (m) { return m.toLowerCase(); }).indexOf(str_(r[0]).toLowerCase()); return i < 0 ? 999 : i; };
+        rows = rows.map(function (r, i) { return { r: r, i: i }; })
+          .sort(function (a, b) { return pos(a.r) - pos(b.r) || a.i - b.i; }).map(function (x) { return x.r; });
+      }
+      if (last > 1) {
+        var area = sh.getRange(2, 1, sh.getMaxRows() - 1, width);
+        area.clearDataValidations();
+        area.clearContent();
+      }
+      if (rows.length) sh.getRange(2, 1, rows.length, width).setValues(rows);
+      Logger.log(name + ': ' + rows.length + ' registros desde la fila 2' + (ids ? ' (' + ids + ' ID asignados)' : ''));
+    });
+    seedMedios_(ss);
+    invalidateCache_();
+  });
+  return backup;
 }
 
 /* ===================== Validación ===================== */

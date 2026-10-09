@@ -21,7 +21,7 @@ export interface Gasto {
   actualizadoEn: string
 }
 
-export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean }
+export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string }
 export interface Medio { nombre: string; activo: boolean }
 export type FiltroCampo = 'Todos' | 'Ámbito' | 'Categoría' | 'Subcategoría' | 'Medio de pago'
 export interface Caja {
@@ -46,11 +46,16 @@ export interface AppData {
   version: string
 }
 
+export type PeriodPreset = 'mes' | 'mes-anterior' | '3m' | '6m' | 'anio' | 'custom'
+
+/** Filtros compartidos por Dashboard y Gastos. Listas vacías = sin filtro. */
 export interface Filters {
-  periodo: string // AAAA-MM
-  ambito: string
-  categoria: string
-  subcategoria: string
-  medioPago: string
-  tipoGasto: string
+  preset: PeriodPreset
+  desde: string // AAAA-MM-DD, inclusive
+  hasta: string // AAAA-MM-DD, inclusive
+  ambitos: string[]
+  categorias: string[]
+  subcategorias: string[] // clave "Categoría › Subcategoría": "Otros" existe en varias categorías
+  medios: string[]
+  tipos: string[]
 }

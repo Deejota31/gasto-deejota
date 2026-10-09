@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createApi } from './lib/api'
 import { generateGastoRows } from './lib/demo'
 import { aggregate } from './lib/engine'
+import { emptyFilters } from './components/shared'
 import type { Caja } from './lib/types'
 
 const today = '2026-10-09'
@@ -21,7 +22,7 @@ describe('rendimiento local', () => {
         data = await createApi(async () => JSON.parse(json)).getData()
         parseT.push(performance.now() - t0)
         const t1 = performance.now()
-        aggregate(data.gastos, { periodo: '2026-10', ambito: '', categoria: '', subcategoria: '', medioPago: '', tipoGasto: '' },
+        aggregate(data.gastos, { ...emptyFilters(today), preset: 'anio', desde: '2026-01-01', hasta: '2026-12-31' },
           { base: 'PEN', rates: { USD: 3.75 }, today, cajas, presupuestos: [] })
         aggT.push(performance.now() - t1)
       }

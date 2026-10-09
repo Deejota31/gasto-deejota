@@ -83,6 +83,18 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const key = (c: CatalogoItem) => `${c.ambito}|${c.categoria}|${c.subcategoria}`.toLowerCase()
       patch(d => ({ ...d, catalogo: d.catalogo.some(c => key(c) === key(s)) ? d.catalogo.map(c => key(c) === key(s) ? s : c) : [...d.catalogo, s] }))
     },
+    async renameCatalogo(p: Parameters<Api['renameCatalogo']>[0]) {
+      const r = await api.renameCatalogo(p)
+      const col = ({ ambito: 'ambito', categoria: 'categoria', subcategoria: 'subcategoria' } as const)[p.nivel]
+      const hit = (x: { ambito: string; categoria: string; subcategoria: string }) =>
+        x.ambito === p.ambito && (p.nivel === 'ambito' || x.categoria === p.categoria) && (p.nivel !== 'subcategoria' || x.subcategoria === p.subcategoria)
+      patch(d => ({
+        ...d,
+        catalogo: d.catalogo.map(c => (hit(c) ? { ...c, [col]: p.nuevo } : c)),
+        gastos: d.gastos.map(g => (hit(g) ? { ...g, [col]: p.nuevo } : g)),
+      }))
+      return r
+    },
     async saveMedio(m: Medio) {
       const s = await api.saveMedio(m)
       patch(d => ({ ...d, medios: d.medios.some(x => x.nombre.toLowerCase() === s.nombre.toLowerCase()) ? d.medios.map(x => x.nombre.toLowerCase() === s.nombre.toLowerCase() ? s : x) : [...d.medios, s] }))

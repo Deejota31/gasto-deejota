@@ -1,26 +1,67 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { AlertTriangle, Loader2, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { AlertTriangle, Info, Loader2, X } from 'lucide-react'
 
-export function Card({ title, icon, action, children, className = '' }: { title?: ReactNode; icon?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
+/** Cierra un popover al hacer clic fuera o pulsar Escape. */
+export function useDismiss(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open, close])
+  return ref
+}
+
+/** Icono ⓘ con explicación. Se abre con hover, foco o toque (móvil). */
+export function InfoTooltip({ title, children, align = 'right' }: { title: string; children: ReactNode; align?: 'right' | 'left' }) {
+  const [open, setOpen] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const id = useId()
+  const ref = useDismiss(open, () => { setOpen(false); setPinned(false) })
   return (
-    <section className={`rounded-2xl border border-line bg-card p-4 shadow-sm ${className}`}>
-      {(title || action) && (
+    <div ref={ref} className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => !pinned && setOpen(false)}>
+      <button type="button" aria-label={`Información: ${title}`} aria-expanded={open} aria-describedby={open ? id : undefined}
+        onClick={() => { setPinned(!pinned); setOpen(!pinned) }} onFocus={() => setOpen(true)} onBlur={() => !pinned && setOpen(false)}
+        className="grid size-6 place-items-center rounded-full text-muted transition hover:bg-bg hover:text-navy focus-visible:outline-2 focus-visible:outline-navy">
+        <Info className="size-4" />
+      </button>
+      {open && (
+        <div id={id} role="tooltip"
+          className={`absolute top-7 z-40 w-72 max-w-[80vw] rounded-xl border border-line bg-card p-3 text-left text-xs leading-relaxed font-normal text-ink shadow-lg ${align === 'right' ? 'right-0' : 'left-0'}`}>
+          <p className="mb-1 text-sm font-semibold">{title}</p>
+          <div className="space-y-1.5 text-muted">{children}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Card({ title, icon, action, info, children, className = '', bodyClass = '' }: {
+  title?: ReactNode; icon?: ReactNode; action?: ReactNode; info?: { title: string; body: ReactNode }; children: ReactNode; className?: string; bodyClass?: string
+}) {
+  return (
+    <section className={`rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] ${className}`}>
+      {(title || action || info) && (
         <header className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">{icon}{title}</h2>
-          {action}
+          <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink">{icon}<span className="truncate">{title}</span></h2>
+          <div className="flex shrink-0 items-center gap-1">{action}{info && <InfoTooltip title={info.title}>{info.body}</InfoTooltip>}</div>
         </header>
       )}
-      {children}
+      <div className={bodyClass}>{children}</div>
     </section>
   )
 }
 
-type Variant = 'primary' | 'ghost' | 'danger' | 'outline'
+type Variant = 'primary' | 'ghost' | 'danger' | 'outline' | 'soft'
 const variants: Record<Variant, string> = {
-  primary: 'bg-navy text-white hover:bg-navy/90',
+  primary: 'bg-navy text-white shadow-sm hover:brightness-110 dark:text-[#0E1525]',
   outline: 'border border-line bg-card text-ink hover:bg-bg',
   ghost: 'text-muted hover:bg-bg hover:text-ink',
-  danger: 'bg-red-600 text-white hover:bg-red-700',
+  danger: 'bg-[#E25563] text-white hover:brightness-110',
+  soft: 'bg-primary-soft text-navy hover:brightness-95',
 }
 
 export function Button({ variant = 'primary', loading, children, className = '', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
@@ -28,7 +69,7 @@ export function Button({ variant = 'primary', loading, children, className = '',
     <button
       {...rest}
       disabled={rest.disabled || loading}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-turquesa ${variants[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy ${variants[variant]} ${className}`}
     >
       {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
       {children}
@@ -36,28 +77,66 @@ export function Button({ variant = 'primary', loading, children, className = '',
   )
 }
 
-export function Field({ label, children, error }: { label: string; children: ReactNode; error?: string }) {
+export function IconButton({ label, children, tone = 'default', className = '', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; tone?: 'default' | 'danger' | 'primary' }) {
+  const tones = { default: 'text-muted hover:bg-bg hover:text-ink', danger: 'text-muted hover:bg-coral-soft hover:text-coral', primary: 'text-muted hover:bg-primary-soft hover:text-navy' }
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-      {label}
+    <button type="button" aria-label={label} title={label} {...rest}
+      className={`grid size-8 place-items-center rounded-lg transition focus-visible:outline-2 focus-visible:outline-navy disabled:opacity-40 ${tones[tone]} ${className}`}>
       {children}
-      {error && <span className="text-red-600">{error}</span>}
-    </label>
+    </button>
   )
 }
 
-export const inputCls = 'w-full rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm text-ink outline-none focus:border-turquesa focus:ring-2 focus:ring-turquesa/20'
-
-export function Select({ value, onChange, options, placeholder, label }: { value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; label: string }) {
+export function Field({ label, children, error, hint, htmlFor }: { label: string; children: ReactNode; error?: string; hint?: string; htmlFor?: string }) {
   return (
-    <select aria-label={label} className={inputCls} value={value} onChange={e => onChange(e.target.value)}>
+    <div className="flex flex-col gap-1">
+      <label htmlFor={htmlFor} className="text-xs font-medium text-muted">{label}</label>
+      {children}
+      {error ? <span className="text-xs text-[#D2463C]">{error}</span> : hint && <span className="text-[11px] text-muted">{hint}</span>}
+    </div>
+  )
+}
+
+export const inputCls = 'w-full rounded-xl border border-line bg-card px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-navy focus:ring-4 focus:ring-navy/10 disabled:cursor-not-allowed disabled:bg-bg disabled:text-muted'
+
+export function Select({ value, onChange, options, placeholder, label, id }: { value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; label: string; id?: string }) {
+  return (
+    <select id={id} aria-label={label} className={inputCls} value={value} onChange={e => onChange(e.target.value)}>
       {placeholder !== undefined && <option value="">{placeholder}</option>}
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )
 }
 
-export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+      className="inline-flex items-center gap-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-navy">
+      <span className={`relative h-5 w-9 rounded-full transition ${checked ? 'bg-navy' : 'bg-line'}`}>
+        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${checked ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+      {label}
+    </button>
+  )
+}
+
+/** Grupo de opciones excluyentes con aspecto de pastillas (accesible como radiogroup). */
+export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; label: string }) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 rounded-xl bg-bg p-1">
+      {options.map(o => (
+        <button key={o.value} type="button" role="radio" aria-checked={value === o.value} onClick={() => onChange(o.value)}
+          className={`flex-1 rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition ${value === o.value ? 'bg-card text-navy shadow-sm' : 'text-muted hover:text-ink'}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function Modal({ open, onClose, title, subtitle, icon, children, footer, size = 'md' }: {
+  open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg'
+}) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const d = ref.current
@@ -65,20 +144,33 @@ export function Modal({ open, onClose, title, children }: { open: boolean; onClo
     if (open && !d.open) d.showModal()
     if (!open && d.open) d.close()
   }, [open])
+  const w = { sm: 'w-[min(26rem,calc(100vw-1.5rem))]', md: 'w-[min(36rem,calc(100vw-1.5rem))]', lg: 'w-[min(44rem,calc(100vw-1.5rem))]' }[size]
   return (
-    <dialog ref={ref} onClose={onClose} className="m-auto w-[min(34rem,calc(100vw-1.5rem))] rounded-2xl border border-line bg-card p-0 text-ink shadow-xl">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <h2 className="text-base font-semibold">{title}</h2>
-        <button aria-label="Cerrar" onClick={onClose} className="rounded-md p-1 text-muted hover:bg-bg"><X className="size-4" /></button>
-      </div>
-      <div className="p-4">{open && children}</div>
+    <dialog ref={ref} onClose={onClose} className={`m-auto max-h-[calc(100dvh-2rem)] ${w} overflow-hidden rounded-2xl border border-line bg-card p-0 text-ink shadow-2xl`}>
+      {open && (
+        <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
+          <div className="flex items-start gap-3 border-b border-line px-5 py-4">
+            {icon && <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-navy">{icon}</span>}
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold">{title}</h2>
+              {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
+            </div>
+            <IconButton label="Cerrar" onClick={onClose}><X className="size-4" /></IconButton>
+          </div>
+          <div className="overflow-y-auto px-5 py-4">{children}</div>
+          {footer && <div className="flex justify-end gap-2 border-t border-line bg-bg/50 px-5 py-3">{footer}</div>}
+        </div>
+      )}
     </dialog>
   )
 }
 
-export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorBox({ message, onRetry, tone = 'error' }: { message: ReactNode; onRetry?: () => void; tone?: 'error' | 'warning' }) {
+  const cls = tone === 'error'
+    ? 'border-[#F5C2C0] bg-[#FDEEEE] text-[#9F2D2D] dark:border-[#5a2a2a] dark:bg-[#3a1d1d] dark:text-[#f3b4b4]'
+    : 'border-[#F5DDA8] bg-[#FFF7E6] text-[#8A5A0B] dark:border-[#5a4a20] dark:bg-[#33290f] dark:text-[#f1d391]'
   return (
-    <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+    <div role={tone === 'error' ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${cls}`}>
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
       <span className="flex-1">{message}</span>
       {onRetry && <button className="font-semibold underline" onClick={() => onRetry()}>Reintentar</button>}
@@ -90,6 +182,29 @@ export function Skeleton({ className = 'h-24' }: { className?: string }) {
   return <div className={`animate-pulse rounded-2xl bg-line/70 ${className}`} aria-hidden />
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="py-8 text-center text-sm text-muted">{children}</p>
+export function Empty({ icon, title, children }: { icon?: ReactNode; title?: string; children?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-2 py-10 text-center">
+      {icon && <span className="grid size-12 place-items-center rounded-2xl bg-bg text-muted">{icon}</span>}
+      {title && <p className="text-sm font-semibold text-ink">{title}</p>}
+      {children && <p className="max-w-sm text-sm text-muted">{children}</p>}
+    </div>
+  )
+}
+
+/** Chip con icono y color de una entidad (ámbito, categoría, medio). */
+export function Pill({ color, Icon, children, size = 'sm' }: { color: string; Icon?: React.ComponentType<{ className?: string }>; children: ReactNode; size?: 'sm' | 'xs' }) {
+  return (
+    <span className={`inline-flex max-w-full items-center gap-1 rounded-full font-medium ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-px text-[11px]'}`}
+      style={{ background: `${color}1F`, color }}>
+      {Icon && <Icon className={size === 'sm' ? 'size-3.5 shrink-0' : 'size-3 shrink-0'} />}
+      <span className="truncate">{children}</span>
+    </span>
+  )
+}
+
+/** Cuadro de icono con fondo pastel del color de la entidad. */
+export function IconTile({ color, Icon, size = 'md' }: { color: string; Icon: React.ComponentType<{ className?: string }>; size?: 'sm' | 'md' | 'lg' }) {
+  const s = { sm: 'size-7 [&>svg]:size-3.5 rounded-lg', md: 'size-9 [&>svg]:size-4.5 rounded-xl', lg: 'size-11 [&>svg]:size-5 rounded-xl' }[size]
+  return <span className={`grid shrink-0 place-items-center ${s}`} style={{ background: `${color}1F`, color }}><Icon /></span>
 }

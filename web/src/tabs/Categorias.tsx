@@ -1,132 +1,305 @@
-import { useMemo, useState } from 'react'
-import { Plus, RotateCcw, Search, X } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
-import { Button, Card, Empty, ErrorBox, Field, inputCls, Skeleton } from '../components/ui'
-import { colorFor } from '../components/shared'
+import { ambitoLook, categoriaLook, COLORS, ICONS } from '../lib/visual'
+import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
+
+type Nivel = 'ambito' | 'categoria' | 'subcategoria'
+interface Target { mode: 'create' | 'edit'; nivel: Nivel; ambito?: string; categoria?: string; subcategoria?: string }
+
+interface CatNode { name: string; head?: CatalogoItem; activo: boolean; subs: CatalogoItem[] }
+interface AmbNode { name: string; head?: CatalogoItem; activo: boolean; cats: CatNode[] }
+
+function buildTree(catalogo: CatalogoItem[]): AmbNode[] {
+  const out = new Map<string, AmbNode>()
+  for (const c of catalogo) {
+    const a = out.get(c.ambito) ?? { name: c.ambito, activo: true, cats: [] }
+    out.set(c.ambito, a)
+    if (!c.categoria) { a.head = c; a.activo = c.activo; continue }
+    let cat = a.cats.find(x => x.name === c.categoria)
+    if (!cat) { cat = { name: c.categoria, activo: true, subs: [] }; a.cats.push(cat) }
+    if (!c.subcategoria) { cat.head = c; cat.activo = c.activo } else cat.subs.push(c)
+  }
+  return [...out.values()]
+}
+
+/** Resalta las coincidencias de la búsqueda. */
+function Hl({ text, q }: { text: string; q: string }) {
+  if (!q) return <>{text}</>
+  const i = text.toLowerCase().indexOf(q)
+  if (i < 0) return <>{text}</>
+  return <>{text.slice(0, i)}<mark className="rounded bg-[#FDE68A] px-0.5 text-ink dark:bg-[#7C5E10]">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
+}
 
 export default function Categorias({ store, notify }: { store: AppStore; notify: (m: string) => void }) {
-  const [ambito, setAmbito] = useState('Personal')
-  const [categoria, setCategoria] = useState('')
-  const [sub, setSub] = useState('')
-  const [q, setQ] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
-
-  const tree = useMemo(() => {
-    const t = new Map<string, Map<string, CatalogoItem[]>>()
-    for (const c of catalogo) {
-      const cats = t.get(c.ambito) ?? new Map<string, CatalogoItem[]>()
-      t.set(c.ambito, cats)
-      if (c.categoria) cats.set(c.categoria, [...(cats.get(c.categoria) ?? []), c])
-    }
-    return t
-  }, [catalogo])
-
-  const ambitos = [...tree.keys()]
-  const activos = catalogo.filter(c => c.activo)
-  const counts = {
-    ambitos: new Set(activos.map(c => c.ambito)).size,
-    categorias: new Set(activos.filter(c => c.categoria).map(c => `${c.ambito}|${c.categoria}`)).size,
-    subcategorias: activos.filter(c => c.subcategoria).length,
-  }
-  const categoriasDe = [...(tree.get(ambito)?.keys() ?? [])]
+  const tree = useMemo(() => buildTree(catalogo), [catalogo])
+  const [sel, setSel] = useState('')
+  const [q, setQ] = useState('')
+  const [target, setTarget] = useState<Target | null>(null)
+  const [menu, setMenu] = useState(false)
+  const menuRef = useDismiss(menu, () => setMenu(false))
   const term = q.trim().toLowerCase()
+  const current = tree.find(a => a.name === sel) ?? tree[0]
 
-  async function save(item: CatalogoItem, msg: string) {
-    setSaving(true)
-    setError('')
-    try { await store.actions.saveCatalogo(item); notify(msg) } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
-  }
+  const activos = catalogo.filter(c => c.activo)
+  const stats = [
+    { label: 'Ámbitos', n: tree.filter(a => a.activo).length, Icon: Layers, cls: 'bg-primary-soft text-navy' },
+    { label: 'Categorías', n: new Set(activos.filter(c => c.categoria).map(c => `${c.ambito}|${c.categoria}`)).size, Icon: Shapes, cls: 'bg-coral-soft text-coral' },
+    { label: 'Subcategorías', n: activos.filter(c => c.subcategoria).length, Icon: Tag, cls: 'bg-verde-soft text-verde' },
+  ]
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault()
-    const a = ambito.trim(), c = categoria.trim(), s = sub.trim()
-    if (!a) return setError('Indica un ámbito.')
-    if (s && !c) return setError('Una subcategoría necesita categoría.')
-    const exists = catalogo.some(x => x.activo && [x.ambito, x.categoria, x.subcategoria].join('|').toLowerCase() === [a, c, s].join('|').toLowerCase())
-    if (exists) return setError('Esa opción ya existe.')
-    if (c && !catalogo.some(x => x.ambito === a && x.categoria === c && !x.subcategoria) && s) {
-      await save({ ambito: a, categoria: c, subcategoria: '', activo: true }, 'Categoría agregada')
-    }
-    await save({ ambito: a, categoria: c, subcategoria: s, activo: true }, 'Opción agregada')
-    setSub('')
-  }
+  const results = term ? tree.map(a => ({
+    ...a,
+    cats: a.cats.map(c => ({ ...c, subs: c.subs.filter(s => s.subcategoria.toLowerCase().includes(term)) }))
+      .filter(c => c.name.toLowerCase().includes(term) || c.subs.length || a.name.toLowerCase().includes(term)),
+  })).filter(a => a.cats.length || a.name.toLowerCase().includes(term)) : []
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        {([['Ámbitos', counts.ambitos], ['Categorías', counts.categorias], ['Subcategorías', counts.subcategorias]] as const).map(([l, n]) => (
-          <div key={l} className="rounded-2xl border border-line bg-card p-3 text-center shadow-sm">
-            <p className="tabular text-2xl font-semibold text-navy dark:text-blue-300">{n}</p><p className="text-xs text-muted">{l}</p>
+      <section className="rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)]">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="grid size-10 place-items-center rounded-xl bg-primary-soft text-navy"><FolderTree className="size-5" /></span>
+          <div className="mr-auto">
+            <h1 className="text-base font-semibold">Catálogo de gastos</h1>
+            <p className="text-xs text-muted">Ámbito → categoría → subcategoría. Desactivar oculta una opción sin perder el historial.</p>
           </div>
-        ))}
-      </div>
-
-      <Card title="Agregar opción">
-        <form onSubmit={add} className="grid gap-2 sm:grid-cols-4 sm:items-end">
-          <Field label="Ámbito">
-            <input className={inputCls} list="dl-ambitos" value={ambito} onChange={e => { setAmbito(e.target.value); setCategoria('') }} maxLength={40} />
-            <datalist id="dl-ambitos">{ambitos.map(a => <option key={a} value={a} />)}</datalist>
-          </Field>
-          <Field label="Categoría">
-            <input className={inputCls} list="dl-categorias" value={categoria} onChange={e => setCategoria(e.target.value)} maxLength={60} placeholder="Existente o nueva" />
-            <datalist id="dl-categorias">{categoriasDe.map(c => <option key={c} value={c} />)}</datalist>
-          </Field>
-          <Field label="Subcategoría"><input className={inputCls} value={sub} onChange={e => setSub(e.target.value)} maxLength={60} placeholder="Opcional" /></Field>
-          <Button type="submit" loading={saving} disabled={!store.data}><Plus className="size-4" /> Agregar</Button>
-        </form>
-        {error && <div className="mt-2"><ErrorBox message={error} /></div>}
-      </Card>
-
-      <label className="relative block">
-        <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-muted" aria-hidden />
-        <input aria-label="Buscar en el catálogo" placeholder="Buscar categoría o subcategoría…" className={`${inputCls} pl-8`} value={q} onChange={e => setQ(e.target.value)} />
-      </label>
-
-      {!store.data ? <Skeleton className="h-48" /> : !ambitos.length ? <Empty>El catálogo está vacío.</Empty> : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {ambitos.map(a => {
-            const cats = [...(tree.get(a)?.entries() ?? [])]
-              .filter(([c, items]) => !term || c.toLowerCase().includes(term) || items.some(i => i.subcategoria.toLowerCase().includes(term)))
-            if (term && !cats.length) return null
-            return (
-              <Card key={a} title={a} icon={<span className="size-2.5 rounded-full" style={{ background: colorFor(a, ambitos) }} />}
-                action={<span className="text-xs text-muted">{cats.length} categorías</span>}>
-                {!cats.length && <p className="text-xs text-muted">Sin categorías aún.</p>}
-                <ul className="space-y-2">
-                  {cats.map(([c, items]) => {
-                    const head = items.find(i => !i.subcategoria)
-                    const catActive = head ? head.activo : items.some(i => i.activo)
-                    return (
-                      <li key={c} className="rounded-xl border border-line p-2">
-                        <div className="flex items-center justify-between">
-                          <span className={`text-sm font-medium ${catActive ? '' : 'text-muted line-through'}`}>{c}</span>
-                          <button aria-label={catActive ? `Desactivar ${c}` : `Reactivar ${c}`} className="rounded p-1 text-muted hover:bg-bg"
-                            onClick={() => save({ ambito: a, categoria: c, subcategoria: '', activo: !catActive }, catActive ? 'Categoría desactivada' : 'Categoría reactivada')}>
-                            {catActive ? <X className="size-3.5" /> : <RotateCcw className="size-3.5" />}
-                          </button>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {items.filter(i => i.subcategoria).map(i => (
-                            <button key={i.subcategoria} title={i.activo ? 'Desactivar' : 'Reactivar'}
-                              onClick={() => save({ ...i, activo: !i.activo }, i.activo ? 'Subcategoría desactivada' : 'Subcategoría reactivada')}
-                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${i.activo ? 'bg-turquesa/10 text-turquesa' : 'bg-bg text-muted line-through'}`}>
-                              {i.subcategoria}{i.activo ? <X className="size-3" /> : <RotateCcw className="size-3" />}
-                            </button>
-                          ))}
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </Card>
-            )
-          })}
+          <div ref={menuRef} className="relative">
+            <Button onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} disabled={!store.data}><Plus className="size-4" /> Agregar <ChevronDown className="size-4" /></Button>
+            {menu && (
+              <div role="menu" className="absolute top-11 right-0 z-40 w-56 rounded-2xl border border-line bg-card p-1.5 shadow-xl">
+                {([['ambito', 'Nuevo ámbito', Layers], ['categoria', 'Nueva categoría', Shapes], ['subcategoria', 'Nueva subcategoría', Tag]] as const).map(([nivel, label, Icon]) => (
+                  <button key={nivel} role="menuitem" type="button" onClick={() => { setMenu(false); setTarget({ mode: 'create', nivel, ambito: current?.name }) }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Icon className="size-4 text-muted" />{label}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.6fr)]">
+          {stats.map(s => (
+            <div key={s.label} className="flex items-center gap-3 rounded-xl border border-line p-3">
+              <span className={`grid size-9 place-items-center rounded-xl ${s.cls}`}><s.Icon className="size-4" /></span>
+              <div><p className="tabular text-xl font-bold">{s.n}</p><p className="text-xs text-muted">{s.label}</p></div>
+            </div>
+          ))}
+          <label className="relative self-center">
+            <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
+            <input aria-label="Buscar en el catálogo" placeholder="Buscar ámbito, categoría o subcategoría…" className={`${inputCls} h-11 pl-9`} value={q} onChange={e => setQ(e.target.value)} />
+          </label>
+        </div>
+      </section>
+
+      {!store.data ? <Skeleton className="h-64" /> : !tree.length ? <Empty icon={<FolderTree className="size-5" />} title="El catálogo está vacío">Usa “Agregar” para crear tu primer ámbito.</Empty> : term ? (
+        <section className="space-y-3" aria-label="Resultados de búsqueda">
+          {!results.length && <Empty icon={<Search className="size-5" />} title="Sin coincidencias">Prueba con otra palabra.</Empty>}
+          {results.map(a => (
+            <div key={a.name} className="rounded-2xl border border-line bg-card p-4">
+              <AmbHeader a={a} catalogo={catalogo} q={term} />
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {a.cats.map(c => <CatCard key={c.name} a={a.name} c={c} catalogo={catalogo} q={term} onEdit={setTarget} />)}
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : (
+        <>
+          <div role="tablist" aria-label="Ámbitos" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {tree.map(a => {
+              const l = ambitoLook(a.name, catalogo)
+              const on = current?.name === a.name
+              const subs = a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)
+              return (
+                <button key={a.name} role="tab" aria-selected={on} type="button" onClick={() => setSel(a.name)}
+                  className={`relative rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 ${on ? 'shadow-md' : 'border-line bg-card hover:shadow-sm'} ${a.activo ? '' : 'opacity-60'}`}
+                  style={on ? { borderColor: l.color, background: `linear-gradient(135deg, ${l.color}14, ${l.color}26)` } : undefined}>
+                  <div className="flex items-center gap-2.5">
+                    <IconTile color={l.color} Icon={l.Icon} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{a.name}</p>
+                      <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} sub.</p>
+                    </div>
+                  </div>
+                  {!a.activo && <span className="absolute top-2 right-2 rounded-full bg-bg px-1.5 text-[10px] text-muted">Inactivo</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          {current && (
+            <section className="rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <AmbHeader a={current} catalogo={catalogo} q="" />
+                <div className="ml-auto flex gap-2">
+                  <Button variant="outline" onClick={() => setTarget({ mode: 'edit', nivel: 'ambito', ambito: current.name })}><Pencil className="size-4" /> Editar ámbito</Button>
+                  <Button variant="soft" onClick={() => setTarget({ mode: 'create', nivel: 'categoria', ambito: current.name })}><Plus className="size-4" /> Categoría</Button>
+                </div>
+              </div>
+              {!current.cats.length ? <Empty icon={<Shapes className="size-5" />} title="Sin categorías">Agrega la primera categoría de este ámbito.</Empty> : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {current.cats.map(c => <CatCard key={c.name} a={current.name} c={c} catalogo={catalogo} q="" onEdit={setTarget} />)}
+                </div>
+              )}
+            </section>
+          )}
+        </>
       )}
-      <p className="text-xs text-muted">Desactivar oculta la opción en formularios sin borrar el historial. Los gastos ya registrados conservan su categoría.</p>
+
+      {target && <CatalogModal key={JSON.stringify(target)} store={store} target={target} tree={tree} onClose={() => setTarget(null)} notify={notify} />}
     </div>
   )
+}
+
+function AmbHeader({ a, catalogo, q }: { a: AmbNode; catalogo: CatalogoItem[]; q: string }) {
+  const l = ambitoLook(a.name, catalogo)
+  return (
+    <div className="flex items-center gap-2.5">
+      <IconTile color={l.color} Icon={l.Icon} size="lg" />
+      <div>
+        <h2 className="text-base font-semibold"><Hl text={a.name} q={q} /></h2>
+        <p className="text-xs text-muted">{a.cats.length} categorías · {a.cats.reduce((s, c) => s + c.subs.length, 0)} subcategorías{!a.activo && ' · inactivo'}</p>
+      </div>
+    </div>
+  )
+}
+
+function CatCard({ a, c, catalogo, q, onEdit }: { a: string; c: CatNode; catalogo: CatalogoItem[]; q: string; onEdit: (t: Target) => void }) {
+  const l = categoriaLook(c.name, catalogo, a)
+  return (
+    <article className={`rounded-2xl border border-line p-3 transition hover:shadow-sm ${c.activo ? '' : 'opacity-60'}`} style={{ background: `linear-gradient(160deg, ${l.color}0D, transparent 60%)` }}>
+      <div className="flex items-center gap-2.5">
+        <IconTile color={l.color} Icon={l.Icon} />
+        <div className="min-w-0 flex-1">
+          <p className={`truncate text-sm font-semibold ${c.activo ? '' : 'line-through'}`}><Hl text={c.name} q={q} /></p>
+          <p className="text-[11px] text-muted">{c.subs.filter(s => s.activo).length} subcategorías{!c.activo && ' · inactiva'}</p>
+        </div>
+        <IconButton label={`Agregar subcategoría a ${c.name}`} tone="primary" onClick={() => onEdit({ mode: 'create', nivel: 'subcategoria', ambito: a, categoria: c.name })}><Plus className="size-4" /></IconButton>
+        <IconButton label={`Editar ${c.name}`} onClick={() => onEdit({ mode: 'edit', nivel: 'categoria', ambito: a, categoria: c.name })}><Pencil className="size-4" /></IconButton>
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {c.subs.map(s => (
+          <button key={s.subcategoria} type="button" title={s.activo ? 'Editar o desactivar' : 'Inactiva: clic para editar o reactivar'}
+            onClick={() => onEdit({ mode: 'edit', nivel: 'subcategoria', ambito: a, categoria: c.name, subcategoria: s.subcategoria })}
+            className={`rounded-full border px-2.5 py-1 text-xs font-medium transition hover:brightness-95 ${s.activo ? '' : 'line-through opacity-60'}`}
+            style={{ background: `${l.color}14`, borderColor: `${l.color}33`, color: l.color }}>
+            <Hl text={s.subcategoria} q={q} />
+          </button>
+        ))}
+        {!c.subs.length && <span className="text-xs text-muted">Sin subcategorías</span>}
+      </div>
+    </article>
+  )
+}
+
+function CatalogModal({ store, target, tree, onClose, notify }: { store: AppStore; target: Target; tree: AmbNode[]; onClose: () => void; notify: (m: string) => void }) {
+  const catalogo = store.data?.catalogo ?? []
+  const { mode, nivel } = target
+  const amb = tree.find(a => a.name === target.ambito)
+  const cat = amb?.cats.find(c => c.name === target.categoria)
+  const sub = cat?.subs.find(s => s.subcategoria === target.subcategoria)
+  const original = nivel === 'ambito' ? target.ambito ?? '' : nivel === 'categoria' ? target.categoria ?? '' : target.subcategoria ?? ''
+  const look = nivel === 'ambito' ? ambitoLook(target.ambito ?? '', catalogo) : categoriaLook(target.categoria ?? '', catalogo, target.ambito)
+  const head = nivel === 'ambito' ? amb?.head : nivel === 'categoria' ? cat?.head : sub
+  const iconKey = Object.entries(ICONS).find(([, I]) => I === look.Icon)?.[0] ?? 'tag'
+
+  const [ambito, setAmbito] = useState(target.ambito ?? tree[0]?.name ?? '')
+  const [categoria, setCategoria] = useState(target.categoria ?? '')
+  const [nombre, setNombre] = useState(mode === 'edit' ? original : '')
+  const [icono, setIcono] = useState(mode === 'edit' ? (head?.icono || iconKey) : 'tag')
+  const [color, setColor] = useState(mode === 'edit' ? (head?.color || look.color) : COLORS[0])
+  const [activo, setActivo] = useState(mode === 'edit' ? (nivel === 'ambito' ? amb?.activo : nivel === 'categoria' ? cat?.activo : sub?.activo) ?? true : true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const cats = tree.find(a => a.name === ambito)?.cats.map(c => c.name) ?? []
+  const label = { ambito: 'ámbito', categoria: 'categoría', subcategoria: 'subcategoría' }[nivel]
+  const masc = nivel === 'ambito'
+  const usaVisual = nivel !== 'subcategoria'
+  const enUso = mode === 'edit' && nombre.trim() !== original
+    ? (store.data?.gastos ?? []).filter(g => g.ambito === target.ambito && (nivel === 'ambito' || g.categoria === target.categoria) && (nivel !== 'subcategoria' || g.subcategoria === target.subcategoria)).length
+    : 0
+
+  async function save() {
+    const n = nombre.trim()
+    if (!n) return setError(`Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`)
+    if (nivel !== 'ambito' && !ambito) return setError('Elige un ámbito.')
+    if (nivel === 'subcategoria' && !categoria) return setError('Elige una categoría.')
+    const key = (a: string, c: string, s: string) => `${a}|${c}|${s}`.toLowerCase()
+    const finalKey = nivel === 'ambito' ? key(n, '', '') : nivel === 'categoria' ? key(ambito, n, '') : key(ambito, categoria, n)
+    const exists = catalogo.some(c => key(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
+    if (exists && (mode === 'create' || n !== original)) return setError(`Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`)
+    setSaving(true)
+    setError('')
+    try {
+      if (mode === 'edit' && n !== original) {
+        const r = await store.actions.renameCatalogo({ nivel, ambito: target.ambito!, categoria: target.categoria, subcategoria: target.subcategoria, nuevo: n })
+        if (r.gastos) notify(`Renombrado. ${r.gastos} gasto(s) actualizados.`)
+      }
+      const a = nivel === 'ambito' ? n : ambito
+      const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
+      const s = nivel === 'subcategoria' ? n : ''
+      await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(usaVisual ? { icono, color } : {}) })
+      notify(mode === 'create' ? `${label.charAt(0).toUpperCase()}${label.slice(1)} ${masc ? 'agregado' : 'agregada'}` : 'Cambios guardados')
+      onClose()
+    } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
+  }
+
+  const Preview = ICONS[icono] ?? ICONS.tag
+  return (
+    <Modal open onClose={onClose} size="md" title={`${mode === 'create' ? (masc ? 'Nuevo' : 'Nueva') : 'Editar'} ${label}`}
+      subtitle={mode === 'create' ? 'Aparecerá de inmediato en el formulario de gastos.' : 'Los gastos existentes conservan su clasificación.'}
+      icon={usaVisual ? <Preview className="size-5" style={{ color }} /> : <Tag className="size-5" />}
+      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button loading={saving} onClick={save}>{mode === 'create' ? 'Agregar' : 'Guardar'}</Button></>}>
+      <div className="space-y-4">
+        {nivel !== 'ambito' && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Ámbito" htmlFor="cm-amb">
+              <select id="cm-amb" className={inputCls} disabled={mode === 'edit'} value={ambito} onChange={e => { setAmbito(e.target.value); setCategoria('') }}>
+                {tree.map(a => <option key={a.name}>{a.name}</option>)}
+              </select>
+            </Field>
+            {nivel === 'subcategoria' && (
+              <Field label="Categoría" htmlFor="cm-cat">
+                <select id="cm-cat" className={inputCls} disabled={mode === 'edit'} value={categoria} onChange={e => setCategoria(e.target.value)}>
+                  <option value="">Elige…</option>
+                  {cats.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </Field>
+            )}
+          </div>
+        )}
+        <Field label="Nombre" htmlFor="cm-nombre" hint={enUso ? `Se renombrará también en ${enUso} gasto(s) registrados.` : undefined}>
+          <input id="cm-nombre" autoFocus className={inputCls} maxLength={nivel === 'ambito' ? 40 : 60} value={nombre} onChange={e => setNombre(e.target.value)} placeholder={`Nombre ${masc ? 'del' : 'de la'} ${label}`} />
+        </Field>
+        {usaVisual && (
+          <>
+            <Picker label="Icono">
+              <div className="grid grid-cols-8 gap-1.5 sm:grid-cols-10">
+                {Object.entries(ICONS).map(([k, I]) => (
+                  <button key={k} type="button" aria-label={`Icono ${k}`} aria-pressed={icono === k} onClick={() => setIcono(k)}
+                    className={`grid aspect-square place-items-center rounded-lg border transition ${icono === k ? 'shadow-sm' : 'border-line hover:bg-bg'}`}
+                    style={icono === k ? { borderColor: color, background: `${color}1F`, color } : undefined}><I className="size-4" /></button>
+                ))}
+              </div>
+            </Picker>
+            <Picker label="Color">
+              <div className="flex flex-wrap gap-2">
+                {COLORS.map(c => (
+                  <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c} onClick={() => setColor(c)}
+                    className={`size-8 rounded-full ring-offset-2 ring-offset-[var(--card)] transition ${color === c ? 'ring-2' : 'hover:scale-110'}`}
+                    style={{ background: c, ['--tw-ring-color' as string]: c }} />
+                ))}
+              </div>
+            </Picker>
+          </>
+        )}
+        {mode === 'edit' && <Switch checked={activo} onChange={setActivo} label={activo ? 'Activa: se ofrece al registrar gastos' : 'Inactiva: oculta en formularios, se conserva en el historial'} />}
+        {error && <ErrorBox message={error} />}
+      </div>
+    </Modal>
+  )
+}
+
+function Picker({ label, children }: { label: string; children: ReactNode }) {
+  return <div><p className="mb-1.5 text-xs font-medium text-muted">{label}</p>{children}</div>
 }
