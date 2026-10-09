@@ -1,8 +1,13 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { FileSpreadsheet, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
+import Toaster from './components/Toaster'
+import GastoModal, { GASTO_MSG, type GastoDraft, type ModalMode } from './components/GastoModal'
+import type { GastoInput } from './lib/api'
+import type { Gasto } from './lib/types'
+import { showToast } from './lib/toast'
 import { emptyFilters } from './components/shared'
 import { todayIn } from './lib/dates'
 import type { Filters } from './lib/types'
@@ -25,7 +30,9 @@ export default function App({ api }: { api?: Api }) {
   const [conn, setConn] = useState<Connection | null>(() => loadConnection())
   const store = useAppData(conn, api)
   const [tab, setTab] = useState<TabId>(() => (TABS.some(t => `#${t.id}` === location.hash) ? (location.hash.slice(1) as TabId) : 'dashboard'))
-  const [toast, setToast] = useState('')
+  // Un solo formulario de gasto para toda la app (Dashboard y Gastos lo abren igual).
+  const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; key: number } | null>(null)
+  const openGasto = useCallback((mode: ModalMode, gasto: Gasto | null, draft?: GastoDraft) => setModal({ mode, gasto, draft, key: Date.now() }), [])
   const tz = store.data?.config.zona_horaria || 'America/Lima'
   const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
@@ -33,12 +40,14 @@ export default function App({ api }: { api?: Api }) {
 
   useEffect(() => { history.replaceState(null, '', `#${tab}`) }, [tab])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
-  useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => setToast(''), 3000)
-    return () => clearTimeout(t)
-  }, [toast])
-  const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') setToast(m) }
+  const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') showToast('success', m) }
+
+  // Guardar no bloquea: el formulario se cierra al aceptar la operación y el resultado real llega como notificación.
+  function submitGasto(input: GastoInput, mode: ModalMode, draft: GastoDraft): boolean {
+    return store.track(`gasto:${input.id}`, GASTO_MSG[mode], () => store.actions.saveGasto(input, mode === 'edit' ? 'update' : 'create'), {
+      onErrorActions: [{ label: 'Abrir formulario', run: () => openGasto(mode, null, draft) }],
+    })
+  }
 
   return (
     <div className="min-h-dvh">
@@ -76,15 +85,14 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} /></Suspense>}
-        {tab === 'gastos' && <Gastos store={store} notify={notify} filters={filters} setFilters={setFilters} today={today} />}
-        {tab === 'categorias' && <Categorias store={store} notify={notify} />}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} /></Suspense>}
+        {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} />}
+        {tab === 'categorias' && <Categorias store={store} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}
       </main>
 
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-4 flex justify-center">
-        {toast && <div className="rounded-xl bg-navy px-4 py-2 text-sm text-white shadow-lg">{toast}</div>}
-      </div>
+      {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} onClose={() => setModal(null)} onSubmit={submitGasto} />}
+      <Toaster />
     </div>
   )
 }

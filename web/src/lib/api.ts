@@ -97,10 +97,12 @@ export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
   }
 }
 
-// [ámbito, categoría, subcategoría, activo, icono?, color?] — un backend 1.0 envía solo las 4 primeras.
-const catRow = z.tuple([str, str, str, z.boolean()]).rest(str)
-const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color = '']: z.infer<typeof catRow>): CatalogoItem =>
-  ({ ambito, categoria, subcategoria, activo, icono, color })
+// [ámbito, categoría, subcategoría, activo, icono?, color?, orden?] — un backend 1.0 envía solo las 4 primeras.
+const catRow = z.tuple([str, str, str, z.boolean()]).rest(z.union([str, z.number()]))
+const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color = '', orden]: z.infer<typeof catRow>): CatalogoItem => ({
+  ambito, categoria, subcategoria, activo, icono: String(icono), color: String(color),
+  ...(orden !== '' && orden !== undefined && Number.isFinite(Number(orden)) ? { orden: Number(orden) } : {}),
+})
 
 const dataSchema = z.object({
   version: str,

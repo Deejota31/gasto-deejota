@@ -119,7 +119,7 @@ describe('backend Apps Script', () => {
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
-    expect(cat.filter(r => r[2])).toHaveLength(178)
+    expect(cat.filter(r => r[2])).toHaveLength(214)
     b.g.setup()
     expect(b.created()).toBe(1)
     expect(b.ss.getSheetByName('CATALOGO')!.rows).toHaveLength(cat.length + 1)
@@ -136,7 +136,7 @@ describe('backend Apps Script', () => {
     const subs = (a: string, c: string) => rows.filter(r => r[0] === a && r[1] === c).map(r => r[2])
     expect(subs('Familia', 'Bebé')).toContain('Pañales')
     expect(subs('Personal', 'Bebé')).toEqual([])
-    expect(subs('Amigos', 'Transporte')).toEqual(['Taxi', 'Bus / Micro', 'Otros'])
+    expect(subs('Amigos', 'Transporte')).toEqual(['Taxi', 'Moto Taxi', 'Bus / Micro', 'Otros'])
   })
 
   it('volver a ejecutar setup agrega lo que falta sin reactivar lo desactivado ni borrar lo manual', () => {
@@ -202,7 +202,7 @@ describe('backend Apps Script', () => {
     b.post('saveGasto', gasto({ id: '22222222-2222-4333-8444-555555555555', ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo' }))
     const r = b.post('renameCatalogo', { nivel: 'categoria', ambito: 'Familia', categoria: 'Bebé', nuevo: 'Hija' }).data
     expect(r.gastos).toBe(1)
-    expect(r.catalogo).toBe(10) // las 10 subcategorías de Bebé
+    expect(r.catalogo).toBe(11) // las 11 subcategorías de Bebé
     const d = b.post('data', { fresh: true }).data
     expect(d.gastos.map((g: unknown[]) => g[3])).toEqual(['Hija', 'Alimentación'])
     expect(d.catalogo.some((c: unknown[]) => c[0] === 'Familia' && c[1] === 'Bebé')).toBe(false)
@@ -213,8 +213,92 @@ describe('backend Apps Script', () => {
     b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Bebé', subcategoria: '', icono: 'baby', color: '#f472b6' })
     b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Bebé', subcategoria: '', activo: false })
     const row = b.post('data', { fresh: true }).data.catalogo.find((c: unknown[]) => c[0] === 'Familia' && c[1] === 'Bebé' && c[2] === '')
-    expect(row).toEqual(['Familia', 'Bebé', '', false, 'baby', '#f472b6'])
+    expect(row.slice(0, 6)).toEqual(['Familia', 'Bebé', '', false, 'baby', '#f472b6'])
     expect(b.post('saveCatalogo', { ambito: 'X', icono: 'Bad Icon!' }).error.code).toBe('VALIDATION')
+  })
+
+  it('catálogo nuevo: 5 ámbitos, Transporte y Alimentación uniformes, Personal → Servicios', () => {
+    const cat = b.post('data', { fresh: true }).data.catalogo as unknown[][]
+    const ambitos = [...new Set(cat.map(r => r[0]))]
+    expect(ambitos).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
+    const subs = (a: string, c: string) => cat.filter(r => r[0] === a && r[1] === c && r[2]).map(r => r[2])
+    for (const a of ambitos as string[]) {
+      expect(subs(a, 'Transporte')).toEqual(['Taxi', 'Moto Taxi', 'Bus / Micro', 'Otros'])
+      expect(subs(a, 'Alimentación')).toContain('Snack / Antojos')
+      expect(subs(a, 'Alimentación')).not.toContain('Antojos')
+    }
+    expect(subs('Personal', 'Servicios')).toEqual(['Línea Celular', 'Otros'])
+    // cada fila trae su orden; "Otros" se ordena al final en la web, no depende de este número
+    expect(cat.every(r => typeof r[6] === 'number')).toBe(true)
+  })
+
+  it('saveCatalogo: "Otros" con otras mayúsculas o espacios no se duplica; lo nuevo va al final de su grupo', () => {
+    const before = b.post('data', { fresh: true }).data.catalogo.length
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: '  OTROS ', activo: true })
+    expect(b.post('data', { fresh: true }).data.catalogo).toHaveLength(before)
+    const nueva = b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Merienda', activo: true }).data
+    expect(nueva[6]).toBe(10108) // después de las 7 existentes (10101…10107)
+    const cat = b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Mascotas', subcategoria: '', activo: true }).data
+    expect(cat[6]).toBe(11100) // nueva categoría tras las 10 de Personal
+    const sub = b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Mascotas', subcategoria: 'Comida', activo: true }).data
+    expect(sub[6]).toBe(11101)
+  })
+
+  it('actualizarCatalogo: respalda, agrega lo nuevo, desactiva lo obsoleto sin borrarlo y no toca GASTOS', () => {
+    const cat = b.ss.getSheetByName('CATALOGO')!
+    // Hoja de la versión anterior: 6 columnas, sin Orden, con valores viejos y un "Otros" repetido.
+    cat.rows = [['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color'],
+      ['Personal', '', '', true, '', ''],
+      ['Personal', 'Alimentación', 'Antojos', true, '', ''],
+      ['Personal', 'Alimentación', 'Desayuno', false, '', ''],
+      ['Familia', 'Bebé', 'Cuidado Darielita', true, '', ''],
+      ['Pareja', 'Salidas', '', true, 'users', '#8B7CF6'],
+      ['Personal', 'Alimentación', 'Otros', true, '', ''],
+      ['Personal', 'Alimentación', ' otros', true, '', '']]
+    const gs = b.ss.getSheetByName('GASTOS')!
+    b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Cuidado Darielita' }))
+    const gastosAntes = JSON.stringify(gs.rows)
+    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
+    expect(b.ss.copies).toHaveLength(1)
+    expect(JSON.stringify(gs.rows)).toBe(gastosAntes)
+    expect(cat.rows[0]).toEqual(['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'])
+    const byKey = (a: string, c: string, s: string) => cat.rows.filter(x => x[0] === a && x[1] === c && String(x[2]).trim() === s)
+    expect(byKey('Personal', 'Alimentación', 'Antojos')[0][3]).toBe(false)       // obsoleto: inactivo, no borrado
+    expect(byKey('Familia', 'Bebé', 'Cuidado Darielita')[0][3]).toBe(false)
+    expect(byKey('Personal', 'Alimentación', 'Desayuno')[0][3]).toBe(true)        // vigente: reactivado
+    expect(byKey('Pareja', 'Salidas', '')[0].slice(3, 6)).toEqual([true, 'users', '#8B7CF6']) // conserva icono/color
+    const otros = cat.rows.filter(x => x[0] === 'Personal' && x[1] === 'Alimentación' && String(x[2]).trim().toLowerCase() === 'otros')
+    expect(otros.map(x => x[3])).toEqual([true, false])                           // el duplicado lógico queda inactivo
+    expect(byKey('Familia', 'Bebé', 'Cuidado Infantil')[0][3]).toBe(true)        // nuevo agregado
+    expect(r.agregadas).toBeGreaterThan(200)
+    const d = b.post('data', { fresh: true }).data
+    expect(d.gastos[0][4]).toBe('Cuidado Darielita')                             // el histórico se sigue leyendo igual
+    expect((b.g.actualizarCatalogo() as unknown as Record<string, number>).agregadas).toBe(0) // idempotente
+  })
+
+  it('actualizarCatalogo respeta los cambios manuales hechos después (activo, orden y opciones propias)', () => {
+    b.g.actualizarCatalogo()
+    const cat = b.ss.getSheetByName('CATALOGO')!
+    const row = (a: string, c: string, s: string) => cat.rows.find(x => x[0] === a && x[1] === c && x[2] === s)!
+    row('Personal', 'Auto', 'SOAT')[3] = false            // la desactivé a mano
+    row('Personal', 'Auto', 'Gas')[6] = 10200.5            // la reordené a mano
+    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Auto', subcategoria: 'Peajes', activo: true }) // creada desde la app
+    const antes = JSON.stringify(cat.rows)
+    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
+    expect(r).toMatchObject({ agregadas: 0, reactivadas: 0, desactivadas: 0 })
+    expect(JSON.stringify(cat.rows)).toBe(antes)
+  })
+
+  it('reintento de un alta: no duplica y aplica la corrección solo si el gasto no se editó después', () => {
+    b.post('saveGasto', gasto())
+    const corregido = b.post('saveGasto', gasto({ monto: 30 })).data
+    expect(corregido[1]).toBe(30)
+    expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)
+    b.post('saveGasto', gasto({ mode: 'update', monto: 40 }))
+    const sh = b.ss.getSheetByName('GASTOS')!
+    sh.rows[1][15] = '2099-01-01T00:00:00.000Z' // fue editado después del alta
+    expect(b.post('saveGasto', gasto({ monto: 99 })).data[1]).toBe(40)  // un reintento tardío no pisa la edición
+    expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {
@@ -322,7 +406,7 @@ describe('backend Apps Script', () => {
     b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 350 })
     b.post('saveConfig', { clave: 'tipo_cambio_USD', valor: '3.75' })
     const d = b.post('data').data
-    expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false, '', '']])
+    expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false, '', '', 10102]])
     expect(d.medios.find((m: unknown[]) => String(m[0]).toLowerCase() === 'yape')[1]).toBe(false)
     expect(d.medios).toHaveLength(6)
     expect(d.medios[0][0]).toBe('Yape')

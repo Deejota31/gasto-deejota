@@ -1,6 +1,7 @@
 import { shiftMonth } from './dates'
 import type { Transport } from './api'
 import { CATALOGO_INICIAL } from './catalogo'
+import { nextOrden, normName, ordenCanonico } from './orden'
 
 /** Modo demostración: backend en memoria con datos sintéticos. Se usa sin URL configurada, en pruebas E2E y en mediciones. */
 
@@ -31,10 +32,23 @@ export function generateGastoRows(n: number, today: string, seed = 42): unknown[
   return rows
 }
 
+/** Catálogo vigente con su orden, más una opción antigua inactiva ("Antojos") para mostrar cómo se ven los históricos. */
+function demoCatalogo(): unknown[][] {
+  const orden = ordenCanonico(CATALOGO_INICIAL)
+  const o = (a: string, c = '', s = '') => orden.get(`${normName(a)}|${normName(c)}|${normName(s)}`) ?? ''
+  return [
+    ...Object.keys(CATALOGO_INICIAL).map(a => [a, '', '', true, '', '', o(a)]),
+    ...DEMO_CATALOGO.map(([a, c, s]) => [a, c, s, true, '', '', o(a, c, s)]),
+    ['Personal', 'Alimentación', 'Antojos', false, '', '', ''],
+  ]
+}
+
 export function demoTransport(today: string, n = 400, latencyMs = 250): Transport {
   const db = {
-    gastos: generateGastoRows(n, today),
-    catalogo: [...Object.keys(CATALOGO_INICIAL).map(a => [a, '', '', true, '', '']), ...DEMO_CATALOGO.map(r => [...r, true, '', ''])] as unknown[][],
+    // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
+    gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
+      'Personal', false, 'Activo', 'demo', '', 'demo-historico-0001', `${today}T12:00:00.000Z`, `${today}T12:00:00.000Z`]] as unknown[][],
+    catalogo: demoCatalogo(),
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
     cajas: [
       ['general', 'Caja general', 7000, 'Todos', '', '#1e3a8a', 1],
@@ -74,10 +88,17 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       return { id: p.id, estado: p.estado, actualizadoEn: row[15] }
     },
     saveCatalogo: p => {
-      const key = [p.ambito, p.categoria ?? '', p.subcategoria ?? ''].join('|').toLowerCase()
-      const prev = db.catalogo.find(r => r.slice(0, 3).join('|').toLowerCase() === key)
-      return upsert(db.catalogo, 3, [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false,
-        p.icono === undefined ? (prev?.[4] ?? '') : p.icono, p.color === undefined ? (prev?.[5] ?? '') : p.color])
+      const k = (r: unknown[]) => r.slice(0, 3).map(x => normName(String(x ?? ''))).join('|')
+      const key = k([p.ambito, p.categoria ?? '', p.subcategoria ?? ''])
+      const prev = db.catalogo.find(r => k(r) === key)
+      const icono = p.icono === undefined ? (prev?.[4] ?? '') : p.icono
+      const color = p.color === undefined ? (prev?.[5] ?? '') : p.color
+      if (prev) { prev[3] = p.activo !== false; prev[4] = icono; prev[5] = color; return [...prev] }
+      const orden = nextOrden(db.catalogo.map(r => ({ ambito: String(r[0]), categoria: String(r[1]), orden: typeof r[6] === 'number' ? r[6] : undefined })),
+        String(p.ambito), String(p.categoria ?? ''), String(p.subcategoria ?? ''))
+      const row = [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false, icono, color, orden ?? '']
+      db.catalogo.push(row)
+      return [...row]
     },
     renameCatalogo: p => {
       const col = { ambito: 0, categoria: 1, subcategoria: 2 }[String(p.nivel) as 'ambito']

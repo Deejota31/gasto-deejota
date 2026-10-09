@@ -5,14 +5,14 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.1.0';
+var APP_VERSION = '1.2.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
   GASTOS: ['Fecha', 'Monto', 'Moneda', 'Categoría', 'Subcategoría', 'Descripción', 'Medio de pago',
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
     'Creado en', 'Actualizado en'],
-  CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color'],
+  CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'],
   MEDIOS_PAGO: ['Nombre', 'Activo'],
   CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
@@ -34,7 +34,7 @@ var CATALOGO_INICIAL = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
@@ -53,9 +53,12 @@ var CATALOGO_INICIAL = {
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Servicios": [
+      "Línea Celular",
       "Otros"
     ],
     "Suscripciones": [
@@ -82,6 +85,19 @@ var CATALOGO_INICIAL = {
       "Muebles",
       "Otros"
     ],
+    "Salud": [
+      "Consultas Médicas",
+      "Medicamentos",
+      "Exámenes Médicos",
+      "Odontología",
+      "Otros"
+    ],
+    "Cuidado Personal": [
+      "Barbería / Peluquería",
+      "Higiene Personal",
+      "Gimnasio",
+      "Otros"
+    ],
     "Educación": [
       "Maestría",
       "Matrícula",
@@ -104,15 +120,20 @@ var CATALOGO_INICIAL = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Herramientas y Equipamiento": [
+      "Software Laboral",
+      "Equipos de Trabajo",
+      "Accesorios",
       "Otros"
     ],
     "Otros": [
@@ -128,27 +149,26 @@ var CATALOGO_INICIAL = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Plan Nube": [
       "Hospedaje",
       "Cuidado Íntimo",
-      "Salida Juntos",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
       "Otros"
     ],
     "Regalos": [
       "Detalle Mensual",
       "Fecha Especial",
       "Aniversario",
+      "Sorpresas",
       "Otros"
     ],
     "Compras": [
@@ -157,9 +177,17 @@ var CATALOGO_INICIAL = {
       "Accesorios",
       "Ropa",
       "Calzado",
-      "Regalos",
       "Electrodomésticos",
       "Muebles",
+      "Otros"
+    ],
+    "Salidas": [
+      "Paseos",
+      "Cine",
+      "Juegos",
+      "Diversión",
+      "Restaurantes",
+      "Actividades Recreativas",
       "Otros"
     ],
     "Otros": [
@@ -175,7 +203,7 @@ var CATALOGO_INICIAL = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
@@ -189,6 +217,7 @@ var CATALOGO_INICIAL = {
       "Accesorios",
       "Consultas Médicas",
       "Medicamentos",
+      "Cuidado Infantil",
       "Otros"
     ],
     "Hogar": [
@@ -197,6 +226,7 @@ var CATALOGO_INICIAL = {
       "Reparaciones",
       "Mantenimiento",
       "Electrodomésticos",
+      "Muebles",
       "Otros"
     ],
     "Servicios": [
@@ -209,9 +239,8 @@ var CATALOGO_INICIAL = {
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
       "Otros"
     ],
     "Compras": [
@@ -225,14 +254,21 @@ var CATALOGO_INICIAL = {
       "Muebles",
       "Otros"
     ],
-    "Familia": [
+    "Apoyo Familiar": [
       "Padre",
       "Madre",
       "Pareja",
       "Hija",
       "Hermanos",
-      "Apoyo Familiar",
+      "Apoyo Económico",
       "Regalo Familiar",
+      "Otros"
+    ],
+    "Salud Familiar": [
+      "Consultas Médicas",
+      "Medicamentos",
+      "Exámenes Médicos",
+      "Emergencias",
       "Otros"
     ],
     "Educación": [
@@ -257,19 +293,35 @@ var CATALOGO_INICIAL = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
+      "Otros"
+    ],
+    "Salidas": [
+      "Cine",
+      "Paseos",
+      "Juegos",
+      "Diversión",
+      "Reuniones",
+      "Actividades Deportivas",
+      "Otros"
+    ],
+    "Regalos": [
+      "Cumpleaños",
+      "Fechas Especiales",
       "Otros"
     ],
     "Otros": [
       "Imprevistos",
       "Trámites",
-      "Por Clasificar"
+      "Por Clasificar",
+      "Otros"
     ]
   }
 };
@@ -376,28 +428,71 @@ function ensureSheet_(ss, name, headers) {
   return sh;
 }
 
+// Compara nombres ignorando mayúsculas y espacios extra: "Otros", " otros " y "OTROS" son la misma opción.
+function norm_(v) { return str_(v).replace(/\s+/g, ' ').toLowerCase(); }
+function catKey_(a, c, s) { return [norm_(a), norm_(c), norm_(s)].join('|'); }
+
+// Orden de presentación: ámbito × 10000 + categoría × 100 + subcategoría. "Otros" se ubica al final en la web
+// sin importar este número; el resto respeta el orden del catálogo (o el que pongas a mano en la columna Orden).
+function ordenCanonico_() {
+  var out = {};
+  Object.keys(CATALOGO_INICIAL).forEach(function (a, i) {
+    var base = (i + 1) * 10000;
+    out[catKey_(a, '', '')] = base;
+    Object.keys(CATALOGO_INICIAL[a]).forEach(function (c, j) {
+      var cb = base + (j + 1) * 100;
+      out[catKey_(a, c, '')] = cb;
+      CATALOGO_INICIAL[a][c].forEach(function (s, k) { out[catKey_(a, c, s)] = cb + k + 1; });
+    });
+  });
+  return out;
+}
+
+function canonicalRows_() {
+  var rows = [];
+  Object.keys(CATALOGO_INICIAL).forEach(function (a) {
+    rows.push([a, '', '']);
+    Object.keys(CATALOGO_INICIAL[a]).forEach(function (c) {
+      CATALOGO_INICIAL[a][c].forEach(function (s) { rows.push([a, c, s]); });
+    });
+  });
+  return rows;
+}
+
 // Agrega solo lo que falte (por ámbito|categoría|subcategoría): no duplica, no reactiva lo que desactivaste
 // y respeta lo que agregaste a mano. Se puede volver a ejecutar sin riesgo.
 function seedCatalogo_(ss) {
   var sh = ss.getSheetByName('CATALOGO');
   var existing = {};
   if (sh.getLastRow() > 1) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) {
-      existing[r.map(str_).join('|').toLowerCase()] = true;
-    });
+    sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues().forEach(function (r) { existing[catKey_(r[0], r[1], r[2])] = true; });
   }
+  var orden = ordenCanonico_();
   var rows = [];
-  var add = function (a, c, s) {
-    var key = [a, c, s].join('|').toLowerCase();
-    if (!existing[key]) { existing[key] = true; rows.push([a, c, s, true, '', '']); }
-  };
-  Object.keys(CATALOGO_INICIAL).forEach(function (a) {
-    add(a, '', '');
-    Object.keys(CATALOGO_INICIAL[a]).forEach(function (c) {
-      CATALOGO_INICIAL[a][c].forEach(function (s) { add(a, c, s); });
-    });
+  canonicalRows_().forEach(function (r) {
+    var key = catKey_(r[0], r[1], r[2]);
+    if (!existing[key]) { existing[key] = true; rows.push([r[0], r[1], r[2], true, '', '', orden[key]]); }
   });
   appendRows_(sh, rows); // una sola escritura
+}
+
+// Siguiente número de orden para una opción nueva, al final de su grupo (antes de "Otros", que la web siempre pone último).
+function nextOrden_(rows, a, c, sub) {
+  var max = function (pred) {
+    var m = null;
+    rows.forEach(function (r) { var o = Number(r[6]); if (str_(r[6]) !== '' && isFinite(o) && pred(r) && (m === null || o > m)) m = o; });
+    return m;
+  };
+  if (sub) {
+    var m1 = max(function (r) { return norm_(r[0]) === norm_(a) && norm_(r[1]) === norm_(c); });
+    if (m1 !== null) return m1 + 1;
+  }
+  if (c) {
+    var m2 = max(function (r) { return norm_(r[0]) === norm_(a); });
+    if (m2 !== null) return (Math.floor(m2 / 100) + 1) * 100 + (sub ? 1 : 0);
+  }
+  var m3 = max(function () { return true; });
+  return m3 === null ? '' : (Math.floor(m3 / 10000) + 1) * 10000 + (c ? 100 : 0) + (sub ? 1 : 0);
 }
 
 // Medios en el orden pedido. Agrega los que falten y respeta los existentes (no reactiva desactivados).
@@ -510,7 +605,7 @@ function getData_(fresh) {
     version: APP_VERSION,
     sheetUrl: ss.getUrl(),
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
-    catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5])]; }),
+    catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5]), str_(r[6]) === '' ? '' : num_(r[6])]; }),
     medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
     cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6])]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
@@ -628,8 +723,16 @@ function saveGasto_(p) {
 
   if (p.mode === 'create') {
     if (rowIndex) {
-      // Reintento de un alta ya guardada: se devuelve el registro existente en lugar de duplicarlo.
-      return normalizeGastoRow_(sh.getRange(rowIndex, 1, 1, SHEETS.GASTOS.length).getValues()[0], 'America/Lima');
+      // Reintento de un alta ya guardada: nunca se duplica. Si el alta no se editó después (Creado = Actualizado),
+      // se aplican los datos del reintento (p. ej. corregidos tras "Abrir formulario"); si ya se editó, gana lo guardado.
+      var exRange = sh.getRange(rowIndex, 1, 1, SHEETS.GASTOS.length);
+      var ex = exRange.getValues()[0];
+      var creado = ex[G.CREADO] instanceof Date ? ex[G.CREADO].toISOString() : str_(ex[G.CREADO]);
+      var actualizado = ex[G.ACTUALIZADO] instanceof Date ? ex[G.ACTUALIZADO].toISOString() : str_(ex[G.ACTUALIZADO]);
+      if (creado !== actualizado) return normalizeGastoRow_(ex, 'America/Lima');
+      var redo = gastoToRow_(g, str_(ex[G.ESTADO]) || 'Activo', str_(ex[G.ORIGEN]) || 'web', creado, creado);
+      exRange.setValues([redo]);
+      return normalizeGastoRow_(redo, 'America/Lima');
     }
     var row = gastoToRow_(g, 'Activo', 'web', now, now);
     appendRows_(sh, [row]);
@@ -669,17 +772,17 @@ function saveCatalogo_(p) {
   if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
   if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) throw appError_('VALIDATION', 'Color inválido.');
   var sh = openSpreadsheet_(false).getSheetByName('CATALOGO');
-  var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 6).getValues() : [];
-  var key = [ambito, categoria, sub].join('|').toLowerCase();
+  var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues() : [];
+  var key = catKey_(ambito, categoria, sub);
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i].slice(0, 3).map(str_).join('|').toLowerCase() === key) {
-      // null = no cambiar el icono/color guardado
+    if (catKey_(rows[i][0], rows[i][1], rows[i][2]) === key) {
+      // null = no cambiar el icono/color guardado. Una opción existente conserva su nombre y su orden.
       var row = [rows[i][0], rows[i][1], rows[i][2], activo, icono === null ? str_(rows[i][4]) : icono, color === null ? str_(rows[i][5]) : color];
       sh.getRange(i + 2, 4, 1, 3).setValues([row.slice(3)]);
-      return [str_(row[0]), str_(row[1]), str_(row[2]), activo, row[4], row[5]];
+      return [str_(row[0]), str_(row[1]), str_(row[2]), activo, row[4], row[5], str_(rows[i][6]) === '' ? '' : num_(rows[i][6])];
     }
   }
-  var nuevo = [ambito, categoria, sub, activo, icono || '', color || ''];
+  var nuevo = [ambito, categoria, sub, activo, icono || '', color || '', nextOrden_(rows, ambito, categoria, sub)];
   appendRows_(sh, [nuevo]);
   return nuevo;
 }
@@ -770,9 +873,9 @@ function renameCatalogo_(p) {
     return a === ambito && (nivel === 'ambito' || c === categoria) && (nivel !== 'subcategoria' || s2 === sub);
   };
   var dup = crow.some(function (r) {
-    var x = r.map(str_);
-    return x[0] === (nivel === 'ambito' ? nuevo : ambito) && (nivel === 'ambito' || x[1] === (nivel === 'categoria' ? nuevo : categoria)) &&
-      (nivel !== 'subcategoria' || x[2] === nuevo);
+    var x = r.map(norm_);
+    return x[0] === norm_(nivel === 'ambito' ? nuevo : ambito) && (nivel === 'ambito' || x[1] === norm_(nivel === 'categoria' ? nuevo : categoria)) &&
+      (nivel !== 'subcategoria' || x[2] === norm_(nuevo)) && !match(str_(r[0]), str_(r[1]), str_(r[2]));
   });
   if (dup) throw appError_('VALIDATION', 'Ya existe una opción con ese nombre.');
   var catChanged = 0;
@@ -798,6 +901,65 @@ function renameCatalogo_(p) {
     }
   }
   return { catalogo: catChanged, gastos: changed };
+}
+
+/**
+ * Aplica el catálogo de CATALOGO_INICIAL a tu hoja (ejecútala a mano desde el editor). Primero crea un respaldo.
+ * - Agrega las opciones que falten y las deja activas, con su orden.
+ * - Filas de versiones anteriores (sin Orden): las de la lista quedan activas y numeradas; las que ya no están quedan
+ *   INACTIVAS (no se borran): dejan de ofrecerse para gastos nuevos, pero tus gastos antiguos las conservan.
+ * - Filas con Orden (ya migradas o creadas desde la app) no se tocan: respeta lo que activaste, desactivaste o reordenaste.
+ * - No toca la hoja GASTOS ni cambia nombres, iconos o colores. Se puede volver a ejecutar sin riesgo.
+ */
+function actualizarCatalogo() {
+  var ss = openSpreadsheet_(false);
+  var backup = backup_(); // antes de cualquier cambio
+  Logger.log('Respaldo creado: ' + backup.url);
+  ensureSheet_(ss, 'CATALOGO', SHEETS.CATALOGO); // agrega la columna Orden si falta
+  var res = withLock_(function () {
+    var sh = ss.getSheetByName('CATALOGO');
+    var n = Math.max(lastDataRow_(sh) - 1, 0);
+    var rows = n ? sh.getRange(2, 1, n, 7).getValues() : [];
+    var orden = ordenCanonico_();
+    var seen = {};
+    var stats = { agregadas: 0, reactivadas: 0, desactivadas: 0, sinCambios: 0 };
+    var log = { reactivadas: [], desactivadas: [] };
+    var label = function (r) { return [str_(r[0]), str_(r[1]), str_(r[2])].filter(String).join(' › '); };
+    // Regla: una fila SIN Orden viene de una versión anterior y se ajusta a la lista oficial. Una fila CON Orden ya
+    // fue migrada o la creaste desde la app: se respeta tal cual (activa/inactiva y orden), así volver a ejecutar
+    // esta función no deshace tus cambios manuales.
+    var vals = rows.map(function (r) {
+      if (!hasContent_(r)) return [r[3], r[6]];
+      var key = catKey_(r[0], r[1], r[2]);
+      var oficial = Object.prototype.hasOwnProperty.call(orden, key) && !seen[key];
+      seen[key] = true;
+      var activo = r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE';
+      if (str_(r[6]) !== '') { stats.sinCambios++; return [r[3], r[6]]; }
+      if (oficial) {
+        if (!activo) { stats.reactivadas++; log.reactivadas.push(label(r)); } else stats.sinCambios++;
+        return [true, orden[key]];
+      }
+      if (activo) { stats.desactivadas++; log.desactivadas.push(label(r)); }
+      return [false, r[6]];
+    });
+    if (n) {
+      sh.getRange(2, 4, n, 1).setValues(vals.map(function (v) { return [v[0]]; }));
+      sh.getRange(2, 7, n, 1).setValues(vals.map(function (v) { return [v[1]]; }));
+    }
+    var nuevas = [];
+    canonicalRows_().forEach(function (r) {
+      var key = catKey_(r[0], r[1], r[2]);
+      if (!seen[key]) { seen[key] = true; nuevas.push([r[0], r[1], r[2], true, '', '', orden[key]]); }
+    });
+    appendRows_(sh, nuevas);
+    stats.agregadas = nuevas.length;
+    invalidateCache_();
+    return { stats: stats, log: log };
+  });
+  Logger.log('Catálogo actualizado: ' + JSON.stringify(res.stats));
+  if (res.log.desactivadas.length) Logger.log('Quedaron inactivas (se conservan para tus gastos antiguos): ' + res.log.desactivadas.join(', '));
+  if (res.log.reactivadas.length) Logger.log('Reactivadas: ' + res.log.reactivadas.join(', '));
+  return res.stats;
 }
 
 /**

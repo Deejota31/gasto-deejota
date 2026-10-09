@@ -74,6 +74,6 @@ describe('cliente HTTP de Apps Script', () => {
     const g = { id: 'abc', fecha: '2026-10-09', monto: 5, moneda: 'PEN', categoria: 'C', subcategoria: '', descripcion: '', medioPago: 'Yape', tipoGasto: 'Variable' as const, ambito: 'Personal', esRecurrente: false, comprobanteUrl: '' }
     await api.saveGasto(g, 'create')
     await api.saveGasto(g, 'create')
-    expect((await api.getData()).gastos).toHaveLength(1)
+    expect((await api.getData()).gastos.filter(x => x.id === 'abc')).toHaveLength(1)
   })
 })

@@ -5,9 +5,10 @@ import type { Caja, FiltroCampo } from '../lib/types'
 import { saveConnection, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select } from '../components/ui'
 import { toCsv } from './Gastos'
+import { showToast } from '../lib/toast'
 import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.1.0'
+export const APP_VERSION = '1.2.0'
 const FILTROS: FiltroCampo[] = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago']
 
 export default function Configuracion({ store, conn, onConnect, notify, goCategorias }: {
@@ -32,10 +33,13 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
     const c = { url: url.trim(), token: token.trim() }
     saveConnection(c)
     onConnect(c)
-    notify('Conexión guardada. Sincronizando…')
+    showToast('info', 'Conexión guardada. Sincronizando…')
   }
 
-  const saveCfg = (clave: string, valor: string) => run(clave, () => store.actions.saveConfig(clave, valor), 'Configuración guardada')
+  // Escrituras sin bloquear: el resultado real llega como notificación arriba a la derecha.
+  const saveCfg = (clave: string, valor: string) => store.track(`config:${clave}`,
+    { pending: 'Guardando configuración…', ok: 'Configuración guardada correctamente.', error: 'No se pudo guardar la configuración.' },
+    () => store.actions.saveConfig(clave, valor))
   const monedas = (cfg.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
 
   return (
@@ -92,13 +96,13 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
 
       <Card title="Cajas y presupuestos" icon={<Wallet className="size-4 text-lima" />} className="lg:col-span-2">
         <div className="space-y-2">
-          {[...(store.data?.cajas ?? [])].sort((a, b) => a.orden - b.orden).map(c => <CajaRow key={c.id} caja={c} busy={busy === c.id} onSave={next => run(c.id, () => store.actions.saveCaja(next), 'Caja guardada')} />)}
+          {[...(store.data?.cajas ?? [])].sort((a, b) => a.orden - b.orden).map(c => <CajaRow key={c.id} caja={c} busy={store.pending.has(`caja:${c.id}`)} onSave={next => store.track(`caja:${c.id}`, { pending: `Guardando ${next.nombre}…`, ok: `${next.nombre} guardada correctamente.`, error: `No se pudo guardar ${next.nombre}.` }, () => store.actions.saveCaja(next))} />)}
         </div>
         <p className="mt-2 text-xs text-muted">El presupuesto es mensual. Para cambiar solo un mes usa el lápiz de la caja en el Dashboard.</p>
       </Card>
 
       <Card title="Medios de pago">
-        <MediosEditor store={store} onError={setError} notify={notify} />
+        <MediosEditor store={store} />
       </Card>
 
       <Card title="Datos" icon={<Activity className="size-4 text-morado" />}>
@@ -150,13 +154,13 @@ function CajaRow({ caja, busy, onSave }: { caja: Caja; busy: boolean; onSave: (c
   )
 }
 
-function MediosEditor({ store, onError, notify }: { store: AppStore; onError: (m: string) => void; notify: (m: string) => void }) {
+function MediosEditor({ store }: { store: AppStore }) {
   const [nuevo, setNuevo] = useState('')
   const raw = store.data?.medios ?? []
   const medios = sortMedios(raw.map(m => m.nombre)).map(n => raw.find(m => m.nombre === n)!).filter(m => m && m.nombre.trim())
-  const save = async (nombre: string, activo: boolean) => {
-    try { await store.actions.saveMedio({ nombre, activo }); notify('Medio de pago guardado') } catch (e) { onError((e as Error).message) }
-  }
+  const save = (nombre: string, activo: boolean) => store.track(`medio:${nombre.toLowerCase()}`,
+    { pending: 'Guardando medio de pago…', ok: 'Medio de pago guardado correctamente.', error: 'No se pudo guardar el medio de pago.' },
+    () => store.actions.saveMedio({ nombre, activo }))
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1">

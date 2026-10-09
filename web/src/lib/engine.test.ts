@@ -72,9 +72,9 @@ describe('fechas y períodos', () => {
     expect(diasDelPeriodo('2026-09-01', '2026-09-30', '2026-10-10')).toBe(30)
     expect(diasDelPeriodo('2026-11-01', '2026-11-30', '2026-10-10')).toBe(0)
   })
-  it('medios en el orden pedido, los demás al final', () => {
+  it('medios en el orden pedido, los agregados después y "Otros" siempre al final', () => {
     expect(sortMedios(['Efectivo', 'Tarjeta de crédito', 'Yape', 'Otros', 'Plin', 'Transferencia', 'Sodexo']))
-      .toEqual(['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Otros', 'Tarjeta de crédito'])
+      .toEqual(['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Tarjeta de crédito', 'Otros'])
   })
 })
 

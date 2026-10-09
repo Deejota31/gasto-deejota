@@ -4,6 +4,7 @@ import { monthLabel, monthEnd, presetRange, rangeLabel, shiftMonth, singleMonth 
 import { subKey } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook, sortMedios, type Look } from '../lib/visual'
 import type { CatalogoItem, Filters, PeriodPreset } from '../lib/types'
+import { normName, otrosAlFinal } from '../lib/orden'
 import { TIPOS_GASTO } from '../lib/types'
 import { inputCls, useDismiss } from './ui'
 
@@ -11,19 +12,45 @@ export function emptyFilters(today: string): Filters {
   return { preset: 'mes', ...presetRange('mes', today), ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
 }
 
-/** Opciones activas del catálogo, dependientes: ámbitos → categorías → subcategorías. */
-export function catalogOptions(catalogo: CatalogoItem[], ambitos: string[], categorias: string[]) {
+/**
+ * Opciones del catálogo, dependientes: ámbitos → categorías → subcategorías. Usa el catálogo ya ordenado
+ * (sortCatalogo) y aplica "Otros" al final también al mezclar varios ámbitos.
+ * `historicos`: valores que aparecen en gastos pero ya no están activos; se agregan para poder filtrarlos.
+ */
+/** Filas ofrecidas para gastos nuevos: activas y sin una categoría o ámbito desactivado por encima. */
+function vigentes(catalogo: CatalogoItem[]): CatalogoItem[] {
   const off = new Set(catalogo.filter(c => !c.activo && !c.subcategoria).map(c => `${c.ambito}|${c.categoria}`))
-  const act = catalogo.filter(c => c.activo && !off.has(`${c.ambito}|${c.categoria}`) && !off.has(`${c.ambito}|`))
-  const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))]
-  const inAmb = act.filter(c => !ambitos.length || ambitos.includes(c.ambito))
+  return catalogo.filter(c => c.activo && !off.has(`${c.ambito}|${c.categoria}`) && !off.has(`${c.ambito}|`))
+}
+
+export function catalogOptions(catalogo: CatalogoItem[], ambitos: string[], categorias: string[], historicos: Pick<CatalogoItem, 'ambito' | 'categoria' | 'subcategoria'>[] = []) {
+  const act: Pick<CatalogoItem, 'ambito' | 'categoria' | 'subcategoria'>[] = vigentes(catalogo)
+  const all = [...act, ...historicos]
+  const uniq = (xs: string[]) => otrosAlFinal([...new Set(xs.filter(Boolean))])
+  const inAmb = all.filter(c => !ambitos.length || ambitos.includes(c.ambito))
+  const cats = uniq(inAmb.map(c => c.categoria))
   const subs = new Map<string, { key: string; categoria: string; subcategoria: string }>()
   for (const c of inAmb) {
     if (!c.subcategoria || (categorias.length && !categorias.includes(c.categoria))) continue
     const key = subKey(c.categoria, c.subcategoria)
     if (!subs.has(key)) subs.set(key, { key, categoria: c.categoria, subcategoria: c.subcategoria })
   }
-  return { ambitos: uniq(act.map(c => c.ambito)), categorias: uniq(inAmb.map(c => c.categoria)), subcategorias: [...subs.values()] }
+  // Agrupadas por categoría (en el orden de categorías) y "Otros" al final de cada grupo.
+  const byCat = (c: string) => otrosAlFinal([...subs.values()].filter(s => s.categoria === c), s => s.subcategoria)
+  const extraCats = [...new Set([...subs.values()].map(s => s.categoria))].filter(c => !cats.includes(c))
+  return { ambitos: uniq(all.map(c => c.ambito)), categorias: cats, subcategorias: [...cats, ...extraCats].flatMap(byCat) }
+}
+
+/** Combinaciones ámbito/categoría/subcategoría usadas en gastos que ya no están activas en el catálogo. */
+export function historicos(catalogo: CatalogoItem[], gastos: { ambito: string; categoria: string; subcategoria: string }[]) {
+  const k = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
+  const ofrecidas = new Set(vigentes(catalogo).map(c => k(c.ambito, c.categoria, c.subcategoria)))
+  const out = new Map<string, { ambito: string; categoria: string; subcategoria: string }>()
+  for (const g of gastos) {
+    const key = k(g.ambito, g.categoria, g.subcategoria)
+    if (!ofrecidas.has(key) && !out.has(key)) out.set(key, { ambito: g.ambito, categoria: g.categoria, subcategoria: g.subcategoria })
+  }
+  return [...out.values()]
 }
 
 export interface Option { value: string; label: string; group?: string; look?: Look }
@@ -154,16 +181,25 @@ export function PeriodPicker({ value, today, onChange }: { value: Filters; today
 }
 
 /** Barra de filtros compartida por Dashboard y Gastos. `extra` agrega controles propios de cada pestaña. */
-export function FilterBar({ filters, setFilters, catalogo, medios, today, extra, extraChips }: {
+const NO_GASTOS: { ambito: string; categoria: string; subcategoria: string }[] = []
+
+export function FilterBar({ filters, setFilters, catalogo, medios, today, extra, extraChips, gastos = NO_GASTOS }: {
   filters: Filters; setFilters: (f: Filters) => void; catalogo: CatalogoItem[]; medios: string[]; today: string; extra?: ReactNode; extraChips?: ReactNode
+  gastos?: { ambito: string; categoria: string; subcategoria: string }[]
 }) {
-  const opts = useMemo(() => catalogOptions(catalogo, filters.ambitos, filters.categorias), [catalogo, filters.ambitos, filters.categorias])
+  const hist = useMemo(() => historicos(catalogo, gastos), [catalogo, gastos])
+  // Subcategorías que solo existen en gastos antiguos: se marcan como "histórica" en el filtro.
+  const histSubs = useMemo(() => {
+    const ofrecidas = new Set(vigentes(catalogo).filter(c => c.subcategoria).map(c => subKey(c.categoria, c.subcategoria)))
+    return new Set(hist.map(h => subKey(h.categoria, h.subcategoria)).filter(k => !ofrecidas.has(k)))
+  }, [catalogo, hist])
+  const opts = useMemo(() => catalogOptions(catalogo, filters.ambitos, filters.categorias, hist), [catalogo, filters.ambitos, filters.categorias, hist])
 
   // Al cambiar una selección se descartan las que dejaron de ser compatibles, y se conservan las válidas.
   function apply(next: Filters) {
-    const o = catalogOptions(catalogo, next.ambitos, next.categorias)
+    const o = catalogOptions(catalogo, next.ambitos, next.categorias, hist)
     const categorias = next.categorias.filter(c => o.categorias.includes(c))
-    const o2 = catalogOptions(catalogo, next.ambitos, categorias)
+    const o2 = catalogOptions(catalogo, next.ambitos, categorias, hist)
     setFilters({ ...next, categorias, subcategorias: next.subcategorias.filter(s => o2.subcategorias.some(x => x.key === s)) })
   }
 
@@ -187,7 +223,7 @@ export function FilterBar({ filters, setFilters, catalogo, medios, today, extra,
           options={opts.categorias.map(c => ({ value: c, label: c, look: categoriaLook(c, catalogo) }))}
           onChange={categorias => apply({ ...filters, categorias })} />
         <MultiSelect label="Subcategoría" icon={<Tag />} allLabel="Todas las subcategorías" value={filters.subcategorias}
-          options={opts.subcategorias.map(s => ({ value: s.key, label: s.subcategoria, group: s.categoria }))}
+          options={opts.subcategorias.map(s => ({ value: s.key, label: histSubs.has(s.key) ? `${s.subcategoria} (histórica)` : s.subcategoria, group: s.categoria }))}
           onChange={subcategorias => setFilters({ ...filters, subcategorias })} />
         <MultiSelect label="Medio de pago" icon={<CreditCard />} allLabel="Todos los medios" value={filters.medios}
           options={sortMedios(medios).map(m => ({ value: m, label: m, look: medioLook(m) }))}
