@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createApi, httpTransport, type Api, type Connection, type GastoInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
-import type { AppData, Caja, CatalogoItem, Gasto, Medio, Presupuesto } from './types'
+import type { AppData, Caja, CatalogoItem, Gasto, Medio, Plantilla, Presupuesto } from './types'
 import { sortCatalogo } from './orden'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
@@ -34,7 +34,7 @@ export function buildApi(conn: Connection | null): Api {
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
   const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 10000))
   const falla = q.get('falla') === '1'
-  return createApi(falla ? (action, payload) => (action === 'data' ? demo(action, payload)
+  return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
     : new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('No se pudo conectar con Google Sheets.'), { code: 'NETWORK' })), 300))) : demo)
 }
 
@@ -51,6 +51,19 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const journal = useRef<((d: AppData) => AppData)[]>([])
   const inflight = useRef(new Set<string>())
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
+  // Plantillas: estado aparte de `data` para que sus cambios no recalculen KPIs ni gráficos.
+  // Se leen una sola vez (al abrir "Gastos mensuales") y se reutilizan; "Actualizar" las marca para releer.
+  const [plantillas, setPlantillas] = useState<{ items: Plantilla[]; loading: boolean; error: string | null; loaded: boolean }>(
+    { items: [], loading: false, error: null, loaded: false })
+  const plantillasReq = useRef<Promise<void> | null>(null)
+  const plantillasLoaded = useRef(false)
+  const apiRef = useRef(api)
+  useEffect(() => {
+    apiRef.current = api
+    plantillasLoaded.current = false
+    plantillasReq.current = null // una lectura de la conexión anterior ya no cuenta
+    setPlantillas({ items: [], loading: false, error: null, loaded: false })
+  }, [api])
   const quiet = useRef(false) // Configuración → "Mostrar notificaciones al guardar" desactivado: se omiten solo los éxitos
   useEffect(() => { quiet.current = data?.config.notificaciones === 'false' }, [data?.config.notificaciones])
 
@@ -59,6 +72,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     if (loadingRef.current) return // evita peticiones duplicadas por clics repetidos
     loadingRef.current = true
     journal.current = []
+    plantillasLoaded.current = false // la próxima apertura de "Gastos mensuales" relee la hoja
+    setPlantillas(p => ({ ...p, loaded: false }))
     setLoading(true)
     setError(null)
     try {
@@ -163,7 +178,34 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     return true
   }, [])
 
-  return { data, loading, error, lastSync, refresh, actions, track, pending, isDemo: !conn && !apiOverride }
+  const loadPlantillas = useCallback((force = false): Promise<void> => {
+    if (plantillasReq.current) return plantillasReq.current // ya hay una lectura en curso
+    if (plantillasLoaded.current && !force) return Promise.resolve() // ya están en memoria
+    setPlantillas(p => ({ ...p, loading: true, error: null }))
+    const req: Promise<void> = api.getPlantillas()
+      .then(items => {
+        if (apiRef.current !== api) return // respuesta de otra conexión: se ignora
+        plantillasLoaded.current = true
+        setPlantillas({ items, loading: false, error: null, loaded: true })
+      })
+      .catch((e: Error) => { if (apiRef.current === api) setPlantillas(p => ({ ...p, loading: false, error: e.message })) })
+      .finally(() => { if (plantillasReq.current === req) plantillasReq.current = null })
+    plantillasReq.current = req
+    return req
+  }, [api])
+
+  const plantillaActions = useMemo(() => ({
+    async save(p: Omit<Plantilla, 'creadoEn' | 'actualizadoEn'>, mode: 'create' | 'update') {
+      const s = await api.savePlantilla(p, mode)
+      setPlantillas(st => ({ ...st, items: st.items.some(x => x.id === s.id) ? st.items.map(x => (x.id === s.id ? s : x)) : [...st.items, s] }))
+    },
+    async remove(id: string) {
+      await api.deletePlantilla(id)
+      setPlantillas(st => ({ ...st, items: st.items.filter(x => x.id !== id) }))
+    },
+  }), [api])
+
+  return { data, loading, error, lastSync, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions, isDemo: !conn && !apiOverride }
 }
 
 export type AppStore = ReturnType<typeof useAppData>

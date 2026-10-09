@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type Gasto, type Medio, type Presupuesto } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type Gasto, type Medio, type Plantilla, type Presupuesto } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -104,6 +104,11 @@ const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color 
   ...(orden !== '' && orden !== undefined && Number.isFinite(Number(orden)) ? { orden: Number(orden) } : {}),
 })
 
+// [id, ámbito, categoría, subcategoría, descripción, creado, actualizado]
+const plantillaRow = z.tuple([str, str, str, str, str, str, str])
+const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn]: z.infer<typeof plantillaRow>): Plantilla =>
+  ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn })
+
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
@@ -195,6 +200,16 @@ export function createApi(t: Transport) {
     },
     async saveConfig(clave: string, valor: string): Promise<void> {
       await t('saveConfig', { clave, valor })
+    },
+    /** Solo la hoja de plantillas: no lee gastos ni recalcula nada del dashboard. */
+    async getPlantillas(): Promise<Plantilla[]> {
+      return parse(z.array(plantillaRow), await t('plantillas', {})).map(toPlantilla)
+    },
+    async savePlantilla(p: Omit<Plantilla, 'creadoEn' | 'actualizadoEn'>, mode: 'create' | 'update'): Promise<Plantilla> {
+      return toPlantilla(parse(plantillaRow, await t('savePlantilla', { ...p, mode })))
+    },
+    async deletePlantilla(id: string): Promise<void> {
+      await t('deletePlantilla', { id })
     },
     diagnose: () => t('diagnose', {}) as Promise<Record<string, unknown>>,
     backup: () => t('backup', {}) as Promise<{ nombre: string; url: string }>,

@@ -20,8 +20,8 @@ const cajaIcon = (c: Caja) => {
   return k.includes('auto') ? Car : k.includes('beb') ? Baby : k.includes('nube') ? Cloud : Wallet
 }
 
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto }: {
-  store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales }: {
+  store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
 }) {
   const [tab, setTab] = useState<'jerarquia' | 'sankey' | 'frecuencia' | 'medios'>('jerarquia')
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
@@ -47,7 +47,11 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           <p className="truncate text-xs text-muted first-letter:uppercase">{mes ? monthLabel(mes, true) : rangeLabel(filters)}</p>
         </div>
         {/* Abre el mismo formulario de la pestaña Gastos (un solo modal en toda la app). */}
-        <Button onClick={onNuevoGasto} disabled={!data} className="shrink-0"><Plus className="size-4" /> Nuevo gasto</Button>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <Button onClick={onNuevoGasto} disabled={!data}><Plus className="size-4" /> Nuevo gasto</Button>
+          {/* Plantillas rápidas de gastos frecuentes: solo lee su propia hoja, no el histórico. */}
+          <Button variant="soft" onClick={onGastosMensuales} disabled={!data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
+        </div>
       </div>
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={store.data?.gastos} />
 

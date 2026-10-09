@@ -23,6 +23,7 @@ class FakeSheet {
   setFrozenRows(n: number) { this.frozen = n }
   getFilter() { return this.filter }
   appendRow(row: Cell[]) { this.rows.push([...row]); this.writes++ }
+  deleteRow(n: number) { this.rows.splice(n - 1, 1); this.writes++ }
   getRange(a: number | string, c?: number, nr = 1, nc = 1): FakeRange {
     if (typeof a === 'string') return new FakeRange(this, 1, 1, 0, 0)
     return new FakeRange(this, a, c!, nr, nc)
@@ -115,7 +116,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'PRESUPUESTOS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -317,6 +318,41 @@ describe('backend Apps Script', () => {
     expect(sh.rows.map(r => r.filter((_, j) => j !== 13))).toEqual(antes)        // ningún otro dato cambió
     expect(new Set(sh.rows.slice(1).map(r => String(r[13]).toLowerCase())).size).toBe(4)
     expect(b.g.repararIds() as unknown as string[]).toHaveLength(0)              // idempotente
+  })
+
+  it('plantillas: crear, listar, editar, evitar duplicados y eliminar sin tocar GASTOS ni la caché del dashboard', () => {
+    const id1 = 'pl-11111111-2222-4333-8444-555555555555', id2 = 'pl-11111111-2222-4333-8444-666666666666'
+    b.post('saveGasto', gasto())
+    const gastosAntes = JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)
+    b.post('data', {})                                               // llena la caché del dashboard
+    const genAntes = b.cache.get('data:gen')
+    expect(genAntes).toBeTruthy()
+    const p = { ambito: 'Personal', categoria: 'Suscripciones', subcategoria: 'ChatGPT', descripcion: 'ChatGPT' }
+    const r1 = b.post('savePlantilla', { id: id1, mode: 'create', ...p })
+    expect(r1.ok).toBe(true)
+    expect(r1.data.slice(0, 5)).toEqual([id1, 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT'])
+    expect(b.post('savePlantilla', { id: id1, mode: 'create', ...p }).ok).toBe(true)   // reintento: no duplica
+    expect(b.post('plantillas').data).toHaveLength(1)
+    // duplicado exacto (ignora mayúsculas y espacios) → rechazado; misma subcategoría con otra descripción → permitido
+    expect(b.post('savePlantilla', { id: id2, mode: 'create', ...p, descripcion: '  chatgpt ' }).error.code).toBe('VALIDATION')
+    expect(b.post('savePlantilla', { id: id2, mode: 'create', ...p, subcategoria: 'Google', descripcion: 'Google One' }).ok).toBe(true)
+    expect(b.post('savePlantilla', { id: id2, mode: 'update', ...p, subcategoria: 'Google', descripcion: 'Google Workspace' }).data[4]).toBe('Google Workspace')
+    expect(b.post('savePlantilla', { id: 'abc', mode: 'create', ...p }).error.code).toBe('VALIDATION')           // ID de gasto no sirve
+    expect(b.post('savePlantilla', { id: id2, mode: 'create', ...p, descripcion: '' }).error.code).toBe('VALIDATION') // 4 campos obligatorios
+    expect(b.post('deletePlantilla', { id: id1 }).data.eliminada).toBe(true)
+    expect(b.post('plantillas').data.map((x: unknown[]) => x[0])).toEqual([id2])
+    expect(JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)).toBe(gastosAntes)
+    expect(b.cache.get('data:gen')).toBe(genAntes)                   // las plantillas no invalidan los datos del dashboard
+    expect(b.post('setEstado', { id: id2, estado: 'Anulado' }).error.code).toBe('VALIDATION') // un ID de plantilla no es ID de gasto
+  })
+
+  it('sin la hoja de plantillas (hoja antigua) la lectura devuelve vacío y la primera plantilla la crea', () => {
+    b.ss.sheets.delete('PLANTILLAS_MENSUALES')
+    expect(b.post('plantillas').data).toEqual([])
+    expect(b.post('diagnose').ok).toBe(true)
+    b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-555555555555', mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Internet', descripcion: 'Internet' })
+    expect(b.ss.getSheetByName('PLANTILLAS_MENSUALES')!.rows[0]).toEqual(['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en'])
+    expect(b.post('plantillas').data).toHaveLength(1)
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {

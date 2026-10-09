@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.2.0';
+var APP_VERSION = '1.3.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -16,11 +16,13 @@ var SHEETS = {
   MEDIOS_PAGO: ['Nombre', 'Activo'],
   CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
-  CONFIG: ['Clave', 'Valor']
+  CONFIG: ['Clave', 'Valor'],
+  // Plantillas de gastos frecuentes: solo configuración reutilizable, nunca movimientos ni montos.
+  PLANTILLAS_MENSUALES: ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en']
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -553,7 +555,7 @@ function doPost(e) {
     if (READ_ONLY[body.action]) return fn(body.payload || {});
     return withLock_(function () {
       var result = fn(body.payload || {});
-      invalidateCache_();
+      if (!KEEP_CACHE[body.action]) invalidateCache_();
       return result;
     });
   });
@@ -698,7 +700,9 @@ function invalidateCache_() {
 
 /* ===================== Escritura ===================== */
 
-var READ_ONLY = { data: true, diagnose: true, backup: true };
+var READ_ONLY = { data: true, diagnose: true, backup: true, plantillas: true };
+// Escrituras que no cambian los datos del dashboard: no invalidan su caché.
+var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true };
 
 var ACTIONS = {
   data: function (p) { return getData_(p.fresh === true); },
@@ -711,7 +715,10 @@ var ACTIONS = {
   savePresupuesto: savePresupuesto_,
   saveConfig: saveConfig_,
   diagnose: diagnose_,
-  backup: backup_
+  backup: backup_,
+  plantillas: listPlantillas_,
+  savePlantilla: savePlantilla_,
+  deletePlantilla: deletePlantilla_
 };
 
 function saveGasto_(p) {
@@ -841,7 +848,7 @@ function diagnose_() {
   var t0 = Date.now();
   var ss = openSpreadsheet_(false);
   var counts = {};
-  Object.keys(SHEETS).forEach(function (n) { counts[n] = Math.max(ss.getSheetByName(n).getLastRow() - 1, 0); });
+  Object.keys(SHEETS).forEach(function (n) { var sh = ss.getSheetByName(n); counts[n] = sh ? Math.max(sh.getLastRow() - 1, 0) : 0; });
   return { version: APP_VERSION, sheetUrl: ss.getUrl(), filas: counts, cacheActiva: !!CacheService.getScriptCache().get(CACHE_KEY + ':' + cacheGen_() + ':n'), lecturaMs: Date.now() - t0 };
 }
 
@@ -901,6 +908,70 @@ function renameCatalogo_(p) {
     }
   }
   return { catalogo: catChanged, gastos: changed };
+}
+
+/* ===================== Plantillas de gastos mensuales ===================== */
+// Lectura liviana: solo la hoja de plantillas (no toca GASTOS ni la caché del dashboard).
+
+var PL_ID = /^pl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function plantillaRow_(r) {
+  var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
+  return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), ts(r[5]), ts(r[6])];
+}
+
+function listPlantillas_() {
+  var ss = openSpreadsheet_(false);
+  if (!ss.getSheetByName('PLANTILLAS_MENSUALES')) return []; // se crea con la primera plantilla
+  return readRows_(ss, 'PLANTILLAS_MENSUALES').map(plantillaRow_);
+}
+
+function plantillasSheet_() {
+  var ss = openSpreadsheet_(false);
+  return ss.getSheetByName('PLANTILLAS_MENSUALES') || ensureSheet_(ss, 'PLANTILLAS_MENSUALES', SHEETS.PLANTILLAS_MENSUALES);
+}
+
+function savePlantilla_(p) {
+  var id = str_(p.id);
+  if (!PL_ID.test(id)) throw appError_('VALIDATION', 'ID de plantilla inválido.');
+  var ambito = text_(p.ambito, 'Ámbito', 40, true);
+  var categoria = text_(p.categoria, 'Categoría', 60, true);
+  var sub = text_(p.subcategoria, 'Subcategoría', 60, true);
+  var desc = text_(p.descripcion, 'Descripción', 200, true);
+  var sh = plantillasSheet_();
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  var rows = n ? sh.getRange(2, 1, n, SHEETS.PLANTILLAS_MENSUALES.length).getValues() : [];
+  var plain = function (v) { return norm_(str_(v).replace(/^'/, '')); }; // ignora el apóstrofo anti-fórmulas
+  var key = [plain(ambito), plain(categoria), plain(sub), plain(desc)].join('|');
+  var idx = -1;
+  for (var i = 0; i < rows.length; i++) {
+    if (str_(rows[i][0]) === id) { idx = i; continue; }
+    if (str_(rows[i][0]) && [plain(rows[i][1]), plain(rows[i][2]), plain(rows[i][3]), plain(rows[i][4])].join('|') === key) {
+      throw appError_('VALIDATION', 'Ya existe una plantilla igual.');
+    }
+  }
+  var now = new Date().toISOString();
+  if (idx >= 0) {
+    var prev = plantillaRow_(rows[idx]);
+    var upd = [id, ambito, categoria, sub, desc, prev[5], now];
+    sh.getRange(idx + 2, 1, 1, upd.length).setValues([upd]);
+    return plantillaRow_(upd);
+  }
+  if (p.mode === 'update') throw appError_('NOT_FOUND', 'La plantilla ya no existe.');
+  var row = [id, ambito, categoria, sub, desc, now, now];
+  appendRows_(sh, [row]);
+  return plantillaRow_(row);
+}
+
+// Elimina solo la fila de la plantilla. No toca gastos, presupuestos ni cajas.
+function deletePlantilla_(p) {
+  var id = str_(p.id);
+  if (!PL_ID.test(id)) throw appError_('VALIDATION', 'ID de plantilla inválido.');
+  var sh = openSpreadsheet_(false).getSheetByName('PLANTILLAS_MENSUALES');
+  var row = sh ? findRowByValue_(sh, 1, id) : 0;
+  if (!row) return { id: id, eliminada: false }; // ya no estaba: el resultado es el mismo
+  sh.deleteRow(row);
+  return { id: id, eliminada: true };
 }
 
 /**

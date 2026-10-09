@@ -57,6 +57,11 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       ['plan-nube', 'Caja Plan Nube', 150, 'Categoría', 'Plan Nube', '#8b5cf6', 4],
     ] as unknown[][],
     presupuestos: [] as unknown[][],
+    plantillas: [
+      ['pl-00000000-0000-4000-8000-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', '', ''],
+      ['pl-00000000-0000-4000-8000-000000000002', 'Personal', 'Servicios', 'Línea Celular', 'Línea Celular', '', ''],
+      ['pl-00000000-0000-4000-8000-000000000003', 'Personal', 'Alimentación', 'Antojos', 'Antojos de la Tarde', '', ''], // clasificación retirada
+    ] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
   const upsert = (rows: unknown[][], keyLen: number, row: unknown[]) => {
@@ -114,10 +119,24 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
     saveCaja: p => upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor, p.color, Number(p.orden)]),
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
+    plantillas: () => db.plantillas,
+    savePlantilla: p => {
+      const k = (r: unknown[]) => r.slice(1, 5).map(x => normName(String(x ?? ''))).join('|')
+      const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, new Date().toISOString(), new Date().toISOString()]
+      if (![row[1], row[2], row[3], row[4]].every(v => String(v ?? '').trim())) throw fail('VALIDATION', 'Los cuatro campos son obligatorios.')
+      if (db.plantillas.some(r => r[0] !== p.id && k(r) === k(row))) throw fail('VALIDATION', 'Ya existe una plantilla igual.')
+      const i = db.plantillas.findIndex(r => r[0] === p.id)
+      if (i >= 0) { row[5] = db.plantillas[i][5]; db.plantillas[i] = row } else db.plantillas.push(row)
+      return row
+    },
+    deletePlantilla: p => { db.plantillas = db.plantillas.filter(r => r[0] !== p.id); return { id: p.id, eliminada: true } },
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
     backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/' }),
   }
   return async (action, payload) => {
+    // Contador de llamadas (solo modo demo) para comprobar en pruebas que no se hacen lecturas de más.
+    const w = globalThis as unknown as { __gdDemoCalls?: Record<string, number> }
+    w.__gdDemoCalls = { ...w.__gdDemoCalls, [action]: (w.__gdDemoCalls?.[action] ?? 0) + 1 }
     await new Promise(r => setTimeout(r, latencyMs))
     const h = handlers[action]
     if (!h) throw fail('BAD_ACTION', 'Acción no válida.')

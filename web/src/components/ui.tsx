@@ -89,7 +89,7 @@ export function IconButton({ label, children, tone = 'default', className = '', 
   )
 }
 
-export function Field({ label, children, error, hint, htmlFor }: { label: string; children: ReactNode; error?: string; hint?: string; htmlFor?: string }) {
+export function Field({ label, children, error, hint, htmlFor }: { label: ReactNode; children: ReactNode; error?: string; hint?: string; htmlFor?: string }) {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={htmlFor} className="text-xs font-medium text-muted">{label}</label>
