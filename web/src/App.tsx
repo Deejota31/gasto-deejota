@@ -4,7 +4,8 @@ import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
 import Toaster from './components/Toaster'
-import GastoModal, { GASTO_MSG, type GastoDraft, type ModalMode } from './components/GastoModal'
+import GastoModal, { GASTO_MSG, type GastoDraft, type GastoPreset, type ModalMode } from './components/GastoModal'
+import PlantillasModal, { type PlantillaDraft } from './components/PlantillasModal'
 import type { GastoInput } from './lib/api'
 import type { Gasto } from './lib/types'
 import { showToast } from './lib/toast'
@@ -31,8 +32,9 @@ export default function App({ api }: { api?: Api }) {
   const store = useAppData(conn, api)
   const [tab, setTab] = useState<TabId>(() => (TABS.some(t => `#${t.id}` === location.hash) ? (location.hash.slice(1) as TabId) : 'dashboard'))
   // Un solo formulario de gasto para toda la app (Dashboard y Gastos lo abren igual).
-  const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; key: number } | null>(null)
-  const openGasto = useCallback((mode: ModalMode, gasto: Gasto | null, draft?: GastoDraft) => setModal({ mode, gasto, draft, key: Date.now() }), [])
+  const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; preset?: GastoPreset; key: number } | null>(null)
+  const openGasto = useCallback((mode: ModalMode, gasto: Gasto | null, draft?: GastoDraft, preset?: GastoPreset) => setModal({ mode, gasto, draft, preset, key: Date.now() }), [])
+  const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number }>(false)
   const tz = store.data?.config.zona_horaria || 'America/Lima'
   const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
@@ -85,13 +87,17 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} /></Suspense>}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} />}
         {tab === 'categorias' && <Categorias store={store} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}
       </main>
 
-      {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} onClose={() => setModal(null)} onSubmit={submitGasto} />}
+      {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} preset={modal.preset} onClose={() => setModal(null)} onSubmit={submitGasto} />}
+      {/* "Usar" cierra las plantillas y abre el mismo formulario de Nuevo gasto con los datos precargados. */}
+      {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} onClose={() => setPlantillasOpen(false)}
+        onUse={p => { setPlantillasOpen(false); openGasto('create', null, undefined, p) }}
+        onReopen={draft => { setModal(null); setPlantillasOpen({ draft, key: Date.now() }) }} />}
       <Toaster />
     </div>
   )

@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { z } from 'zod'
-import { Check, Copy, Pencil, Plus, Receipt } from 'lucide-react'
+import { Copy, Pencil, Plus, Receipt } from 'lucide-react'
 import type { GastoInput } from '../lib/api'
 import type { AppStore, OpMessages } from '../lib/store'
 import { TIPOS_GASTO, type Gasto, type TipoGasto } from '../lib/types'
 import { todayIn } from '../lib/dates'
-import { ambitoLook, categoriaLook, medioLook, sortMedios } from '../lib/visual'
-import { catalogOptions } from './shared'
-import { otrosAlFinal } from '../lib/orden'
+import { medioLook, sortMedios } from '../lib/visual'
+import { formatearDescripcion } from '../lib/texto'
+import { autocompletar, ClasificacionPicker, opcionesClasif, type Clasif } from './Clasificacion'
 import { Button, Field, inputCls, Modal, Segmented, Switch } from './ui'
 
 export type ModalMode = 'create' | 'edit' | 'clone'
@@ -29,18 +29,23 @@ const schema = z.object({
 export type GastoDraft = Omit<GastoInput, 'monto'> & { montoText: string }
 type Form = GastoDraft
 
-function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft): Form {
+/** Datos precargados desde una plantilla de "Gastos mensuales" (solo clasificación y descripción). */
+export type GastoPreset = Clasif & { descripcion: string }
+
+function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft, preset?: GastoPreset): Form {
   if (draft) return draft // reabrir tras un error: se conservan los datos que ingresaste
   const cfg = store.data?.config ?? {}
-  const today = todayIn(cfg.zona_horaria || 'America/Lima')
   if (g) {
-    const { monto, estado: _e, origen: _o, creadoEn: _c, actualizadoEn: _a, ...rest } = g
-    // Clonar: mismos datos, ID nuevo y fecha de hoy (editable).
-    return mode === 'clone' ? { ...rest, id: crypto.randomUUID(), fecha: today, montoText: String(monto) } : { ...rest, montoText: String(monto) }
+    // uid y problemaId son solo de la interfaz; estado, origen y marcas de tiempo los pone el backend.
+    const { monto, estado: _e, origen: _o, creadoEn: _c, actualizadoEn: _a, uid: _u, problemaId: _p, ...rest } = g
+    // Clonar: todos los datos funcionales del original, INCLUIDA su fecha (texto AAAA-MM-DD, sin conversiones de zona
+    // horaria), e ID nuevo. Antes se ponía la fecha de hoy.
+    return mode === 'clone' ? { ...rest, id: crypto.randomUUID(), montoText: String(monto) } : { ...rest, montoText: String(monto) }
   }
   return {
     id: crypto.randomUUID(), // generado al abrir: si la red falla y se reintenta, el backend no duplica
-    fecha: today, montoText: '', moneda: cfg.moneda || 'PEN', ambito: 'Personal', categoria: '', subcategoria: '', descripcion: '',
+    fecha: todayIn(cfg.zona_horaria || 'America/Lima'), montoText: '', moneda: cfg.moneda || 'PEN',
+    ambito: preset?.ambito ?? 'Personal', categoria: preset?.categoria ?? '', subcategoria: preset?.subcategoria ?? '', descripcion: preset?.descripcion ?? '',
     medioPago: '', tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
   }
 }
@@ -58,36 +63,47 @@ export const GASTO_MSG: Record<ModalMode, OpMessages> = {
   clone: { pending: 'Clonando gasto…', ok: 'Gasto clonado correctamente.', error: 'No se pudo clonar el gasto.' },
 }
 
-function Chip({ on, color, children, onClick, label }: { on: boolean; color: string; children: React.ReactNode; onClick: () => void; label?: string }) {
-  return (
-    <button type="button" role="radio" aria-checked={on} aria-label={label} onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[13px] font-medium transition ${on ? 'shadow-sm' : 'border-line bg-card text-ink hover:bg-bg'}`}
-      style={on ? { background: `${color}1F`, borderColor: color, color } : undefined}>
-      {children}
-      {on && <Check className="size-3.5" />}
-    </button>
-  )
-}
-
 /**
  * Formulario único de gasto (crear, editar, clonar), usado desde el Dashboard y desde Gastos.
  * Al guardar valida, entrega la operación a `onSubmit` y se cierra: el guardado sigue en segundo plano
  * y su resultado real llega como notificación. Si falla, la notificación permite reabrirlo con los mismos datos.
  */
-export default function GastoModal({ store, mode, gasto, draft, onClose, onSubmit }: {
-  store: AppStore; mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; onClose: () => void
+export default function GastoModal({ store, mode, gasto, draft, preset, onClose, onSubmit }: {
+  store: AppStore; mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; preset?: GastoPreset; onClose: () => void
   onSubmit: (input: GastoInput, mode: ModalMode, draft: GastoDraft) => boolean
 }) {
-  const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft))
+  const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft, preset))
+  // Última descripción que se completó sola. En editar/clonar la descripción es la del registro: no se reemplaza
+  // (null nunca coincide con un texto, así que solo se autocompleta si la vacías).
+  const [descAuto, setDescAuto] = useState<string | null>(() => {
+    if (mode !== 'create') return null
+    const f = draft ?? preset
+    return f ? (autocompletar('', null, f.subcategoria).descripcion === f.descripcion ? f.descripcion : null) : ''
+  })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const set = (p: Partial<Form>) => setForm(f => ({ ...f, ...p }))
   const catalogo = store.data?.catalogo ?? []
-  const opts = catalogOptions(catalogo, form.ambito ? [form.ambito] : [], form.categoria ? [form.categoria] : [])
-  const subOptions = form.categoria ? opts.subcategorias.map(s => s.subcategoria) : []
+  const subOptions = opcionesClasif(catalogo, form, mode !== 'create' || !!draft).subsVigentes
   const medios = sortMedios((store.data?.medios ?? []).filter(m => m.activo).map(m => m.nombre))
   const monedas = (store.data?.config.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   // Al editar, conserva valores que ya no estén activos en el catálogo.
-  const withCurrent = (xs: string[], v: string) => otrosAlFinal(v && !xs.includes(v) ? [...xs, v] : xs)
+  const withCurrent = (xs: string[], v: string) => sortMedios(v && !xs.includes(v) ? [...xs, v] : xs)
+
+  function setClasif(next: Clasif) {
+    const subCambio = next.subcategoria !== form.subcategoria
+    if (subCambio && next.subcategoria) {
+      const r = autocompletar(form.descripcion, descAuto, next.subcategoria)
+      setDescAuto(r.auto)
+      set({ ...next, descripcion: r.descripcion })
+    } else set(next)
+  }
+  // Formato al salir del campo (no en cada tecla: así no salta el cursor).
+  function onDescBlur() {
+    const f = formatearDescripcion(form.descripcion)
+    if (f === form.descripcion) return
+    if (form.descripcion === descAuto) setDescAuto(f)
+    set({ descripcion: f })
+  }
   const t = TITLES[mode]
   const symbol = form.moneda === 'PEN' ? 'S/' : form.moneda === 'USD' ? 'US$' : form.moneda
 
@@ -98,13 +114,14 @@ export default function GastoModal({ store, mode, gasto, draft, onClose, onSubmi
     const monto = Number(montoTxt.replace(',', '.'))
     if (!montoTxt) errs.monto = 'Ingresa un monto'
     else if (!AMOUNT.test(montoTxt) || !(monto > 0)) errs.monto = 'Monto mayor a 0, con hasta 2 decimales'
-    const parsed = schema.safeParse(form)
+    const descripcion = formatearDescripcion(form.descripcion) // normalización final antes de guardar
+    const parsed = schema.safeParse({ ...form, descripcion })
     if (!parsed.success) parsed.error.issues.forEach(i => { errs[String(i.path[0])] ??= i.message })
     if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
     setErrors(errs)
     if (Object.keys(errs).length || !parsed.success) return
     // El mismo ID viaja en cada reintento: el backend no duplica aunque llegue dos veces.
-    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl }, mode, form)) onClose()
+    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl }, mode, { ...form, descripcion })) onClose()
   }
 
   return (
@@ -115,42 +132,7 @@ export default function GastoModal({ store, mode, gasto, draft, onClose, onSubmi
         <Button type="submit" form="gasto-form">{mode === 'create' && <Plus className="size-4" />}{t.cta}</Button>
       </>}>
       <form id="gasto-form" onSubmit={submit} noValidate className="grid gap-5 md:grid-cols-2">
-        <div className="space-y-4">
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">1. Ámbito</p>
-            <div role="radiogroup" aria-label="Ámbito" className="flex flex-wrap gap-1.5">
-              {withCurrent(opts.ambitos, form.ambito).map(a => {
-                const l = ambitoLook(a, catalogo)
-                return <Chip key={a} on={form.ambito === a} color={l.color} onClick={() => form.ambito !== a && set({ ambito: a, categoria: '', subcategoria: '' })}><l.Icon className="size-4" />{a}</Chip>
-              })}
-            </div>
-            {errors.ambito && <span className="text-xs text-[#D2463C]">{errors.ambito}</span>}
-          </div>
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">2. Categoría</p>
-            {!form.ambito ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted">Primero elige un ámbito.</p> : (
-              <div role="radiogroup" aria-label="Categoría" className="flex flex-wrap gap-1.5">
-                {withCurrent(opts.categorias, form.categoria).map(c => {
-                  const l = categoriaLook(c, catalogo, form.ambito)
-                  return <Chip key={c} on={form.categoria === c} color={l.color} onClick={() => form.categoria !== c && set({ categoria: c, subcategoria: '' })}><l.Icon className="size-4" />{c}</Chip>
-                })}
-                {!opts.categorias.length && <p className="text-xs text-muted">No hay categorías activas para este ámbito. Agrégalas en Categorías.</p>}
-              </div>
-            )}
-            {errors.categoria && <span className="text-xs text-[#D2463C]">{errors.categoria}</span>}
-          </div>
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">3. Subcategoría</p>
-            {!form.categoria ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted">Se habilita al elegir una categoría.</p> : (
-              <div role="radiogroup" aria-label="Subcategoría" className="flex flex-wrap gap-1.5">
-                {withCurrent(subOptions, form.subcategoria).map(s => (
-                  <Chip key={s} on={form.subcategoria === s} color={categoriaLook(form.categoria, catalogo, form.ambito).color} onClick={() => set({ subcategoria: s })}>{s}</Chip>
-                ))}
-              </div>
-            )}
-            {errors.subcategoria && <span className="text-xs text-[#D2463C]">{errors.subcategoria}</span>}
-          </div>
-        </div>
+        <ClasificacionPicker catalogo={catalogo} value={form} onChange={setClasif} errors={errors} keepCurrent={mode !== 'create' || !!draft} />
 
         <div className="space-y-4">
           <div className="rounded-2xl border border-line bg-bg/50 p-3">
@@ -194,7 +176,7 @@ export default function GastoModal({ store, mode, gasto, draft, onClose, onSubmi
             {errors.medioPago && <span className="text-xs text-[#D2463C]">{errors.medioPago}</span>}
           </div>
           <Field label="Descripción" error={errors.descripcion} hint="Opcional" htmlFor="gasto-desc">
-            <input id="gasto-desc" className={inputCls} maxLength={200} placeholder="Ej. almuerzo con el equipo" value={form.descripcion} onChange={e => set({ descripcion: e.target.value })} />
+            <input id="gasto-desc" className={inputCls} maxLength={200} placeholder="Ej. almuerzo con el equipo" value={form.descripcion} onChange={e => set({ descripcion: e.target.value })} onBlur={onDescBlur} />
           </Field>
           <Switch checked={form.esRecurrente} onChange={v => set({ esRecurrente: v })} label="Es recurrente" />
         </div>

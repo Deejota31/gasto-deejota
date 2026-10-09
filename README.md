@@ -28,6 +28,24 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido por diseño:** cualquier lógica de Gastos mensuales (plantillas, control mensual, lotes, vínculos). `Es recurrente` es solo un atributo del movimiento.
 
 
+## Novedades v1.3.0
+
+| Punto | Qué cambió |
+|---|---|
+| Descripción automática | Al elegir una subcategoría, la descripción se completa con su nombre ("Moto Taxi", "ChatGPT"). Si cambias de subcategoría se actualiza solo mientras siga siendo la automática; si la escribiste tú, no se toca; si la vacías, vuelve a completarse. "Otros" y "Por Clasificar" la dejan vacía. En editar y clonar se conserva la del registro. Lógica en `autocompletar()` (`components/Clasificacion.tsx`), usada por el formulario de gasto y por el de plantillas. |
+| Formato de descripciones | `formatearDescripcion()` (`lib/texto.ts`), una sola función para nuevo, editar, clonar y plantillas: mayúscula inicial en palabras principales, artículos/preposiciones en minúscula (salvo al inicio), marcas y siglas con su escritura (ChatGPT, HBO, SOAT, YouTube, iPhone, WiFi, USD…), y respeta tildes, números, signos y emojis. Se aplica al salir del campo y antes de guardar; nunca a registros antiguos. |
+| Clonar | **Causa del error:** al clonar, el formulario reemplazaba la fecha por la de hoy. Ahora copia la fecha original tal cual (texto AAAA-MM-DD, sin conversiones de zona horaria) y todos los datos; el ID es nuevo al guardar y el original no cambia. |
+| Configuración | Encabezado con estado de conexión, campos con iconos, cajas como tarjetas con su color, alcance y botón "Guardar cambios/Descartar", medios como botones con icono (activar/desactivar), acciones de datos agrupadas y "Acerca de" compacto. Misma lógica que antes. |
+| Gastos mensuales | Botón junto a "+ Nuevo gasto" en el Dashboard. Abre un panel de **plantillas** (ámbito, categoría, subcategoría y descripción). "Usar" abre el mismo formulario de Nuevo gasto precargado (fecha de hoy, monto vacío) y se registra por el flujo normal. Editar/eliminar (con confirmación) solo afectan la plantilla. Una plantilla cuya clasificación ya no está vigente aparece como "Requiere revisión" y no se puede usar hasta editarla. Duplicados exactos rechazados (ignora mayúsculas y espacios). |
+| Hoja nueva | `PLANTILLAS_MENSUALES` (ID, Ámbito, Categoría, Subcategoría, Descripción, Creado en, Actualizado en). Se crea sola con la primera plantilla (o al ejecutar `setup`). IDs con prefijo `pl-`, que el backend no acepta como ID de gasto. Nunca se escribe en GASTOS. |
+| Rendimiento | Las plantillas se leen solo al abrir "Gastos mensuales" por primera vez, con una acción liviana que lee únicamente su hoja; luego quedan en memoria (se releen tras "Actualizar"). Viven fuera de los datos del dashboard, así que crear/editar/eliminar plantillas no recalcula KPIs ni gráficos, y en el backend no invalidan la caché de datos. Escrituras sin bloquear, con su notificación. |
+
+### Migración a v1.3.0
+
+1. Reemplaza `Code.gs` en Apps Script y guarda (no hace falta ejecutar nada: la hoja de plantillas se crea sola; si prefieres, ejecuta `setup`).
+2. **Implementar → Gestionar implementaciones → ✏️ → Nueva versión → Implementar.**
+3. La web se publica al fusionar en `main`.
+
 ## Novedades v1.2.0
 
 | Punto | Qué cambió |
@@ -38,6 +56,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 | "Otros" al final | Regla central en `web/src/lib/orden.ts`: `sortCatalogo` (ámbito → categoría → subcategoría, por grupo) y `otrosAlFinal`. Se aplica al recibir datos de la hoja y después de cada alta, edición o renombrado; la usan el formulario (crear/editar/clonar), los filtros, la pestaña Categorías y Configuración (medios). Compara ignorando mayúsculas y espacios, y evita "Otros" duplicados en un mismo grupo (también el backend). |
 | Escrituras sin bloquear | `store.track()`: el formulario valida, entrega la operación y se cierra; la petición sigue en segundo plano. Cada operación tiene su clave (ID del gasto, caja, opción del catálogo) para impedir envíos duplicados; la fila afectada muestra "Guardando…" y no admite otra acción hasta la respuesta. Nada se marca como guardado hasta que el backend lo confirma. Si una lectura completa ("Actualizar") termina después de un guardado, los cambios confirmados se vuelven a aplicar encima, así una respuesta tardía no borra datos nuevos. Sin polling ni consultas extra. Una operación pendiente se pierde si recargas o cierras la pestaña (no es una cola persistente). Si un alta llegó a guardarse pero la respuesta se perdió, reintentarla con el formulario corregido actualiza ese mismo registro (nunca duplica, y no pisa un gasto que ya editaste después). |
 | Notificaciones | Arriba a la derecha, apiladas en orden y una por operación: "Guardando…" → verde con ✓ (se va a los ~4 s) o roja con ✕ (queda hasta que la cierres, con **Reintentar** —mismo ID, sin duplicar— y **Abrir formulario** con tus datos). Solo cada tarjeta recibe clics. Si hay un formulario abierto, las notificaciones se muestran encima de él. |
+| IDs editados a mano | Si en la hoja hay gastos con el ID repetido o con caracteres no válidos, la tabla los muestra una sola vez (antes, al ordenar, se repetían filas en pantalla) y bloquea Editar/Clonar/Eliminar en esas filas, con un aviso: con un ID repetido, editar uno cambiaría el otro. La función **`repararIds()`** (editor de Apps Script) crea un respaldo y asigna un ID nuevo solo a esas filas, sin tocar ningún otro dato. |
 | Dashboard | Botón **+ Nuevo gasto** junto al título; abre el mismo formulario que Gastos (un solo modal en toda la app). **Top 5 categorías** y **Top 10 subcategorías** (identificadas por categoría + subcategoría), calculados sobre los datos ya cargados y con los filtros activos. |
 
 ### Migración a v1.2.0
@@ -127,8 +146,8 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 |---|---|
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
-| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 86) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (20), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 103) |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (26), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas

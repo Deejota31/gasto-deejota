@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
@@ -10,6 +10,11 @@ import type { ModalMode } from '../components/GastoModal'
 import { Pagination, SwipeRow } from '../components/table'
 import { Button, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
+
+const ID_AVISO = {
+  duplicado: 'Otro movimiento tiene el mismo ID. Ejecuta repararIds en Apps Script para poder editarlo.',
+  invalido: 'El ID tiene caracteres no válidos. Ejecuta repararIds en Apps Script para poder editarlo.',
+}
 
 type SortKey = 'fecha' | 'monto' | 'descripcion' | 'categoria'
 type EstadoFiltro = 'Activo' | 'Anulado' | 'todos'
@@ -104,6 +109,8 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
 
   const actionsFor = (g: Gasto, compact = false) => isBusy(g) ? (
     <span className="inline-flex items-center gap-1.5 px-2 text-xs text-muted"><Loader2 className="size-3.5 animate-spin" /> Guardando…</span>
+  ) : g.problemaId ? (
+    <span className="inline-flex items-center gap-1 rounded-lg bg-[#FEF3C7] px-2 py-1 text-[11px] font-medium text-[#92400E]" title={ID_AVISO[g.problemaId]}><AlertTriangle className="size-3.5" /> ID por reparar</span>
   ) : g.estado === 'Activo' ? (
     <>
       <IconButton label="Editar" tone="primary" onClick={() => open('edit', g)}><Pencil className="size-4" /></IconButton>
@@ -114,8 +121,17 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
     <Button variant="soft" className={compact ? 'px-2 py-1 text-xs' : ''} onClick={() => changeEstado(g, 'Activo')}><Undo2 className="size-3.5" /> Restaurar</Button>
   )
 
+  const conProblema = (store.data?.gastos ?? []).filter(g => g.problemaId).length
+
   return (
     <div className="space-y-4">
+      {conProblema > 0 && (
+        <ErrorBox tone="warning" message={<>
+          <b>{conProblema} movimiento(s) tienen un ID repetido o inválido</b> (por ejemplo, editado a mano en la hoja). Se muestran y suman normal,
+          pero no se pueden editar ni eliminar desde la app hasta repararlos: con un ID repetido, editar uno cambiaría el otro.
+          Arréglalo ejecutando <b>repararIds</b> en Apps Script (crea un respaldo y solo cambia esos IDs).
+        </>} />
+      )}
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={store.data?.gastos}
         extra={<>
           <label className="relative">
@@ -160,7 +176,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
                     const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                     const off = g.estado === 'Anulado'
                     return (
-                      <tr key={g.id} className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${off ? 'opacity-60' : ''}`}>
+                      <tr key={g.uid ?? g.id} className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${off ? 'opacity-60' : ''}`}>
                         <td className="tabular px-3 py-2.5 whitespace-nowrap text-muted">{formatDate(g.fecha, cfg.formato_fecha)}</td>
                         <td className="max-w-60 px-3 py-2.5">
                           <p className={`truncate font-medium ${off ? 'line-through' : ''}`} title={g.descripcion}>{g.descripcion || <span className="font-normal text-muted">Sin descripción</span>}</p>
@@ -192,8 +208,10 @@ export default function Gastos({ store, openGasto, filters, setFilters, today }:
                 const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                 const off = g.estado === 'Anulado'
                 return (
-                  <li key={g.id} className="rounded-2xl border border-line">
-                    <SwipeRow width={off ? 120 : 168} actions={isBusy(g) ? (
+                  <li key={g.uid ?? g.id} className="rounded-2xl border border-line">
+                    <SwipeRow width={off ? 120 : 168} actions={g.problemaId ? (
+                      <span className="flex flex-1 items-center justify-center gap-1 bg-[#FEF3C7] px-2 text-center text-[11px] text-[#92400E]"><AlertTriangle className="size-4 shrink-0" />ID por reparar</span>
+                    ) : isBusy(g) ? (
                       <span className="flex flex-1 items-center justify-center gap-1.5 bg-bg text-xs text-muted"><Loader2 className="size-4 animate-spin" />Guardando…</span>
                     ) : off ? (
                       <button type="button" onClick={() => changeEstado(g, 'Activo')} className="flex flex-1 flex-col items-center justify-center gap-1 bg-primary-soft text-xs font-medium text-navy"><Undo2 className="size-4" />Restaurar</button>

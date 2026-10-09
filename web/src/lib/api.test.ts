@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, createApi, httpTransport } from './api'
+import { ApiError, createApi, httpTransport, marcarIds } from './api'
 import { demoTransport } from './demo'
 
 const conn = { url: 'https://script.google.com/macros/s/x/exec', token: 't'.repeat(32) }
@@ -75,5 +75,12 @@ describe('cliente HTTP de Apps Script', () => {
     await api.saveGasto(g, 'create')
     await api.saveGasto(g, 'create')
     expect((await api.getData()).gastos.filter(x => x.id === 'abc')).toHaveLength(1)
+  })
+
+  it('marca IDs repetidos o inválidos y da a cada fila una clave única para la interfaz', () => {
+    const g = (id: string) => ({ id } as unknown as Parameters<typeof marcarIds>[0][number])
+    const r = marcarIds([g('5d1d6822-e84c-41f0-0b0d-aa2cf573c62A'), g('5d1d6822-e84c-41f0-0b0d-aa2cf573c62a'), g('5d1d6822-e84c-41f0-0b0d-aa2cf573c62P'), g('00488880-85fb-4805-a7f0-5962625e15b1')])
+    expect(r.map(x => x.problemaId)).toEqual(['duplicado', 'duplicado', 'invalido', undefined])
+    expect(new Set(r.map(x => x.uid)).size).toBe(4)
   })
 })

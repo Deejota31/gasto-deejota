@@ -19,7 +19,14 @@ export interface Gasto {
   id: string
   creadoEn: string
   actualizadoEn: string
+  /** Clave única para la interfaz (igual al ID salvo si el ID está repetido en la hoja). */
+  uid?: string
+  /** ID escrito a mano que la hoja no puede usar para editar: repetido o con caracteres no válidos. */
+  problemaId?: 'duplicado' | 'invalido'
 }
+
+/** Plantilla de gasto frecuente: solo clasificación + descripción. No es un movimiento ni suma en nada. */
+export interface Plantilla { id: string; ambito: string; categoria: string; subcategoria: string; descripcion: string; creadoEn: string; actualizadoEn: string }
 
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
 export interface Medio { nombre: string; activo: boolean }
