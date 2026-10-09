@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   Activity, AlertTriangle, Baby, Calculator, CalendarDays, Car, CircleDollarSign, Cloud, GitFork, Hash, Layers, Lock, Pencil,
-  Percent, PieChart as PieIcon, PiggyBank, Shapes, Tag, Target, TrendingUp, Trophy, Wallet,
+  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, Target, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
 import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney, ratesFromConfig } from '../lib/money'
-import { formatDate, monthLabel, singleMonth } from '../lib/dates'
+import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, Filters } from '../lib/types'
 import { categoriaLook, medioLook } from '../lib/visual'
@@ -20,7 +20,9 @@ const cajaIcon = (c: Caja) => {
   return k.includes('auto') ? Car : k.includes('beb') ? Baby : k.includes('nube') ? Cloud : Wallet
 }
 
-export default function Dashboard({ store, filters, setFilters, today }: { store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string }) {
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto }: {
+  store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void
+}) {
   const [tab, setTab] = useState<'jerarquia' | 'sankey' | 'frecuencia' | 'medios'>('jerarquia')
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const data = store.data
@@ -39,7 +41,15 @@ export default function Dashboard({ store, filters, setFilters, today }: { store
 
   return (
     <div className="space-y-4">
-      <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} />
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold text-ink">Resumen</h1>
+          <p className="truncate text-xs text-muted first-letter:uppercase">{mes ? monthLabel(mes, true) : rangeLabel(filters)}</p>
+        </div>
+        {/* Abre el mismo formulario de la pestaña Gastos (un solo modal en toda la app). */}
+        <Button onClick={onNuevoGasto} disabled={!data} className="shrink-0"><Plus className="size-4" /> Nuevo gasto</Button>
+      </div>
+      <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={store.data?.gastos} />
 
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
 
@@ -96,11 +106,11 @@ export default function Dashboard({ store, filters, setFilters, today }: { store
               <AmbitoDonut items={a.porAmbito} catalogo={catalogo} currency={base} total={a.total} selected={filters.ambitos}
                 onToggle={v => setFilters({ ...filters, ambitos: toggle(filters.ambitos, v) })} />
             </Card>
-            <Card title="Top categorías" icon={<Shapes className="size-4 text-coral" />}
-              info={{ title: 'Top categorías', body: <>
-                <p>Las categorías en las que más gastaste en el período, de mayor a menor. Muestra monto, porcentaje sobre el total filtrado y cantidad de movimientos.</p>
+            <Card title="Top 5 categorías" icon={<Shapes className="size-4 text-coral" />}
+              info={{ title: 'Top 5 categorías', body: <>
+                <p>Las 5 categorías en las que más gastaste en el período, de mayor a menor (si hay menos de 5 con gastos, solo esas). Muestra monto, porcentaje sobre el total filtrado y cantidad de movimientos.</p>
                 <p>Haz clic en una barra para filtrar por esa categoría.</p></> }}>
-              <BarList ariaLabel="Top categorías" items={a.porCategoria.slice(0, 8)} total={a.total} currency={base}
+              <BarList ariaLabel="Top 5 categorías" items={a.porCategoria.slice(0, 5)} total={a.total} currency={base}
                 lookFor={it => categoriaLook(it.name, catalogo)} selected={it => filters.categorias.includes(it.name)}
                 onToggle={it => setFilters({ ...filters, categorias: toggle(filters.categorias, it.name) })} />
             </Card>
@@ -108,7 +118,7 @@ export default function Dashboard({ store, filters, setFilters, today }: { store
 
           <Card title="Top 10 subcategorías" icon={<Tag className="size-4 text-turquesa" />}
             info={{ title: 'Top 10 subcategorías', body: <>
-              <p>Las diez subcategorías con más gasto, con su categoría, monto, porcentaje y número de operaciones.</p>
+              <p>Las 10 subcategorías con más gasto, de mayor a menor. Cada una se identifica por categoría + subcategoría, así "Otros" de Alimentación y "Otros" de Auto no se mezclan.</p>
               <p>Haz clic para filtrar el dashboard y la tabla de gastos por esa subcategoría.</p></> }}>
             <BarList ariaLabel="Top 10 subcategorías" items={a.porSubcategoria} total={a.total} currency={base}
               lookFor={it => categoriaLook(it.categoria, catalogo)} selected={it => filters.subcategorias.includes(it.key)}
@@ -295,7 +305,6 @@ function CajaModal({ store, target, cajas, mes, money, onClose }: {
   const esGeneral = target.caja.filtroCampo === 'Todos'
   const [monto, setMonto] = useState(String(target.asignado / 100))
   const [soloMes, setSoloMes] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const n = Number(monto)
   const cents = Math.round(n * 100)
@@ -304,20 +313,17 @@ function CajaModal({ store, target, cajas, mes, money, onClose }: {
     ? cents < cajas.reservado ? `Las reservas de subcajas (${money(cajas.reservado)}) superarían este presupuesto.` : ''
     : otrasReservas + cents > cajas.presupuesto ? `Con este monto las reservas sumarían ${money(otrasReservas + cents)}, más que la caja general (${money(cajas.presupuesto)}).` : ''
 
-  async function save() {
+  // No bloquea: valida, cierra y la escritura sigue en segundo plano con su notificación de resultado.
+  function save() {
     if (!/^\d+(\.\d{1,2})?$/.test(monto.trim()) || n < 0) return setError('Ingresa un monto válido (hasta 2 decimales, sin negativos).')
-    setSaving(true)
-    setError('')
-    try {
-      if (soloMes && mes) await store.actions.savePresupuesto({ periodo: mes, cajaId: target.caja.id, monto: n })
-      else await store.actions.saveCaja({ ...target.caja, presupuesto: n })
-      onClose()
-    } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
+    const ok = store.track(`caja:${target.caja.id}`, { pending: `Guardando ${target.caja.nombre}…`, ok: `${target.caja.nombre} actualizada correctamente.`, error: `No se pudo guardar ${target.caja.nombre}.` },
+      () => soloMes && mes ? store.actions.savePresupuesto({ periodo: mes, cajaId: target.caja.id, monto: n }) : store.actions.saveCaja({ ...target.caja, presupuesto: n }))
+    if (ok) onClose()
   }
   return (
     <Modal open onClose={onClose} size="sm" title={`Ajustar ${target.caja.nombre}`} icon={<Wallet className="size-5" />}
       subtitle={esGeneral ? 'Presupuesto mensual total' : 'Reserva mensual dentro de la caja general'}
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button loading={saving} onClick={save}>Guardar</Button></>}>
+      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>Guardar</Button></>}>
       <div className="space-y-3">
         <Field label={esGeneral ? 'Presupuesto mensual' : 'Monto asignado'} htmlFor="caja-monto">
           <div className="relative">

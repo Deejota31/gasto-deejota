@@ -73,6 +73,8 @@ body {
 dialog::backdrop { background: rgb(15 23 42 / 0.45); backdrop-filter: blur(2px); }
 .tabular { font-variant-numeric: tabular-nums; }
 .bar-grow { transition: width 0.45s cubic-bezier(.2, .8, .2, 1); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+.toast-in { animation: toast-in .22s ease-out; }
 @media (prefers-reduced-motion: reduce) { .bar-grow, * { transition: none !important; animation: none !important; } }
 /* Sombra discreta para la tabla con scroll horizontal: indica que hay más columnas. */
 .scroll-hint { background:

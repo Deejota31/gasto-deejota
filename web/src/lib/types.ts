@@ -21,7 +21,7 @@ export interface Gasto {
   actualizadoEn: string
 }
 
-export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string }
+export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
 export interface Medio { nombre: string; activo: boolean }
 export type FiltroCampo = 'Todos' | 'Ámbito' | 'Categoría' | 'Subcategoría' | 'Medio de pago'
 export interface Caja {

@@ -28,6 +28,28 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido por diseño:** cualquier lógica de Gastos mensuales (plantillas, control mensual, lotes, vínculos). `Es recurrente` es solo un atributo del movimiento.
 
 
+## Novedades v1.2.0
+
+| Punto | Qué cambió |
+|---|---|
+| Catálogo | Nueva lista oficial (5 ámbitos, 36 categorías, 214 subcategorías) en `CATALOGO_INICIAL` (`Code.gs`) y `web/src/lib/catalogo.ts`. Una prueba exige que ambas sean idénticas: son la misma lista en los dos lugares donde debe existir (Apps Script no puede importar archivos del frontend). Transporte = Taxi, Moto Taxi, Bus / Micro, Otros en todos los ámbitos; Alimentación usa "Snack / Antojos"; Personal → Servicios = Línea Celular y Otros. |
+| Aplicar el catálogo a tu hoja | Función `actualizarCatalogo()` (se ejecuta a mano desde el editor). Crea un respaldo, agrega lo que falta y, en las filas de versiones anteriores (sin Orden), deja **inactivo** (no borra) lo que ya no está en la lista y activa lo vigente. Las filas con Orden (ya migradas o creadas desde la app) no se tocan, así volver a ejecutarla no deshace tus cambios manuales. El registro lista qué quedó inactivo. No toca la hoja GASTOS: los gastos antiguos conservan sus valores ("Antojos", "Cuidado Darielita", "Familia › Madre"…), se siguen viendo, sumando en cajas y se pueden filtrar (aparecen como "(histórica)"). Al editar un gasto antiguo, su clasificación se conserva. |
+| Columna Orden | CATALOGO tiene una 7.ª columna `Orden` (se agrega sola con `setup` o `actualizarCatalogo`). La web ordena por ese número, no por la posición de la fila. Puedes reordenar a mano cambiando los números. |
+| "Otros" al final | Regla central en `web/src/lib/orden.ts`: `sortCatalogo` (ámbito → categoría → subcategoría, por grupo) y `otrosAlFinal`. Se aplica al recibir datos de la hoja y después de cada alta, edición o renombrado; la usan el formulario (crear/editar/clonar), los filtros, la pestaña Categorías y Configuración (medios). Compara ignorando mayúsculas y espacios, y evita "Otros" duplicados en un mismo grupo (también el backend). |
+| Escrituras sin bloquear | `store.track()`: el formulario valida, entrega la operación y se cierra; la petición sigue en segundo plano. Cada operación tiene su clave (ID del gasto, caja, opción del catálogo) para impedir envíos duplicados; la fila afectada muestra "Guardando…" y no admite otra acción hasta la respuesta. Nada se marca como guardado hasta que el backend lo confirma. Si una lectura completa ("Actualizar") termina después de un guardado, los cambios confirmados se vuelven a aplicar encima, así una respuesta tardía no borra datos nuevos. Sin polling ni consultas extra. Una operación pendiente se pierde si recargas o cierras la pestaña (no es una cola persistente). Si un alta llegó a guardarse pero la respuesta se perdió, reintentarla con el formulario corregido actualiza ese mismo registro (nunca duplica, y no pisa un gasto que ya editaste después). |
+| Notificaciones | Arriba a la derecha, apiladas en orden y una por operación: "Guardando…" → verde con ✓ (se va a los ~4 s) o roja con ✕ (queda hasta que la cierres, con **Reintentar** —mismo ID, sin duplicar— y **Abrir formulario** con tus datos). Solo cada tarjeta recibe clics. Si hay un formulario abierto, las notificaciones se muestran encima de él. |
+| Dashboard | Botón **+ Nuevo gasto** junto al título; abre el mismo formulario que Gastos (un solo modal en toda la app). **Top 5 categorías** y **Top 10 subcategorías** (identificadas por categoría + subcategoría), calculados sobre los datos ya cargados y con los filtros activos. |
+
+### Migración a v1.2.0
+
+1. Haz un respaldo (Configuración → *Crear respaldo*).
+2. Reemplaza `Code.gs` en tu proyecto de Apps Script y guarda.
+3. Ejecuta **`actualizarCatalogo`** desde el editor y acepta. El registro muestra el respaldo creado y cuántas opciones se agregaron, reactivaron o desactivaron.
+4. **Implementar → Gestionar implementaciones → ✏️ → Nueva versión → Implementar** (la URL no cambia).
+5. La web se publica sola desde GitHub al fusionar en `main`.
+
+Para volver atrás: versión anterior de la implementación y, si hace falta, copia la hoja CATALOGO del respaldo. GASTOS no cambia en esta migración.
+
 ## Novedades v1.1.0
 
 | Punto | Qué cambió |
@@ -105,8 +127,8 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 |---|---|
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
-| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 65) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (12). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 86) |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (20), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas

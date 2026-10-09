@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { z } from 'zod'
 import { Check, Copy, Pencil, Plus, Receipt } from 'lucide-react'
 import type { GastoInput } from '../lib/api'
-import type { AppStore } from '../lib/store'
+import type { AppStore, OpMessages } from '../lib/store'
 import { TIPOS_GASTO, type Gasto, type TipoGasto } from '../lib/types'
 import { todayIn } from '../lib/dates'
 import { ambitoLook, categoriaLook, medioLook, sortMedios } from '../lib/visual'
 import { catalogOptions } from './shared'
-import { Button, ErrorBox, Field, inputCls, Modal, Segmented, Switch } from './ui'
+import { otrosAlFinal } from '../lib/orden'
+import { Button, Field, inputCls, Modal, Segmented, Switch } from './ui'
 
 export type ModalMode = 'create' | 'edit' | 'clone'
 
@@ -25,9 +26,11 @@ const schema = z.object({
   esRecurrente: z.boolean(),
 })
 
-type Form = Omit<GastoInput, 'monto'> & { montoText: string }
+export type GastoDraft = Omit<GastoInput, 'monto'> & { montoText: string }
+type Form = GastoDraft
 
-function initial(store: AppStore, mode: ModalMode, g: Gasto | null): Form {
+function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft): Form {
+  if (draft) return draft // reabrir tras un error: se conservan los datos que ingresaste
   const cfg = store.data?.config ?? {}
   const today = todayIn(cfg.zona_horaria || 'America/Lima')
   if (g) {
@@ -42,10 +45,17 @@ function initial(store: AppStore, mode: ModalMode, g: Gasto | null): Form {
   }
 }
 
-const TITLES: Record<ModalMode, { title: string; sub: string; cta: string; ok: string }> = {
-  create: { title: 'Nuevo gasto', sub: 'Elige el ámbito y luego la categoría.', cta: 'Registrar gasto', ok: 'Gasto registrado' },
-  edit: { title: 'Editar gasto', sub: 'Los cambios se guardan en tu hoja con el mismo ID.', cta: 'Guardar cambios', ok: 'Gasto actualizado' },
-  clone: { title: 'Clonar gasto', sub: 'Se creará un gasto nuevo con estos datos. Ajusta lo que necesites.', cta: 'Crear copia', ok: 'Copia registrada' },
+const TITLES: Record<ModalMode, { title: string; sub: string; cta: string }> = {
+  create: { title: 'Nuevo gasto', sub: 'Elige el ámbito y luego la categoría.', cta: 'Registrar gasto' },
+  edit: { title: 'Editar gasto', sub: 'Los cambios se guardan en tu hoja con el mismo ID.', cta: 'Guardar cambios' },
+  clone: { title: 'Clonar gasto', sub: 'Se creará un gasto nuevo con estos datos. Ajusta lo que necesites.', cta: 'Crear copia' },
+}
+
+/** Mensajes de las notificaciones de cada operación (pendiente → éxito o error real del backend). */
+export const GASTO_MSG: Record<ModalMode, OpMessages> = {
+  create: { pending: 'Guardando gasto…', ok: 'Gasto registrado correctamente.', error: 'No se pudo registrar el gasto.' },
+  edit: { pending: 'Actualizando gasto…', ok: 'Gasto actualizado correctamente.', error: 'Error al actualizar el registro.' },
+  clone: { pending: 'Clonando gasto…', ok: 'Gasto clonado correctamente.', error: 'No se pudo clonar el gasto.' },
 }
 
 function Chip({ on, color, children, onClick, label }: { on: boolean; color: string; children: React.ReactNode; onClick: () => void; label?: string }) {
@@ -59,11 +69,17 @@ function Chip({ on, color, children, onClick, label }: { on: boolean; color: str
   )
 }
 
-export default function GastoModal({ store, mode, gasto, onClose, onSaved }: { store: AppStore; mode: ModalMode; gasto: Gasto | null; onClose: () => void; onSaved: (msg: string) => void }) {
-  const [form, setForm] = useState<Form>(() => initial(store, mode, gasto))
+/**
+ * Formulario único de gasto (crear, editar, clonar), usado desde el Dashboard y desde Gastos.
+ * Al guardar valida, entrega la operación a `onSubmit` y se cierra: el guardado sigue en segundo plano
+ * y su resultado real llega como notificación. Si falla, la notificación permite reabrirlo con los mismos datos.
+ */
+export default function GastoModal({ store, mode, gasto, draft, onClose, onSubmit }: {
+  store: AppStore; mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; onClose: () => void
+  onSubmit: (input: GastoInput, mode: ModalMode, draft: GastoDraft) => boolean
+}) {
+  const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft))
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [serverError, setServerError] = useState('')
-  const [saving, setSaving] = useState(false)
   const set = (p: Partial<Form>) => setForm(f => ({ ...f, ...p }))
   const catalogo = store.data?.catalogo ?? []
   const opts = catalogOptions(catalogo, form.ambito ? [form.ambito] : [], form.categoria ? [form.categoria] : [])
@@ -71,13 +87,12 @@ export default function GastoModal({ store, mode, gasto, onClose, onSaved }: { s
   const medios = sortMedios((store.data?.medios ?? []).filter(m => m.activo).map(m => m.nombre))
   const monedas = (store.data?.config.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   // Al editar, conserva valores que ya no estén activos en el catálogo.
-  const withCurrent = (xs: string[], v: string) => (v && !xs.includes(v) ? [v, ...xs] : xs)
+  const withCurrent = (xs: string[], v: string) => otrosAlFinal(v && !xs.includes(v) ? [...xs, v] : xs)
   const t = TITLES[mode]
   const symbol = form.moneda === 'PEN' ? 'S/' : form.moneda === 'USD' ? 'US$' : form.moneda
 
-  async function submit(e?: React.FormEvent) {
+  function submit(e?: React.FormEvent) {
     e?.preventDefault()
-    if (saving) return // evita envíos duplicados
     const errs: Record<string, string> = {}
     const montoTxt = form.montoText.trim()
     const monto = Number(montoTxt.replace(',', '.'))
@@ -88,17 +103,8 @@ export default function GastoModal({ store, mode, gasto, onClose, onSaved }: { s
     if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
     setErrors(errs)
     if (Object.keys(errs).length || !parsed.success) return
-    setServerError('')
-    setSaving(true)
-    try {
-      await store.actions.saveGasto({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl }, mode === 'edit' ? 'update' : 'create')
-      onSaved(t.ok)
-      onClose() // solo se cierra cuando el backend confirmó
-    } catch (err) {
-      setServerError((err as Error).message) // los datos quedan en el formulario
-    } finally {
-      setSaving(false)
-    }
+    // El mismo ID viaja en cada reintento: el backend no duplica aunque llegue dos veces.
+    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl }, mode, form)) onClose()
   }
 
   return (
@@ -106,7 +112,7 @@ export default function GastoModal({ store, mode, gasto, onClose, onSaved }: { s
       icon={mode === 'edit' ? <Pencil className="size-5" /> : mode === 'clone' ? <Copy className="size-5" /> : <Receipt className="size-5" />}
       footer={<>
         <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-        <Button type="submit" form="gasto-form" loading={saving}>{mode === 'create' && <Plus className="size-4" />}{t.cta}</Button>
+        <Button type="submit" form="gasto-form">{mode === 'create' && <Plus className="size-4" />}{t.cta}</Button>
       </>}>
       <form id="gasto-form" onSubmit={submit} noValidate className="grid gap-5 md:grid-cols-2">
         <div className="space-y-4">
@@ -192,7 +198,6 @@ export default function GastoModal({ store, mode, gasto, onClose, onSaved }: { s
           </Field>
           <Switch checked={form.esRecurrente} onChange={v => set({ esRecurrente: v })} label="Es recurrente" />
         </div>
-        {serverError && <div className="md:col-span-2"><ErrorBox message={serverError} /></div>}
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </Modal>

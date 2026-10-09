@@ -6,7 +6,7 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
@@ -25,9 +25,12 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Servicios": [
+      "Línea Celular",
       "Otros"
     ],
     "Suscripciones": [
@@ -54,6 +57,19 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Muebles",
       "Otros"
     ],
+    "Salud": [
+      "Consultas Médicas",
+      "Medicamentos",
+      "Exámenes Médicos",
+      "Odontología",
+      "Otros"
+    ],
+    "Cuidado Personal": [
+      "Barbería / Peluquería",
+      "Higiene Personal",
+      "Gimnasio",
+      "Otros"
+    ],
     "Educación": [
       "Maestría",
       "Matrícula",
@@ -76,15 +92,20 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
+      "Otros"
+    ],
+    "Herramientas y Equipamiento": [
+      "Software Laboral",
+      "Equipos de Trabajo",
+      "Accesorios",
       "Otros"
     ],
     "Otros": [
@@ -100,27 +121,26 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Plan Nube": [
       "Hospedaje",
       "Cuidado Íntimo",
-      "Salida Juntos",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
       "Otros"
     ],
     "Regalos": [
       "Detalle Mensual",
       "Fecha Especial",
       "Aniversario",
+      "Sorpresas",
       "Otros"
     ],
     "Compras": [
@@ -129,9 +149,17 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Accesorios",
       "Ropa",
       "Calzado",
-      "Regalos",
       "Electrodomésticos",
       "Muebles",
+      "Otros"
+    ],
+    "Salidas": [
+      "Paseos",
+      "Cine",
+      "Juegos",
+      "Diversión",
+      "Restaurantes",
+      "Actividades Recreativas",
       "Otros"
     ],
     "Otros": [
@@ -147,7 +175,7 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
@@ -161,6 +189,7 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Accesorios",
       "Consultas Médicas",
       "Medicamentos",
+      "Cuidado Infantil",
       "Otros"
     ],
     "Hogar": [
@@ -169,6 +198,7 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Reparaciones",
       "Mantenimiento",
       "Electrodomésticos",
+      "Muebles",
       "Otros"
     ],
     "Servicios": [
@@ -181,9 +211,8 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
-      "Viajes Nacionales",
-      "Viajes Internacionales",
       "Otros"
     ],
     "Compras": [
@@ -197,14 +226,21 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Muebles",
       "Otros"
     ],
-    "Familia": [
+    "Apoyo Familiar": [
       "Padre",
       "Madre",
       "Pareja",
       "Hija",
       "Hermanos",
-      "Apoyo Familiar",
+      "Apoyo Económico",
       "Regalo Familiar",
+      "Otros"
+    ],
+    "Salud Familiar": [
+      "Consultas Médicas",
+      "Medicamentos",
+      "Exámenes Médicos",
+      "Emergencias",
       "Otros"
     ],
     "Educación": [
@@ -229,19 +265,35 @@ export const CATALOGO_INICIAL: Record<string, Record<string, string[]>> = {
       "Almuerzo",
       "Cena",
       "Delivery",
-      "Antojos",
+      "Snack / Antojos",
       "Bebidas",
       "Otros"
     ],
     "Transporte": [
       "Taxi",
+      "Moto Taxi",
       "Bus / Micro",
+      "Otros"
+    ],
+    "Salidas": [
+      "Cine",
+      "Paseos",
+      "Juegos",
+      "Diversión",
+      "Reuniones",
+      "Actividades Deportivas",
+      "Otros"
+    ],
+    "Regalos": [
+      "Cumpleaños",
+      "Fechas Especiales",
       "Otros"
     ],
     "Otros": [
       "Imprevistos",
       "Trámites",
-      "Por Clasificar"
+      "Por Clasificar",
+      "Otros"
     ]
   }
 }

@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { AlertTriangle, Info, Loader2, X } from 'lucide-react'
+import { useModalLayer } from '../lib/toast'
+import Toaster from './Toaster'
 
 /** Cierra un popover al hacer clic fuera o pulsar Escape. */
 export function useDismiss(open: boolean, close: () => void) {
@@ -138,6 +140,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
   open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg'
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  useModalLayer(open)
   useEffect(() => {
     const d = ref.current
     if (!d) return
@@ -159,6 +162,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
           </div>
           <div className="overflow-y-auto px-5 py-4">{children}</div>
           {footer && <div className="flex justify-end gap-2 border-t border-line bg-bg/50 px-5 py-3">{footer}</div>}
+          <Toaster layer="modal" />
         </div>
       )}
     </dialog>

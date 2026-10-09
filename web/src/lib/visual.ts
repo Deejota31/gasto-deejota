@@ -41,6 +41,12 @@ const CATEGORIAS: Record<string, { icon: string; color: string }> = {
   Hogar: { icon: 'house', color: '#16A085' },
   Servicios: { icon: 'zap', color: '#0E9F8E' },
   Familia: { icon: 'users', color: '#22A35A' },
+  'Apoyo Familiar': { icon: 'hand-coins', color: '#22A35A' },
+  Salud: { icon: 'stethoscope', color: '#E25563' },
+  'Salud Familiar': { icon: 'stethoscope', color: '#E25563' },
+  'Cuidado Personal': { icon: 'sparkles', color: '#E86AA6' },
+  'Herramientas y Equipamiento': { icon: 'wrench', color: '#B07A4A' },
+  Salidas: { icon: 'film', color: '#F07D69' },
 }
 
 const MEDIOS: Record<string, { icon: LucideIcon; color: string }> = {
@@ -57,6 +63,7 @@ export const MEDIOS_ORDEN = ['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectiv
 
 export function sortMedios(names: string[]): string[] {
   const pos = (n: string) => {
+    if (n.trim().toLowerCase() === 'otros') return 100 // "Otros" siempre al final, también tras medios agregados
     const i = MEDIOS_ORDEN.findIndex(m => m.toLowerCase() === n.trim().toLowerCase())
     return i < 0 ? 99 : i
   }

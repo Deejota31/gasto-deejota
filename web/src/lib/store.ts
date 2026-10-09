@@ -3,6 +3,13 @@ import { createApi, httpTransport, type Api, type Connection, type GastoInput } 
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { AppData, Caja, CatalogoItem, Gasto, Medio, Presupuesto } from './types'
+import { sortCatalogo } from './orden'
+import { dismiss, showToast, updateToast, type ToastAction } from './toast'
+
+/** El catálogo siempre se entrega ordenado ("Otros" al final de cada grupo), venga de la hoja o de un cambio local. */
+const normalize = (d: AppData): AppData => ({ ...d, catalogo: sortCatalogo(d.catalogo) })
+
+export interface OpMessages { pending: string; ok: string; error: string }
 
 const SNAPSHOT_KEY = 'gd.snapshot'
 
@@ -21,28 +28,43 @@ function writeSnapshot(conn: Connection | null, data: AppData) {
 }
 
 export function buildApi(conn: Connection | null): Api {
-  // ?demo=10000 carga más filas sintéticas para medir rendimiento en el navegador.
-  const n = Math.min(Number(new URLSearchParams(location.search).get('demo')) || 400, 20000)
-  return createApi(conn ? httpTransport(conn) : demoTransport(todayIn(), n))
+  if (conn) return createApi(httpTransport(conn))
+  // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
+  const q = new URLSearchParams(location.search)
+  const n = Math.min(Number(q.get('demo')) || 400, 20000)
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 10000))
+  const falla = q.get('falla') === '1'
+  return createApi(falla ? (action, payload) => (action === 'data' ? demo(action, payload)
+    : new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('No se pudo conectar con Google Sheets.'), { code: 'NETWORK' })), 300))) : demo)
 }
 
 /** Estado global: una lectura completa al abrir y al pulsar "Actualizar"; las escrituras actualizan el estado local. */
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const api = useMemo(() => apiOverride ?? buildApi(conn), [conn, apiOverride])
-  const [data, setData] = useState<AppData | null>(() => readSnapshot(conn))
+  const [data, setData] = useState<AppData | null>(() => { const s = readSnapshot(conn); return s && normalize(s) })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const loadingRef = useRef(false)
+  // Cambios confirmados mientras una lectura completa estaba en curso: se vuelven a aplicar sobre su resultado
+  // para que una respuesta tardía no pise datos más recientes. Todos los parches son idempotentes (upsert por clave).
+  const journal = useRef<((d: AppData) => AppData)[]>([])
+  const inflight = useRef(new Set<string>())
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
+  const quiet = useRef(false) // Configuración → "Mostrar notificaciones al guardar" desactivado: se omiten solo los éxitos
+  useEffect(() => { quiet.current = data?.config.notificaciones === 'false' }, [data?.config.notificaciones])
 
   // fresh=true salta la caché del servidor: "Actualizar" siempre trae lo último, incluidas ediciones hechas a mano en la hoja.
   const refresh = useCallback(async (fresh = true) => {
     if (loadingRef.current) return // evita peticiones duplicadas por clics repetidos
     loadingRef.current = true
+    journal.current = []
     setLoading(true)
     setError(null)
     try {
-      const d = await api.getData(fresh)
+      const raw = await api.getData(fresh)
+      const d = normalize(journal.current.reduce((acc, fn) => fn(acc), raw))
+      journal.current = []
       setData(d)
       setLastSync(new Date())
       writeSnapshot(conn, d)
@@ -55,14 +77,16 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   }, [api, conn])
 
   useEffect(() => {
-    setData(readSnapshot(conn))
+    const s = readSnapshot(conn)
+    setData(s && normalize(s))
     void refresh(false)
   }, [refresh, conn])
 
   const patch = useCallback((fn: (d: AppData) => AppData) => {
+    if (loadingRef.current) journal.current.push(fn)
     setData(prev => {
       if (!prev) return prev
-      const next = fn(prev)
+      const next = normalize(fn(prev))
       writeSnapshot(conn, next)
       return next
     })
@@ -115,7 +139,31 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     backup: () => api.backup(),
   }), [api, patch])
 
-  return { data, loading, error, lastSync, refresh, actions, isDemo: !conn && !apiOverride }
+  /**
+   * Ejecuta una escritura sin bloquear la interfaz: la promesa sigue en segundo plano y el resultado real
+   * del backend se informa con una notificación (arriba a la derecha). Devuelve false si esa misma operación
+   * (misma clave) ya está en curso, para evitar envíos duplicados.
+   * Una operación en curso no sobrevive a recargar o cerrar la pestaña: no es una cola persistente.
+   */
+  const track = useCallback((key: string, msg: OpMessages, fn: () => Promise<unknown>, extra?: { retry?: boolean; onErrorActions?: ToastAction[] }): boolean => {
+    if (inflight.current.has(key)) { showToast('info', 'Esa operación ya se está guardando.'); return false }
+    inflight.current.add(key)
+    setPending(new Set(inflight.current))
+    const id = showToast('pending', msg.pending)
+    const done = () => { inflight.current.delete(key); setPending(new Set(inflight.current)) }
+    fn().then(() => {
+      done()
+      if (quiet.current) dismiss(id); else updateToast(id, 'success', msg.ok)
+    }, (e: unknown) => {
+      done()
+      const actions: ToastAction[] = [...(extra?.retry !== false ? [{ label: 'Reintentar', run: () => { track(key, msg, fn, extra) } }] : []), ...(extra?.onErrorActions ?? [])]
+      const detail = e instanceof Error ? e.message : String(e ?? '')
+      updateToast(id, 'error', `${msg.error} ${detail}`.trim(), actions)
+    })
+    return true
+  }, [])
+
+  return { data, loading, error, lastSync, refresh, actions, track, pending, isDemo: !conn && !apiOverride }
 }
 
 export type AppStore = ReturnType<typeof useAppData>

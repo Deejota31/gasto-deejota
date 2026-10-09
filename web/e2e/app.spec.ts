@@ -236,3 +236,140 @@ test('caso 10: Familia + Bebé + Yape → tabla y KPI muestran exactamente esos 
   await go(page, 'Dashboard')
   expect(await total(page)).toBeCloseTo(suma, 2)
 })
+
+const toastStack = (page: Page) => page.locator('[aria-live="polite"]').filter({ has: page.locator('[data-kind]') })
+
+test('Dashboard: "+ Nuevo gasto" abre el mismo formulario y actualiza los KPI sin cambiar de sección', async ({ page }) => {
+  const antes = await total(page)
+  await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Snack / Antojos', monto: '15.25', medio: 'Plin', desc: 'Desde dashboard' })
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
+  await expect.poll(() => total(page)).toBeCloseTo(antes + 15.25, 2)
+})
+
+test('notificaciones arriba a la derecha, verdes al confirmar; Top 5 categorías y Top 10 subcategorías', async ({ page }) => {
+  await newGasto(page, { ambito: 'Familia', categoria: 'Hogar', sub: 'Muebles', monto: '9', medio: 'Yape', desc: 'Toast' })
+  const ok = page.locator('[data-kind="success"]').first()
+  await expect(ok).toBeVisible()
+  const box = (await ok.boundingBox())!
+  const vw = page.viewportSize()!.width
+  expect(box.y).toBeLessThan(80)
+  expect(vw - (box.x + box.width)).toBeLessThan(40)
+  expect(await ok.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(238, 249, 242)')
+  await expect(ok).toHaveCount(0, { timeout: 7000 }) // desaparece sola (~4 s)
+  await page.getByRole('button', { name: 'Período', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este año' }).click()
+  await expect(page.getByRole('heading', { name: 'Top 5 categorías' }).or(page.getByText('Top 5 categorías', { exact: true })).first()).toBeVisible()
+  expect(await page.getByLabel('Top 5 categorías').getByRole('button').count()).toBe(5)
+  expect(await page.getByLabel('Top 10 subcategorías').getByRole('button').count()).toBe(10)
+})
+
+test('formulario y filtros: "Otros" al final, Transporte nuevo y catálogo por ámbito', async ({ page }) => {
+  await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+  const d = dialog(page)
+  for (const amb of ['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos']) {
+    await d.getByRole('radiogroup', { name: 'Ámbito' }).getByRole('radio', { name: amb, exact: true }).click()
+    const cats = (await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio').allInnerTexts()).map(s => s.trim())
+    expect(cats.at(-1), amb).toBe('Otros')
+    await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Transporte', exact: true }).click()
+    expect((await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio').allInnerTexts()).map(s => s.trim()), amb)
+      .toEqual(['Taxi', 'Moto Taxi', 'Bus / Micro', 'Otros'])
+  }
+  await d.getByRole('radiogroup', { name: 'Ámbito' }).getByRole('radio', { name: 'Personal', exact: true }).click()
+  await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Servicios', exact: true }).click()
+  expect((await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio').allInnerTexts()).map(s => s.trim())).toEqual(['Línea Celular', 'Otros'])
+  await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Alimentación', exact: true }).click()
+  const alim = (await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio').allInnerTexts()).map(s => s.trim())
+  expect(alim).toContain('Snack / Antojos')
+  expect(alim).not.toContain('Antojos') // obsoleto: no se ofrece para gastos nuevos
+  await page.keyboard.press('Escape')
+  // Filtro de categorías con varios ámbitos: Otros sigue al final
+  await pickMulti(page, 'Ámbito', 'Personal')
+  await pickMulti(page, 'Ámbito', 'Pareja')
+  await page.getByRole('button', { name: 'Categoría', exact: true }).click()
+  const opts = (await page.getByRole('listbox', { name: 'Categoría' }).getByRole('option').allInnerTexts()).map(s => s.trim())
+  expect(opts.at(-1)).toBe('Otros')
+})
+
+test('Categorías: agregar una subcategoría la deja antes de "Otros"', async ({ page }) => {
+  await go(page, 'Categorías')
+  await page.getByRole('button', { name: 'Agregar subcategoría a Alimentación' }).click()
+  await dialog(page).getByLabel('Nombre').fill('Merienda')
+  await dialog(page).getByRole('button', { name: 'Agregar' }).click()
+  await expect(dialog(page)).toHaveCount(0) // se cierra al aceptar, sin esperar a la hoja
+  await expect(page.getByRole('status').filter({ hasText: 'Subcategoría creada correctamente.' })).toBeVisible()
+  const grupo = page.getByRole('button', { name: 'Merienda', exact: true }).locator('xpath=..') // chips de Alimentación
+  const chips = (await grupo.getByRole('button').allInnerTexts()).map(s => s.trim()).filter(Boolean)
+  expect(chips.at(-1)).toBe('Otros') // (aquí también se listan las inactivas, como "Antojos")
+  expect(chips.indexOf('Merienda')).toBeGreaterThan(chips.indexOf('Bebidas'))
+  // y en el formulario
+  await go(page, 'Gastos')
+  await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+  await dialog(page).getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Alimentación', exact: true }).click()
+  const subs = (await dialog(page).getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio').allInnerTexts()).map(s => s.trim())
+  expect(subs.slice(-2)).toEqual(['Merienda', 'Otros'])
+})
+
+test('históricos: un gasto con una subcategoría retirada se ve y se puede filtrar', async ({ page }) => {
+  await go(page, 'Gastos')
+  await page.getByLabel('Buscar gastos').fill('Gasto histórico')
+  await expect(page.getByRole('row', { name: /Gasto histórico/ })).toContainText('Antojos')
+  await page.getByLabel('Buscar gastos').fill('')
+  await page.getByRole('button', { name: 'Subcategoría', exact: true }).click()
+  await expect(page.getByRole('listbox', { name: 'Subcategoría' }).getByRole('option', { name: 'Antojos (histórica)' })).toBeVisible()
+  await page.getByRole('listbox', { name: 'Subcategoría' }).getByRole('option', { name: 'Antojos (histórica)' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('tbody tr')).toHaveCount(1)
+  // editar conserva el valor histórico
+  await page.getByRole('row', { name: /Gasto histórico/ }).getByRole('button', { name: 'Editar' }).click()
+  await expect(dialog(page).getByRole('radio', { name: 'Antojos', exact: true })).toHaveAttribute('aria-checked', 'true')
+})
+
+test.describe('Apps Script lento o caído', () => {
+  test('con 2,5 s de latencia se puede navegar mientras se guarda; el éxito llega al final', async ({ page }) => {
+    await page.goto('/?demo=60&latencia=2500')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 10000 })
+    const antes = await total(page)
+    await newGasto(page, { ambito: 'Trabajo', categoria: 'Transporte', sub: 'Moto Taxi', monto: '4', medio: 'Yape', desc: 'Lento' })
+    await expect(page.locator('[data-kind="pending"]')).toContainText('Guardando gasto…')
+    // la interfaz sigue usable: cambiar de pestaña, usar filtros y volver
+    await go(page, 'Categorías')
+    await go(page, 'Gastos')
+    await expect(page.getByRole('row', { name: /Lento/ })).toHaveCount(0) // aún no confirmado: no se muestra como guardado
+    await go(page, 'Dashboard')
+    await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible({ timeout: 6000 })
+    await expect.poll(() => total(page)).toBeCloseTo(antes + 4, 2)
+    await go(page, 'Gastos')
+    await expect(page.getByRole('row', { name: /Lento/ })).toHaveCount(1) // sin duplicados
+  })
+
+  test('si la escritura falla: notificación roja, sin éxito falso, y "Abrir formulario" conserva los datos', async ({ page }) => {
+    await page.goto('/?demo=60&falla=1')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    const antes = await total(page)
+    await newGasto(page, { ambito: 'Amigos', categoria: 'Salidas', sub: 'Cine', monto: '30', medio: 'Plin', desc: 'Falla' })
+    const err = page.getByRole('alert').filter({ hasText: 'No se pudo registrar el gasto.' })
+    await expect(err).toBeVisible()
+    expect(await err.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(253, 240, 239)')
+    await expect(page.getByText('Gasto registrado correctamente.')).toHaveCount(0)
+    expect(await total(page)).toBe(antes)
+    // con otro formulario abierto, el error sigue visible y usable (se muestra dentro del modal)
+    await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    await expect(dialog(page).getByRole('alert').filter({ hasText: 'No se pudo registrar el gasto.' })).toBeVisible()
+    await dialog(page).getByRole('button', { name: 'Cancelar' }).click()
+    await err.getByRole('button', { name: 'Abrir formulario' }).click()
+    await expect(dialog(page).getByLabel('Monto', { exact: true })).toHaveValue('30')
+    await expect(dialog(page).getByLabel('Descripción')).toHaveValue('Falla')
+    await expect(dialog(page).getByRole('radio', { name: 'Cine', exact: true })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  test('las notificaciones no bloquean clics fuera de su área', async ({ page }) => {
+    await page.goto('/?demo=60&latencia=3000')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 10000 })
+    await newGasto(page, { ambito: 'Personal', categoria: 'Auto', sub: 'Gas', monto: '20', medio: 'Yape', desc: 'Bloqueo' })
+    await expect(page.locator('[data-kind="pending"]')).toBeVisible()
+    // el botón "Mi hoja"/actualizar está bajo la zona de notificaciones en escritorio: se puede pulsar igual
+    await go(page, 'Gastos')
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Gastos' })).toHaveAttribute('aria-current', 'page')
+  })
+})

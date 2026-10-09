@@ -3,6 +3,7 @@ import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag } fr
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
 import { ambitoLook, categoriaLook, COLORS, ICONS } from '../lib/visual'
+import { normName, otrosAlFinal } from '../lib/orden'
 import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
 type Nivel = 'ambito' | 'categoria' | 'subcategoria'
@@ -21,7 +22,10 @@ function buildTree(catalogo: CatalogoItem[]): AmbNode[] {
     if (!cat) { cat = { name: c.categoria, activo: true, subs: [] }; a.cats.push(cat) }
     if (!c.subcategoria) { cat.head = c; cat.activo = c.activo } else cat.subs.push(c)
   }
-  return [...out.values()]
+  // El catálogo llega ordenado (sortCatalogo); esto solo garantiza "Otros" al final de cada grupo.
+  return otrosAlFinal([...out.values()], a => a.name).map(a => ({
+    ...a, cats: otrosAlFinal(a.cats, c => c.name).map(c => ({ ...c, subs: otrosAlFinal(c.subs, x => x.subcategoria) })),
+  }))
 }
 
 /** Resalta las coincidencias de la búsqueda. */
@@ -32,7 +36,7 @@ function Hl({ text, q }: { text: string; q: string }) {
   return <>{text.slice(0, i)}<mark className="rounded bg-[#FDE68A] px-0.5 text-ink dark:bg-[#7C5E10]">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
 }
 
-export default function Categorias({ store, notify }: { store: AppStore; notify: (m: string) => void }) {
+export default function Categorias({ store }: { store: AppStore }) {
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
   const tree = useMemo(() => buildTree(catalogo), [catalogo])
   const [sel, setSel] = useState('')
@@ -146,7 +150,7 @@ export default function Categorias({ store, notify }: { store: AppStore; notify:
         </>
       )}
 
-      {target && <CatalogModal key={JSON.stringify(target)} store={store} target={target} tree={tree} onClose={() => setTarget(null)} notify={notify} />}
+      {target && <CatalogModal key={JSON.stringify(target)} store={store} target={target} tree={tree} onClose={() => setTarget(null)} />}
     </div>
   )
 }
@@ -192,7 +196,7 @@ function CatCard({ a, c, catalogo, q, onEdit }: { a: string; c: CatNode; catalog
   )
 }
 
-function CatalogModal({ store, target, tree, onClose, notify }: { store: AppStore; target: Target; tree: AmbNode[]; onClose: () => void; notify: (m: string) => void }) {
+function CatalogModal({ store, target, tree, onClose }: { store: AppStore; target: Target; tree: AmbNode[]; onClose: () => void }) {
   const catalogo = store.data?.catalogo ?? []
   const { mode, nivel } = target
   const amb = tree.find(a => a.name === target.ambito)
@@ -209,7 +213,6 @@ function CatalogModal({ store, target, tree, onClose, notify }: { store: AppStor
   const [icono, setIcono] = useState(mode === 'edit' ? (head?.icono || iconKey) : 'tag')
   const [color, setColor] = useState(mode === 'edit' ? (head?.color || look.color) : COLORS[0])
   const [activo, setActivo] = useState(mode === 'edit' ? (nivel === 'ambito' ? amb?.activo : nivel === 'categoria' ? cat?.activo : sub?.activo) ?? true : true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const cats = tree.find(a => a.name === ambito)?.cats.map(c => c.name) ?? []
   const label = { ambito: 'ámbito', categoria: 'categoría', subcategoria: 'subcategoría' }[nivel]
@@ -219,29 +222,33 @@ function CatalogModal({ store, target, tree, onClose, notify }: { store: AppStor
     ? (store.data?.gastos ?? []).filter(g => g.ambito === target.ambito && (nivel === 'ambito' || g.categoria === target.categoria) && (nivel !== 'subcategoria' || g.subcategoria === target.subcategoria)).length
     : 0
 
-  async function save() {
-    const n = nombre.trim()
+  // No bloquea: valida, cierra y la escritura sigue en segundo plano; el resultado llega como notificación.
+  function save() {
+    const n = nombre.trim().replace(/\s+/g, ' ')
     if (!n) return setError(`Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`)
     if (nivel !== 'ambito' && !ambito) return setError('Elige un ámbito.')
     if (nivel === 'subcategoria' && !categoria) return setError('Elige una categoría.')
-    const key = (a: string, c: string, s: string) => `${a}|${c}|${s}`.toLowerCase()
+    const key = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
     const finalKey = nivel === 'ambito' ? key(n, '', '') : nivel === 'categoria' ? key(ambito, n, '') : key(ambito, categoria, n)
     const exists = catalogo.some(c => key(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
-    if (exists && (mode === 'create' || n !== original)) return setError(`Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`)
-    setSaving(true)
-    setError('')
-    try {
-      if (mode === 'edit' && n !== original) {
-        const r = await store.actions.renameCatalogo({ nivel, ambito: target.ambito!, categoria: target.categoria, subcategoria: target.subcategoria, nuevo: n })
-        if (r.gastos) notify(`Renombrado. ${r.gastos} gasto(s) actualizados.`)
+    if (exists && (mode === 'create' || normName(n) !== normName(original))) return setError(`Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`)
+    const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    let renombrado = false
+    const a = nivel === 'ambito' ? n : ambito
+    const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
+    const s = nivel === 'subcategoria' ? n : ''
+    const ok = store.track(`cat:${finalKey}`, mode === 'create'
+      ? { pending: `Creando ${label}…`, ok: `${Label} ${masc ? 'creado' : 'creada'} correctamente.`, error: `No se pudo crear ${masc ? 'el' : 'la'} ${label}.` }
+      : { pending: `Actualizando ${label}…`, ok: `${Label} ${masc ? 'actualizado' : 'actualizada'} correctamente.`, error: `Error al actualizar ${masc ? 'el' : 'la'} ${label}.` },
+    async () => {
+      // Si el renombrado ya se guardó y falló el paso siguiente, "Reintentar" no lo repite.
+      if (mode === 'edit' && n !== original && !renombrado) {
+        await store.actions.renameCatalogo({ nivel, ambito: target.ambito!, categoria: target.categoria, subcategoria: target.subcategoria, nuevo: n })
+        renombrado = true
       }
-      const a = nivel === 'ambito' ? n : ambito
-      const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
-      const s = nivel === 'subcategoria' ? n : ''
       await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(usaVisual ? { icono, color } : {}) })
-      notify(mode === 'create' ? `${label.charAt(0).toUpperCase()}${label.slice(1)} ${masc ? 'agregado' : 'agregada'}` : 'Cambios guardados')
-      onClose()
-    } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
+    })
+    if (ok) onClose()
   }
 
   const Preview = ICONS[icono] ?? ICONS.tag
@@ -249,7 +256,7 @@ function CatalogModal({ store, target, tree, onClose, notify }: { store: AppStor
     <Modal open onClose={onClose} size="md" title={`${mode === 'create' ? (masc ? 'Nuevo' : 'Nueva') : 'Editar'} ${label}`}
       subtitle={mode === 'create' ? 'Aparecerá de inmediato en el formulario de gastos.' : 'Los gastos existentes conservan su clasificación.'}
       icon={usaVisual ? <Preview className="size-5" style={{ color }} /> : <Tag className="size-5" />}
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button loading={saving} onClick={save}>{mode === 'create' ? 'Agregar' : 'Guardar'}</Button></>}>
+      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{mode === 'create' ? 'Agregar' : 'Guardar'}</Button></>}>
       <div className="space-y-4">
         {nivel !== 'ambito' && (
           <div className="grid gap-3 sm:grid-cols-2">

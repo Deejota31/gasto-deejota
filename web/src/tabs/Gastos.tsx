@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Download, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
 import { formatMoney, toCents } from '../lib/money'
 import { matchesDims } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook } from '../lib/visual'
-import GastoModal, { type ModalMode } from '../components/GastoModal'
+import type { ModalMode } from '../components/GastoModal'
 import { Pagination, SwipeRow } from '../components/table'
 import { Button, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
@@ -45,8 +45,8 @@ function useDebounced<T>(value: T, ms = 250): T {
   return v
 }
 
-export default function Gastos({ store, notify, filters, setFilters, today }: {
-  store: AppStore; notify: (m: string) => void; filters: Filters; setFilters: (f: Filters) => void; today: string
+export default function Gastos({ store, openGasto, filters, setFilters, today }: {
+  store: AppStore; openGasto: (mode: ModalMode, gasto: Gasto | null) => void; filters: Filters; setFilters: (f: Filters) => void; today: string
 }) {
   const cfg = store.data?.config ?? {}
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
@@ -56,10 +56,9 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'fecha', dir: -1 })
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(10)
-  const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; key: number } | null>(null)
   const [confirm, setConfirm] = useState<Gasto | null>(null)
-  const [busy, setBusy] = useState('')
-  const [actionError, setActionError] = useState('')
+  // Un gasto con una escritura en curso muestra "Guardando…" y no admite otra acción hasta que el backend responda.
+  const isBusy = (g: Gasto) => store.pending.has(`gasto:${g.id}`) || store.pending.has(`estado:${g.id}`)
   const medios = (store.data?.medios ?? []).map(m => m.nombre)
 
   const rows = useMemo(() => {
@@ -84,17 +83,16 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
 
   const toggleSort = (key: SortKey) => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === 'fecha' || key === 'monto' ? -1 : 1 }))
 
-  async function changeEstado(g: Gasto, next: 'Activo' | 'Anulado') {
-    setBusy(g.id)
-    setActionError('')
-    try {
-      await store.actions.setEstado(g, next)
-      notify(next === 'Anulado' ? 'Gasto eliminado. Puedes restaurarlo desde "Eliminados".' : 'Gasto restaurado')
-      setConfirm(null)
-    } catch (e) { setActionError((e as Error).message) } finally { setBusy('') }
+  // No bloquea: cierra la confirmación, la escritura sigue en segundo plano y el resultado llega como notificación.
+  function changeEstado(g: Gasto, next: 'Activo' | 'Anulado') {
+    setConfirm(null)
+    store.track(`estado:${g.id}`, next === 'Anulado'
+      ? { pending: 'Eliminando gasto…', ok: 'Gasto eliminado correctamente. Puedes restaurarlo desde "Eliminados".', error: 'No se pudo eliminar el gasto.' }
+      : { pending: 'Restaurando gasto…', ok: 'Gasto restaurado correctamente.', error: 'No se pudo restaurar el gasto.' },
+    () => store.actions.setEstado(g, next))
   }
 
-  const open = (mode: ModalMode, gasto: Gasto | null) => setModal({ mode, gasto, key: Date.now() })
+  const open = openGasto
   const SortTh = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => {
     const Icon = sort.key !== k ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown
     return (
@@ -104,19 +102,21 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
     )
   }
 
-  const actionsFor = (g: Gasto, compact = false) => g.estado === 'Activo' ? (
+  const actionsFor = (g: Gasto, compact = false) => isBusy(g) ? (
+    <span className="inline-flex items-center gap-1.5 px-2 text-xs text-muted"><Loader2 className="size-3.5 animate-spin" /> Guardando…</span>
+  ) : g.estado === 'Activo' ? (
     <>
       <IconButton label="Editar" tone="primary" onClick={() => open('edit', g)}><Pencil className="size-4" /></IconButton>
       <IconButton label="Clonar" tone="primary" onClick={() => open('clone', g)}><Copy className="size-4" /></IconButton>
       <IconButton label="Eliminar" tone="danger" onClick={() => setConfirm(g)}><Trash2 className="size-4" /></IconButton>
     </>
   ) : (
-    <Button variant="soft" className={compact ? 'px-2 py-1 text-xs' : ''} loading={busy === g.id} onClick={() => changeEstado(g, 'Activo')}><Undo2 className="size-3.5" /> Restaurar</Button>
+    <Button variant="soft" className={compact ? 'px-2 py-1 text-xs' : ''} onClick={() => changeEstado(g, 'Activo')}><Undo2 className="size-3.5" /> Restaurar</Button>
   )
 
   return (
     <div className="space-y-4">
-      <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today}
+      <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={store.data?.gastos}
         extra={<>
           <label className="relative">
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
@@ -127,7 +127,6 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
         </>} />
 
       {store.error && <ErrorBox message={store.error} onRetry={store.refresh} />}
-      {actionError && <ErrorBox message={actionError} />}
 
       <section className="rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)]">
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -194,7 +193,9 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
                 const off = g.estado === 'Anulado'
                 return (
                   <li key={g.id} className="rounded-2xl border border-line">
-                    <SwipeRow width={off ? 120 : 168} actions={off ? (
+                    <SwipeRow width={off ? 120 : 168} actions={isBusy(g) ? (
+                      <span className="flex flex-1 items-center justify-center gap-1.5 bg-bg text-xs text-muted"><Loader2 className="size-4 animate-spin" />Guardando…</span>
+                    ) : off ? (
                       <button type="button" onClick={() => changeEstado(g, 'Activo')} className="flex flex-1 flex-col items-center justify-center gap-1 bg-primary-soft text-xs font-medium text-navy"><Undo2 className="size-4" />Restaurar</button>
                     ) : (<>
                       <button type="button" onClick={() => open('edit', g)} className="flex flex-1 flex-col items-center justify-center gap-1 bg-primary-soft text-xs font-medium text-navy"><Pencil className="size-4" />Editar</button>
@@ -210,6 +211,7 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
                             <Pill size="xs" color={al.color} Icon={al.Icon}>{g.ambito}</Pill>
                             <Pill size="xs" color={ml.color} Icon={ml.Icon}>{g.medioPago}</Pill>
                             {g.esRecurrente && <Repeat className="size-3 text-turquesa" aria-label="Recurrente" />}
+                            {isBusy(g) && <span className="inline-flex items-center gap-1 text-[11px] text-muted"><Loader2 className="size-3 animate-spin" />Guardando…</span>}
                           </div>
                         </div>
                         <div className="text-right">
@@ -231,10 +233,9 @@ export default function Gastos({ store, notify, filters, setFilters, today }: {
         )}
       </section>
 
-      {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} onClose={() => setModal(null)} onSaved={notify} />}
 
       <Modal open={!!confirm} onClose={() => setConfirm(null)} size="sm" title="Eliminar gasto" icon={<Trash2 className="size-5" />}
-        footer={<><Button variant="outline" onClick={() => setConfirm(null)}>Cancelar</Button><Button variant="danger" loading={!!busy} onClick={() => confirm && changeEstado(confirm, 'Anulado')}>Eliminar</Button></>}>
+        footer={<><Button variant="outline" onClick={() => setConfirm(null)}>Cancelar</Button><Button variant="danger" onClick={() => confirm && changeEstado(confirm, 'Anulado')}>Eliminar</Button></>}>
         {confirm && (
           <div className="space-y-2 text-sm">
             <div className="rounded-xl border border-line bg-bg/50 p-3">
