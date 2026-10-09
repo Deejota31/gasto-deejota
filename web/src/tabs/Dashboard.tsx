@@ -1,15 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
-  Activity, AlertTriangle, Baby, Calculator, CalendarDays, Car, CircleDollarSign, Cloud, GitFork, Hash, Layers, Lock, Pencil,
-  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, Target, TrendingUp, Trophy, Wallet,
+  Activity, AlertTriangle, Baby, Calculator, CalendarDays, Car, Cloud, Hash, Layers, Lock, Pencil,
+  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
 import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, Filters } from '../lib/types'
-import { categoriaLook, medioLook } from '../lib/visual'
-import { AcumuladoChart, AmbitoDonut, BarList, FrecuenciaChart, Jerarquia, SankeyChart, SubLabel } from '../components/charts'
+import { categoriaLook } from '../lib/visual'
+import { AcumuladoChart, AmbitoDonut, BarList, SubLabel } from '../components/charts'
+import { AnalisisDetallado } from '../components/analisis'
 import { Button, Card, ErrorBox, Field, IconButton, InfoTooltip, inputCls, Modal, Skeleton, Switch } from '../components/ui'
 import { FilterBar } from '../components/shared'
 
@@ -23,7 +24,6 @@ const cajaIcon = (c: Caja) => {
 export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
 }) {
-  const [tab, setTab] = useState<'jerarquia' | 'sankey' | 'frecuencia' | 'medios'>('jerarquia')
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const data = store.data
   const base = data?.config.moneda || 'PEN'
@@ -132,23 +132,14 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
 
           <Card title="Análisis detallado" icon={<Layers className="size-4 text-morado" />}
             info={{ title: 'Análisis detallado', body: <>
-              <p><b>Jerarquía:</b> desglose ámbito → categoría → subcategoría.</p>
-              <p><b>Flujo de medios de pago:</b> desde qué medio sale el dinero y hacia qué ámbito va. El grosor es el monto.</p>
-              <p><b>Frecuencia vs monto:</b> cada punto es una categoría; a la derecha, muchas compras; arriba, mucho dinero. Clic para filtrar.</p>
-              <p><b>Por medio de pago:</b> cuánto pagaste con cada medio. Clic para filtrar.</p></> }}>
-            <div role="tablist" aria-label="Vistas del análisis" className="mb-4 flex flex-wrap gap-1 rounded-xl bg-bg p-1">
-              {([['jerarquia', 'Jerarquía', GitFork], ['sankey', 'Flujo de medios de pago', CircleDollarSign], ['frecuencia', 'Frecuencia vs monto', Target], ['medios', 'Por medio de pago', Wallet]] as const).map(([id, label, Icon]) => (
-                <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
-                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${tab === id ? 'bg-card text-navy shadow-sm' : 'text-muted hover:text-ink'}`}>
-                  <Icon className="size-3.5" />{label}
-                </button>
-              ))}
-            </div>
-            {tab === 'jerarquia' && <Jerarquia a={a} currency={base} catalogo={catalogo} />}
-            {tab === 'sankey' && <SankeyChart a={a} currency={base} catalogo={catalogo} />}
-            {tab === 'frecuencia' && <FrecuenciaChart a={a} currency={base} catalogo={catalogo} onPick={c => setFilters({ ...filters, categorias: toggle(filters.categorias, c) })} />}
-            {tab === 'medios' && <BarList ariaLabel="Gasto por medio de pago" items={a.porMedio} total={a.total} currency={base} lookFor={it => medioLook(it.name)}
-              selected={it => filters.medios.includes(it.name)} onToggle={it => setFilters({ ...filters, medios: toggle(filters.medios, it.name) })} />}
+              <p>Usa los mismos filtros y período del dashboard; no hace consultas adicionales.</p>
+              <p><b>Jerarquía:</b> ámbito → categoría → subcategoría, con barras de peso relativo. Clic en un ámbito para expandir o contraer.</p>
+              <p><b>Flujo de medios de pago:</b> desde qué medio sale el dinero y hacia qué ámbito va; el grosor es el monto. Pasa el mouse sobre un medio, un ámbito o una conexión para resaltarlo.</p>
+              <p><b>Frecuencia vs monto:</b> cada burbuja es una categoría; a la derecha, muchas compras; arriba, mucho dinero; el tamaño es el monto. Clic para filtrar.</p></> }}>
+            <AnalisisDetallado a={a} currency={base} catalogo={catalogo}
+              periodo={{ nombre: mes ? monthLabel(mes, true) : rangeLabel(filters), desde: filters.desde, hasta: filters.hasta, dateFormat: data!.config.formato_fecha }}
+              filtros={[...filters.ambitos, ...filters.categorias, ...filters.subcategorias, ...filters.medios, ...filters.tipos]}
+              onPickCategoria={c => setFilters({ ...filters, categorias: toggle(filters.categorias, c) })} />
           </Card>
         </>
       )}
@@ -308,7 +299,8 @@ function CajaModal({ store, target, cajas, mes, money, onClose }: {
 }) {
   const esGeneral = target.caja.filtroCampo === 'Todos'
   const [monto, setMonto] = useState(String(target.asignado / 100))
-  const [soloMes, setSoloMes] = useState(false)
+  // Siempre empieza en ON (solo el mes elegido) cada vez que se abre; si lo apagas, se respeta mientras esté abierto.
+  const [soloMes, setSoloMes] = useState(true)
   const [error, setError] = useState('')
   const n = Number(monto)
   const cents = Math.round(n * 100)
@@ -320,6 +312,7 @@ function CajaModal({ store, target, cajas, mes, money, onClose }: {
   // No bloquea: valida, cierra y la escritura sigue en segundo plano con su notificación de resultado.
   function save() {
     if (!/^\d+(\.\d{1,2})?$/.test(monto.trim()) || n < 0) return setError('Ingresa un monto válido (hasta 2 decimales, sin negativos).')
+    if (soloMes && !mes) return setError('Para ajustar solo un mes, elige un único mes en el filtro de período, o apaga “Solo este mes” para cambiar el presupuesto base.')
     const ok = store.track(`caja:${target.caja.id}`, { pending: `Guardando ${target.caja.nombre}…`, ok: `${target.caja.nombre} actualizada correctamente.`, error: `No se pudo guardar ${target.caja.nombre}.` },
       () => soloMes && mes ? store.actions.savePresupuesto({ periodo: mes, cajaId: target.caja.id, monto: n }) : store.actions.saveCaja({ ...target.caja, presupuesto: n }))
     if (ok) onClose()

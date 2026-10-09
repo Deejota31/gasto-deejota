@@ -57,11 +57,21 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       ['plan-nube', 'Caja Plan Nube', 150, 'Categoría', 'Plan Nube', '#8b5cf6', 4],
     ] as unknown[][],
     presupuestos: [] as unknown[][],
-    plantillas: [
-      ['pl-00000000-0000-4000-8000-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', '', ''],
-      ['pl-00000000-0000-4000-8000-000000000002', 'Personal', 'Servicios', 'Línea Celular', 'Línea Celular', '', ''],
-      ['pl-00000000-0000-4000-8000-000000000003', 'Personal', 'Alimentación', 'Antojos', 'Antojos de la Tarde', '', ''], // clasificación retirada
-    ] as unknown[][],
+    // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto, moneda, medio, orden]
+    plantillas: ([
+      ['Familia', 'Servicios', 'Luz', 'Luz', 120, 'PEN', 'Yape'],
+      ['Familia', 'Servicios', 'Agua', 'Agua', 60, 'PEN', 'Yape'],
+      ['Familia', 'Servicios', 'Internet', 'Internet', 100, 'PEN', 'Plin'],
+      ['Familia', 'Servicios', 'Gas', 'Gas', 45, 'PEN', 'Efectivo'],
+      ['Personal', 'Servicios', 'Línea Celular', 'Línea Celular', 40, 'PEN', 'Yape'],
+      ['Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 80, 'PEN', 'Yape'],
+      ['Personal', 'Suscripciones', 'Spotify', 'Spotify', 25, 'PEN', 'Yape'],
+      ['Personal', 'Suscripciones', 'Claude', 'Claude', 20, 'USD', 'Transferencia'],
+      ['Personal', 'Suscripciones', 'Netflix', 'Netflix', 40, 'PEN', 'Yape'],
+      ['Familia', 'Apoyo Familiar', 'Padre', 'Seguro Padre', 100, 'PEN', 'Transferencia'],
+      ['Personal', 'Alimentación', 'Antojos', 'Antojos de la Tarde', '', 'PEN', ''], // clasificación retirada: "Requiere revisión"
+    ] as unknown[][]).map((r, i) => [`pl-00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, r[0], r[1], r[2], r[3], '', '', r[4], r[5], r[6], i + 1]),
+    ordenGastos: [] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
   const upsert = (rows: unknown[][], keyLen: number, row: unknown[]) => {
@@ -119,17 +129,55 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
     saveCaja: p => upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor, p.color, Number(p.orden)]),
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
-    plantillas: () => db.plantillas,
+    plantillas: () => [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10])),
     savePlantilla: p => {
-      const k = (r: unknown[]) => r.slice(1, 5).map(x => normName(String(x ?? ''))).join('|')
-      const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, new Date().toISOString(), new Date().toISOString()]
-      if (![row[1], row[2], row[3], row[4]].every(v => String(v ?? '').trim())) throw fail('VALIDATION', 'Los cuatro campos son obligatorios.')
-      if (db.plantillas.some(r => r[0] !== p.id && k(r) === k(row))) throw fail('VALIDATION', 'Ya existe una plantilla igual.')
+      const n = (v: unknown) => normName(String(v ?? ''))
+      const k = (r: unknown[]) => [n(r[1]), n(r[2]), n(r[3]), n(r[4]), r[7] === '' ? '' : Math.round(Number(r[7]) * 100), n(r[8] || 'PEN'), n(r[9])].join('|')
+      const now = new Date().toISOString()
+      const monto = p.monto === '' || p.monto === null || p.monto === undefined ? '' : Math.round(Number(p.monto) * 100) / 100
+      if (monto !== '' && !(Number(monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
+      const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, now, now, monto, p.moneda || 'PEN', p.medioPago ?? '', 0]
+      if (![row[1], row[2], row[3], row[4]].every(v => String(v ?? '').trim())) throw fail('VALIDATION', 'Ámbito, categoría, subcategoría y descripción son obligatorios.')
+      if (db.plantillas.some(r => r[0] !== p.id && k(r) === k(row))) throw fail('VALIDATION', 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.')
       const i = db.plantillas.findIndex(r => r[0] === p.id)
-      if (i >= 0) { row[5] = db.plantillas[i][5]; db.plantillas[i] = row } else db.plantillas.push(row)
-      return row
+      if (i >= 0) { row[5] = db.plantillas[i][5]; row[10] = db.plantillas[i][10]; db.plantillas[i] = row; return [...row] }
+      const orden = [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10]))
+      const pos = p.afterId ? orden.findIndex(r => r[0] === p.afterId) + 1 || orden.length : orden.length
+      orden.splice(pos, 0, row)
+      orden.forEach((r, j) => { r[10] = j + 1 })
+      db.plantillas.push(row)
+      return [...row]
+    },
+    reorderPlantillas: p => {
+      const ids = p.ids as string[]
+      const resto = db.plantillas.filter(r => !ids.includes(String(r[0]))).sort((a, b) => Number(a[10]) - Number(b[10]))
+      ;[...ids.map(id => db.plantillas.find(r => r[0] === id)).filter(Boolean) as unknown[][], ...resto].forEach((r, j) => { r[10] = j + 1 })
+      return { ok: true }
     },
     deletePlantilla: p => { db.plantillas = db.plantillas.filter(r => r[0] !== p.id); return { id: p.id, eliminada: true } },
+    saveGastosBatch: p => {
+      const lista = p.gastos as Record<string, unknown>[]
+      lista.forEach((g, i) => { if (!(Number(g.monto) > 0) || !String(g.medioPago ?? '').trim()) throw fail('VALIDATION', `Gasto ${i + 1} (${g.descripcion}): monto o medio de pago inválido.`) })
+      const now = new Date().toISOString()
+      const nuevas: unknown[][] = []
+      // Como el backend real: un ID ya existente no se duplica ni se modifica; se devuelve lo guardado.
+      const filas = lista.map(g => db.gastos.find(r => r[13] === g.id) ?? (() => {
+        const f = [g.fecha, Math.round(Number(g.monto) * 100) / 100, g.moneda, g.categoria, g.subcategoria, g.descripcion, g.medioPago,
+          g.tipoGasto ?? 'Variable', g.ambito, g.esRecurrente === true, 'Activo', 'web', '', g.id, now, now]
+        nuevas.push(f)
+        return f
+      })())
+      db.gastos.push(...nuevas)
+      return { estado: 'confirmado', loteId: p.loteId, solicitados: filas.length, confirmados: filas.length, nuevos: nuevas.length, yaExistian: filas.length - nuevas.length,
+        ids: filas.map(f => f[13]), gastos: filas, mensaje: `Se registraron ${filas.length} gastos.` }
+    },
+    reorderGastos: p => {
+      ;(p.ids as string[]).forEach((id, i) => {
+        const r = db.ordenGastos.find(x => x[0] === id)
+        if (r) r[1] = i + 1; else db.ordenGastos.push([id, i + 1])
+      })
+      return { ok: true }
+    },
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
     backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/' }),
   }
