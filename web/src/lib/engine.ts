@@ -26,7 +26,7 @@ export interface Ctx {
 export interface Item { name: string; cents: number; count: number }
 export interface SubItem extends Item { categoria: string; subcategoria: string; key: string }
 export interface DayPoint { date: string; label: string; diario: number; acumulado: number | null; ideal: number | null; proyeccion: number | null }
-export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; disponible: number; pct: number | null; excedido: boolean }
+export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; count: number; disponible: number; pct: number | null; excedido: boolean }
 export interface CajasResumen {
   general: Caja | null
   presupuesto: number        // P
@@ -40,6 +40,8 @@ export interface CajasResumen {
   pct: number | null
   sobreasignado: boolean     // R > P
   subcajas: SubcajaResumen[]
+  /** Subcajas desactivadas: no reservan ni toman gastos. */
+  inactivas: Caja[]
 }
 
 export interface FlowLink { medio: string; ambito: string; cents: number; count: number }
@@ -97,15 +99,35 @@ export function matchesDims(g: Gasto, f: Filters): boolean {
 export const hasDimFilters = (f: Filters) =>
   !!(f.ambitos.length || f.categorias.length || f.subcategorias.length || f.medios.length || f.tipos.length)
 
-export function cajaMatches(c: Caja, g: Gasto): boolean {
+/**
+ * Prioridad entre cajas que se solapan: gana la más específica (Subcategoría > Categoría > Ámbito > Medio de pago);
+ * a igual nivel, la primera en el orden manual. Así cada gasto cae en UNA sola subcaja y nunca se cuenta dos veces.
+ */
+export const ESPECIFICIDAD: Record<Caja['filtroCampo'], number> = { 'Subcategoría': 4, 'Categoría': 3, 'Ámbito': 2, 'Medio de pago': 1, Todos: 0 }
+export const cajaActiva = (c: Caja) => c.activo !== false
+export function prioridadCajas(cajas: Caja[]): Caja[] {
+  return cajas.filter(c => c.filtroCampo !== 'Todos' && cajaActiva(c))
+    .sort((a, b) => ESPECIFICIDAD[b.filtroCampo] - ESPECIFICIDAD[a.filtroCampo] || a.orden - b.orden)
+}
+/** La subcaja que se queda con el gasto (o undefined: va a "gastado fuera de subcajas"). */
+export const cajaDe = (priorizadas: Caja[], g: Pick<Gasto, 'ambito' | 'categoria' | 'subcategoria' | 'medioPago'>) => priorizadas.find(c => cajaMatches(c, g))
+
+const nrm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
+export function cajaMatches(c: Caja, g: Pick<Gasto, 'ambito' | 'categoria' | 'subcategoria' | 'medioPago'>): boolean {
+  const v = nrm(c.filtroValor)
   switch (c.filtroCampo) {
     case 'Todos': return true
-    case 'Ámbito': return g.ambito === c.filtroValor
-    case 'Categoría': return g.categoria === c.filtroValor
-    case 'Subcategoría': return g.subcategoria === c.filtroValor
-    case 'Medio de pago': return g.medioPago === c.filtroValor
+    case 'Ámbito': return nrm(g.ambito) === v
+    case 'Categoría': return nrm(g.categoria) === v
+    // "Categoría › Subcategoría" identifica una sola subcategoría ("Otros" existe en muchas); solo el nombre, todas las de ese nombre.
+    case 'Subcategoría': {
+      const [cat, sub] = v.includes(' › ') ? v.split(' › ') : [null, v]
+      return nrm(g.subcategoria) === sub && (cat === null || nrm(g.categoria) === cat)
+    }
+    case 'Medio de pago': return nrm(g.medioPago) === v
   }
 }
+
 
 /** Presupuesto de una caja para un mes: el de PRESUPUESTOS si existe; si no, el de la caja. */
 export function budgetCents(caja: Caja, periodo: string, presupuestos: Presupuesto[]): number {
@@ -137,8 +159,12 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   let primerFecha: string | null = null, ultimaFecha: string | null = null
   const ordered = [...ctx.cajas].sort((a, b) => a.orden - b.orden)
   const general = ordered.find(c => c.filtroCampo === 'Todos') ?? null
-  const subcajas = ordered.filter(c => c !== general)
+  const subcajas = ordered.filter(c => c !== general && c.filtroCampo !== 'Todos' && cajaActiva(c))
+  const inactivas = ordered.filter(c => c.filtroCampo !== 'Todos' && !cajaActiva(c))
+  const priorizadas = prioridadCajas(subcajas)
+  const indice = new Map(subcajas.map((c, i) => [c, i]))
   const subGastado = new Array<number>(subcajas.length).fill(0)
+  const subCount = new Array<number>(subcajas.length).fill(0)
   let total = 0, count = 0, maxCents = 0, max: Gasto | null = null, excluidos = 0, totalPeriodo = 0, gastadoLibre = 0
 
   for (const g of gastos) {
@@ -148,8 +174,8 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
 
     // Presupuesto: solo período. Cada gasto va a una sola subcaja o al saldo libre.
     totalPeriodo += cents
-    const i = subcajas.findIndex(c => cajaMatches(c, g))
-    if (i >= 0) subGastado[i] += cents; else gastadoLibre += cents
+    const dueña = cajaDe(priorizadas, g)
+    if (dueña) { const i = indice.get(dueña)!; subGastado[i] += cents; subCount[i]++ } else gastadoLibre += cents
 
     if (!matchesDims(g, f)) continue
     total += cents
@@ -184,7 +210,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const subResumen: SubcajaResumen[] = subcajas.map((caja, i) => {
     const asignado = budgetForRange(caja, f.desde, f.hasta, ctx.presupuestos)
     const gastado = subGastado[i]
-    return { caja, asignado, gastado, disponible: asignado - gastado, pct: percent(gastado, asignado), excedido: gastado > asignado }
+    return { caja, asignado, gastado, count: subCount[i], disponible: asignado - gastado, pct: percent(gastado, asignado), excedido: gastado > asignado }
   })
   const R = subResumen.reduce((s, x) => s + x.asignado, 0)
   const Gs = subResumen.reduce((s, x) => s + x.gastado, 0)
@@ -192,7 +218,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const cajas: CajasResumen = {
     general, presupuesto: P, reservado: R, libreInicial: P - R, gastadoSubcajas: Gs, gastadoLibre, excesoSubcajas: exceso,
     saldoLibre: P - R - gastadoLibre - exceso, disponible: P - Gs - gastadoLibre, pct: percent(Gs + gastadoLibre, P),
-    sobreasignado: R > P, subcajas: subResumen,
+    sobreasignado: R > P, subcajas: subResumen, inactivas,
   }
 
   // Serie diaria: real hasta hoy (o el último gasto si hay fechas futuras), ritmo ideal y proyección solo si está en curso.

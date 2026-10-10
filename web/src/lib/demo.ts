@@ -61,7 +61,16 @@ function demoSalud(today: string): unknown[][] {
   ]
 }
 
-export function demoTransport(today: string, n = 400, latencyMs = 250): Transport {
+// Cajas de ejemplo para ver la pestaña Cajas con muchas subcajas (?cajas=10).
+const CAJAS_EXTRA: unknown[][] = [
+  ['caja-salud', 'Caja Salud', 250, 'Categoría', 'Salud', '#16A085'], ['caja-transporte', 'Caja Transporte', 180, 'Categoría', 'Transporte', '#0EA5E9'],
+  ['caja-streaming', 'Caja Streaming', 120, 'Categoría', 'Suscripciones', '#E25563'], ['caja-familia', 'Caja Familia', 900, 'Ámbito', 'Familia', '#F59E0B'],
+  ['caja-linea', 'Caja Línea Celular', 40, 'Subcategoría', 'Servicios › Línea Celular', '#4F7BE8'], ['caja-delivery', 'Caja Delivery', 150, 'Subcategoría', 'Alimentación › Delivery', '#E8664F'],
+  ['caja-sodexo', 'Caja Sodexo', 280, 'Medio de pago', 'Sodexo', '#84CC16'], ['caja-educacion', 'Caja Educación', 300, 'Categoría', 'Educación', '#8B7CF6'],
+  ['caja-viajes', 'Caja Viajes', 0, 'Ámbito', 'Amigos', '#64748B'], ['caja-emergencia', 'Caja Emergencia', 200, 'Subcategoría', 'Otros › Imprevistos', '#C0362C'],
+]
+
+export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0): Transport {
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
@@ -74,6 +83,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       ['auto', 'Caja Auto', 600, 'Categoría', 'Auto', '#64748b', 2],
       ['bebe', 'Caja Bebé', 800, 'Categoría', 'Bebé', '#ec4899', 3],
       ['plan-nube', 'Caja Plan Nube', 150, 'Categoría', 'Plan Nube', '#8b5cf6', 4],
+      ...CAJAS_EXTRA.slice(0, Math.max(0, extraCajas)).map((r, i) => [...r, i + 5, true, '']),
     ] as unknown[][],
     presupuestos: [] as unknown[][],
     // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto, moneda, medio, orden]
@@ -156,7 +166,24 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       return { catalogo, gastos }
     },
     saveMedio: p => upsert(db.medios, 1, [p.nombre, p.activo !== false]),
-    saveCaja: p => upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor, p.color, Number(p.orden)]),
+    saveCaja: p => {
+      const norm = (v: unknown) => normName(String(v ?? ''))
+      if (p.filtroCampo !== 'Todos' && p.activo !== false && db.cajas.some(r => r[0] !== p.id && r[3] === p.filtroCampo && norm(r[4]) === norm(p.filtroValor) && r[7] !== false)) {
+        throw fail('VALIDATION', `Otra caja ya usa ${p.filtroCampo} = ${p.filtroValor}. Cambia el alcance o desactívala primero.`)
+      }
+      return upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor ?? '', p.color, Number(p.orden), p.activo !== false, p.descripcion ?? ''])
+    },
+    deleteCaja: p => {
+      const r = db.cajas.find(x => x[0] === p.id)
+      if (r && r[3] === 'Todos') throw fail('VALIDATION', 'La caja general no se puede eliminar.')
+      db.cajas = db.cajas.filter(x => x[0] !== p.id)
+      return { id: p.id, eliminada: !!r }
+    },
+    reorderCajas: p => {
+      const ids = p.ids as string[]
+      db.cajas.forEach(r => { r[6] = r[3] === 'Todos' ? 1 : ids.indexOf(String(r[0])) + 2 || ids.length + 2 })
+      return { ok: true }
+    },
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
     plantillas: () => [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10])),

@@ -954,3 +954,98 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     expect(await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla)).toBe(1)
   })
 })
+
+// ───────────────────────────── v1.7 ─────────────────────────────
+test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
+  const resumen = (page: Page, l: string) => page.getByTestId('cajas-resumen').locator('div', { hasText: l }).locator('dd').innerText().then(money)
+  const tarjeta = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
+
+  test('crear por subcategoría descuenta la reserva del libre; duplicado rechazado; editar, desactivar y eliminar sin tocar gastos', async ({ page }) => {
+    const total0 = await total(page)
+    await go(page, 'Cajas')
+    await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
+    const res0 = await resumen(page, 'Reservado en subcajas'), libre0 = await resumen(page, 'Libre inicial')
+    await page.getByRole('button', { name: 'Nueva caja' }).first().click()
+    const d = dialog(page)
+    await d.getByLabel('Nombre').fill('Caja Línea Celular')
+    await d.getByRole('radio', { name: 'Subcategoría' }).click()
+    await d.locator('#caja-valor').selectOption('Servicios › Línea Celular')
+    await d.getByLabel('Monto asignado por mes').fill('40')
+    await d.getByRole('button', { name: 'Crear caja' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular creada correctamente.' })).toBeVisible()
+    await expect(tarjeta(page, 'Caja Línea Celular')).toContainText('Subcategoría · Servicios › Línea Celular')
+    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 + 40, 2)
+    expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 - 40, 2)            // la general no duplica la reserva
+    // mismo alcance y valor: rechazado en el formulario
+    await page.getByRole('button', { name: 'Nueva caja' }).first().click()
+    await d.getByLabel('Nombre').fill('Otra línea')
+    await d.getByRole('radio', { name: 'Subcategoría' }).click()
+    await d.locator('#caja-valor').selectOption('Servicios › Línea Celular')
+    await d.getByLabel('Monto asignado por mes').fill('10')
+    await d.getByRole('button', { name: 'Crear caja' }).click()
+    await expect(d.getByText(/ya usa Subcategoría = Servicios › Línea Celular/)).toBeVisible()
+    await d.getByRole('button', { name: 'Cancelar' }).click()
+    // editar el monto
+    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Editar Caja Línea Celular' }).click()
+    await d.getByLabel('Monto asignado por mes').fill('60')
+    await d.getByRole('button', { name: 'Guardar cambios' }).click()
+    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 + 60, 2)
+    // desactivar: deja de reservar
+    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
+    await page.getByRole('menuitem', { name: 'Desactivar' }).click()
+    await expect(tarjeta(page, 'Caja Línea Celular').getByTestId('estado-caja')).toHaveText('Inactiva')
+    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)
+    // eliminar con confirmación
+    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    await expect(d.getByText('No se borra ningún gasto ni la caja general.', { exact: false })).toBeVisible()
+    await d.getByRole('button', { name: 'Eliminar', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular eliminada. Ningún gasto se borró.' })).toBeVisible()
+    await expect(tarjeta(page, 'Caja Línea Celular')).toHaveCount(0)
+    await go(page, 'Dashboard')
+    expect(await total(page)).toBeCloseTo(total0, 2)
+  })
+
+  test('con muchas cajas: buscar, filtrar por alcance y estado, ordenar, vista lista y reordenar con una solicitud', async ({ page }) => {
+    await page.goto('/?demo=60&cajas=10#cajas')
+    const cards = page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja')
+    await expect(cards).toHaveCount(13)
+    await page.getByLabel('Buscar caja').fill('salud')
+    await expect(cards).toHaveCount(1)
+    await page.getByLabel('Buscar caja').fill('zzz')
+    await expect(page.getByText('Ninguna caja coincide')).toBeVisible()
+    await page.getByRole('button', { name: 'Limpiar filtros' }).click()
+    await page.getByLabel('Filtrar por alcance').selectOption('Subcategoría')
+    await expect(cards).toHaveCount(3)
+    await page.getByLabel('Filtrar por alcance').selectOption('todos')
+    await page.getByLabel('Ordenar cajas').selectOption('mas')
+    const nombres = () => cards.locator('p.truncate.text-sm').allInnerTexts()
+    expect((await nombres())[0]).toBe('Caja Familia')                                 // la más gastada
+    await page.getByRole('radio', { name: 'Lista' }).click()
+    await expect(cards).toHaveCount(13)
+    await page.getByRole('radio', { name: 'Tarjetas' }).click()
+    await page.getByLabel('Ordenar cajas').selectOption('manual')
+    expect((await nombres()).slice(0, 2)).toEqual(['Caja Auto', 'Caja Bebé'])
+    const c0 = await calls(page)
+    await tarjeta(page, 'Caja Auto').getByRole('button', { name: 'Más acciones de Caja Auto' }).click()
+    await page.getByRole('menuitem', { name: 'Bajar' }).click()
+    await expect.poll(async () => (await nombres()).slice(0, 2)).toEqual(['Caja Bebé', 'Caja Auto'])
+    expect(((await calls(page)).reorderCajas ?? 0) - (c0.reorderCajas ?? 0)).toBe(1)
+    // la caja por medio de pago se explica en su tarjeta; las de clasificación muestran con quién se solapan
+    await expect(tarjeta(page, 'Caja Sodexo').getByTestId('solape')).toContainText('Toma lo pagado con Sodexo')
+    await expect(tarjeta(page, 'Caja Bebé').getByTestId('solape')).toContainText('Caja Familia')
+    // el Dashboard muestra 6 y enlaza a todas
+    await go(page, 'Dashboard')
+    await page.getByRole('button', { name: 'Ver las 13 cajas' }).click()
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Cajas' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('responsive: la pestaña Cajas no genera scroll horizontal en móvil ni tablet', async ({ page }) => {
+    for (const vp of [{ width: 360, height: 780 }, { width: 768, height: 1024 }]) {
+      await page.setViewportSize(vp)
+      await page.goto('/?demo=60&cajas=10#cajas')
+      await expect(page.getByTestId('caja-general')).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    }
+  })
+})

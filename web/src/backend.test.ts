@@ -563,6 +563,48 @@ describe('backend Apps Script', () => {
     expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(1)
   })
 
+  it('v1.7 cajas personalizadas: hoja antigua se amplía, alcance único, general única, eliminar y reordenar sin tocar gastos', () => {
+    const sh = b.ss.getSheetByName('CAJAS')!
+    sh.rows = sh.rows.map(r => r.slice(0, 7))                             // hoja de una versión anterior
+    sh.rows[0] = ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden']
+    const antes = sh.rows.slice(1).map(r => [...r])
+    const caja = (o: Record<string, unknown>) => b.post('saveCaja', { nombre: 'X', presupuesto: 100, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9, ...o })
+    const r = caja({ id: 'caja-salud', nombre: 'Caja Salud', descripcion: 'Médico y farmacia' })
+    expect(r.ok).toBe(true)
+    expect(sh.rows[0]).toHaveLength(9)
+    expect(sh.rows.slice(1, antes.length + 1).map(x => x.slice(0, 7))).toEqual(antes)   // cajas existentes intactas
+    expect(r.data.slice(7)).toEqual([true, 'Médico y farmacia'])
+    // mismo alcance y valor (otra capitalización) → rechazado; desactivada sí se permite
+    expect(caja({ id: 'caja-salud2', filtroValor: ' salud ' }).error.message).toMatch(/ya usa Categoría = /)
+    expect(caja({ id: 'caja-salud2', filtroValor: 'salud', activo: false }).ok).toBe(true)
+    // alcances por ámbito y por subcategoría (Categoría › Subcategoría)
+    expect(caja({ id: 'caja-pareja', filtroCampo: 'Ámbito', filtroValor: 'Pareja' }).ok).toBe(true)
+    expect(caja({ id: 'caja-linea', filtroCampo: 'Subcategoría', filtroValor: 'Servicios › Línea Celular' }).ok).toBe(true)
+    expect(caja({ id: 'caja-x', filtroCampo: 'Categoría', filtroValor: '' }).error.code).toBe('VALIDATION')
+    expect(caja({ id: 'caja-x', presupuesto: -1 }).error.code).toBe('VALIDATION')
+    // una sola caja general, que no cambia de alcance ni se elimina
+    expect(caja({ id: 'otra-general', filtroCampo: 'Todos' }).error.message).toMatch(/solo puede haber una/)
+    expect(caja({ id: 'general', filtroCampo: 'Categoría', filtroValor: 'Auto' }).error.message).toMatch(/siempre abarca/)
+    expect(b.post('deleteCaja', { id: 'general' }).error.code).toBe('VALIDATION')
+    // reordenar en una escritura; la general queda primera
+    const w = sh.writes
+    expect(b.post('reorderCajas', { ids: ['caja-linea', 'auto', 'caja-salud'] }).ok).toBe(true)
+    expect(sh.writes - w).toBe(1)
+    const orden = (id: string) => sh.rows.find(x => x[0] === id)![6]
+    expect([orden('general'), orden('caja-linea'), orden('auto'), orden('caja-salud')]).toEqual([1, 2, 3, 4])
+    // eliminar una subcaja no toca GASTOS ni PRESUPUESTOS
+    b.post('saveGasto', gasto())
+    b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'caja-salud', monto: 50 })
+    const g0 = JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows), p0 = JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)
+    expect(b.post('deleteCaja', { id: 'caja-salud' }).data.eliminada).toBe(true)
+    expect(sh.rows.some(x => x[0] === 'caja-salud')).toBe(false)
+    expect(JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)).toBe(g0)
+    expect(JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)).toBe(p0)
+    const d = b.post('data', { fresh: true }).data
+    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-salud2').slice(7)).toEqual([false, ''])
+    expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[7]).toBe(true)  // fila antigua sin Activo = activa
+  })
+
   it('reorderGastos: guarda el orden en su propia hoja sin tocar GASTOS', () => {
     b.post('saveGasto', gasto())
     const antes = JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)

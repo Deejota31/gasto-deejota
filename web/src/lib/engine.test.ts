@@ -117,6 +117,36 @@ describe('cajas: la general es el total y las subcajas son reservas (casos 4, 5 
     expect(c.subcajas.find(s => s.caja.id === 'familia')!.gastado).toBe(0)
     expect(c.disponible).toBe(500000 - 5000)
   })
+  it('v1.7 prioridad por especificidad: Subcategoría > Categoría > Ámbito > Medio de pago, sin importar el orden manual', () => {
+    const cajas = [caja('general', 5000), caja('familia', 300, 'Ámbito', 'Familia', 2), caja('yape', 200, 'Medio de pago', 'Yape', 3),
+      caja('bebe', 600, 'Categoría', 'Bebé', 4), caja('leche', 100, 'Subcategoría', 'Bebé › Leche', 5)]
+    const gastos = [
+      g({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Leche', medioPago: 'Yape', monto: 10 }),   // → leche
+      g({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Pañales', medioPago: 'Yape', monto: 20 }), // → bebe
+      g({ ambito: 'Familia', categoria: 'Hogar', subcategoria: 'Limpieza', medioPago: 'Yape', monto: 30 }), // → familia
+      g({ ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', medioPago: 'Yape', monto: 40 }), // → yape
+      g({ ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', medioPago: 'Plin', monto: 50 }), // → fuera
+    ]
+    const c = aggregate(gastos, f(), ctx({ cajas })).cajas
+    const por = (id: string) => c.subcajas.find(s => s.caja.id === id)!
+    expect(['leche', 'bebe', 'familia', 'yape'].map(id => [por(id).gastado, por(id).count])).toEqual([[1000, 1], [2000, 1], [3000, 1], [4000, 1]])
+    expect(c.gastadoLibre).toBe(5000)
+    expect(c.gastadoSubcajas + c.gastadoLibre).toBe(15000)          // sin doble conteo
+    expect(c.reservado).toBe(120000)                                  // 300 + 200 + 600 + 100
+    expect(c.libreInicial).toBe(500000 - 120000)
+  })
+
+  it('v1.7 subcategoría con categoría ("Servicios › Línea Celular") o solo por nombre; caja inactiva no reserva ni toma gastos', () => {
+    const linea = g({ ambito: 'Personal', categoria: 'Servicios', subcategoria: 'Línea Celular', monto: 40 })
+    const otros = g({ ambito: 'Personal', categoria: 'Auto', subcategoria: 'Otros', monto: 5 })
+    const cajas = [caja('general', 1000), caja('linea', 50, 'Subcategoría', 'servicios › línea celular', 2), caja('otros', 20, 'Subcategoría', 'Otros', 3),
+      { ...caja('salud', 300, 'Categoría', 'Auto', 4), activo: false }]
+    const c = aggregate([linea, otros], f(), ctx({ cajas })).cajas
+    expect(c.subcajas.map(s => [s.caja.id, s.gastado])).toEqual([['linea', 4000], ['otros', 500]])
+    expect(c.inactivas.map(x => x.id)).toEqual(['salud'])
+    expect(c.reservado).toBe(7000)                                    // la inactiva no reserva
+  })
+
   it('detecta reservas mayores que el presupuesto general', () => {
     expect(aggregate([], f(), ctx({ cajas: [caja('general', 1000), caja('bebe', 1500, 'Categoría', 'Bebé', 2)] })).cajas.sobreasignado).toBe(true)
   })

@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.5.0';
+var APP_VERSION = '1.7.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -14,7 +14,8 @@ var SHEETS = {
     'Creado en', 'Actualizado en'],
   CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'],
   MEDIOS_PAGO: ['Nombre', 'Activo'],
-  CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden'],
+  // Activo y Descripción (v1.7): cajas personalizadas. Una caja inactiva no reserva dinero ni toma gastos.
+  CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
   CONFIG: ['Clave', 'Valor'],
   // Plantillas de gastos frecuentes: solo configuración reutilizable, nunca movimientos ni montos.
@@ -624,7 +625,7 @@ function getData_(fresh) {
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
     catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5]), str_(r[6]) === '' ? '' : num_(r[6])]; }),
     medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
-    cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6])]; }),
+    cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6]), str_(r[7]) === '' ? true : bool_(r[7]), str_(r[8]).replace(/^'/, '')]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
     config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {}),
     ordenGastos: ss.getSheetByName('ORDEN_GASTOS') ? readRows_(ss, 'ORDEN_GASTOS').map(function (r) { return [str_(r[0]), num_(r[1])]; }) : [],
@@ -734,6 +735,8 @@ var ACTIONS = {
   renameCatalogo: renameCatalogo_,
   saveMedio: saveMedio_,
   saveCaja: saveCaja_,
+  deleteCaja: deleteCaja_,
+  reorderCajas: reorderCajas_,
   savePresupuesto: savePresupuesto_,
   saveConfig: saveConfig_,
   diagnose: diagnose_,
@@ -833,19 +836,73 @@ function saveMedio_(p) {
   return [nombre, activo];
 }
 
+var CAJA_CAMPOS = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'];
+
+function cajasSheet_() {
+  var ss = openSpreadsheet_(false);
+  return ensureSheet_(ss, 'CAJAS', SHEETS.CAJAS); // hoja anterior (7 columnas): agrega Activo y Descripción
+}
+
+// Crea o edita una caja. La caja general (Todos) es única y no cambia de alcance. Dos cajas activas no pueden
+// tener el mismo alcance y valor (sería ambiguo); los solapamientos entre niveles se resuelven por especificidad.
 function saveCaja_(p) {
   var id = text_(p.id, 'ID de caja', 40, true);
   var campo = p.filtroCampo || 'Todos';
-  if (['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'].indexOf(campo) < 0) {
-    throw appError_('VALIDATION', 'Filtro de caja inválido.');
+  if (CAJA_CAMPOS.indexOf(campo) < 0) throw appError_('VALIDATION', 'Filtro de caja inválido.');
+  var activo = p.activo === undefined ? true : p.activo === true;
+  var valor = campo === 'Todos' ? '' : text_(p.filtroValor, 'Valor del alcance', 130, true);
+  var row = [id, text_(p.nombre, 'Nombre', 40, true), amount_(p.presupuesto, true), campo, valor,
+    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden), activo, text_(p.descripcion, 'Descripción', 200, false)];
+  var sh = cajasSheet_();
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  var rows = n ? sh.getRange(2, 1, n, SHEETS.CAJAS.length).getValues() : [];
+  var idx = -1;
+  for (var j = 0; j < rows.length; j++) if (str_(rows[j][0]) === id) idx = j;
+  if (idx >= 0 && str_(rows[idx][3]) === 'Todos' && campo !== 'Todos') throw appError_('VALIDATION', 'La caja general siempre abarca todos los gastos.');
+  for (var i = 0; i < rows.length; i++) {
+    var rid = str_(rows[i][0]);
+    if (!rid || rid === id) continue;
+    var rCampo = str_(rows[i][3]), rActivo = str_(rows[i][7]) === '' ? true : bool_(rows[i][7]);
+    if (campo === 'Todos' && rCampo === 'Todos') throw appError_('VALIDATION', 'Ya existe una caja general: solo puede haber una.');
+    if (campo !== 'Todos' && activo && rActivo && rCampo === campo && norm_(rows[i][4]) === norm_(valor)) {
+      throw appError_('VALIDATION', 'La caja “' + str_(rows[i][1]) + '” ya usa ' + campo + ' = ' + valor + '. Cambia el alcance o desactívala primero.');
+    }
   }
-  var row = [id, text_(p.nombre, 'Nombre', 40, true), amount_(p.presupuesto, true), campo,
-    campo === 'Todos' ? '' : text_(p.filtroValor, 'Valor del filtro', 60, true),
-    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden)];
-  var sh = openSpreadsheet_(false).getSheetByName('CAJAS');
-  var idx = findRowByValue_(sh, 1, id);
-  if (idx) sh.getRange(idx, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
+  if (idx >= 0) sh.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
   return row;
+}
+
+// Elimina una subcaja (no la general). No toca gastos ni presupuestos: sus gastos pasan a "fuera de subcajas"
+// o a otra caja que coincida. Los ajustes mensuales que tuviera quedan en PRESUPUESTOS sin efecto.
+function deleteCaja_(p) {
+  var id = text_(p.id, 'ID de caja', 40, true);
+  var sh = cajasSheet_();
+  var row = findRowByValue_(sh, 1, id);
+  if (!row) return { id: id, eliminada: false };
+  if (str_(sh.getRange(row, 4, 1, 1).getValues()[0][0]) === 'Todos') throw appError_('VALIDATION', 'La caja general no se puede eliminar.');
+  sh.deleteRow(row);
+  return { id: id, eliminada: true };
+}
+
+// Orden manual de las subcajas en una sola escritura de la columna Orden (la general queda primera).
+function reorderCajas_(p) {
+  var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
+  if (!ids.length || ids.length > 200) throw appError_('VALIDATION', 'Orden de cajas inválido.');
+  var sh = cajasSheet_();
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  if (!n) return { ok: true };
+  var rows = sh.getRange(2, 1, n, 7).getValues();
+  var pos = {};
+  ids.forEach(function (id, i) { pos[id] = i + 2; });
+  var extra = ids.length + 2;
+  var orden = rows.map(function (r) {
+    var id = str_(r[0]);
+    if (!id) return [r[6]];
+    if (str_(r[3]) === 'Todos') return [1];
+    return [pos[id] !== undefined ? pos[id] : extra++];
+  });
+  sh.getRange(2, 7, n, 1).setValues(orden);
+  return { ok: true };
 }
 
 function savePresupuesto_(p) {

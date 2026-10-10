@@ -122,13 +122,16 @@ const loteSchema = z.object({
   ids: z.array(str), gastos: z.array(gastoRow), mensaje: str,
 })
 
+// [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?] — antes de v1.7 llegan solo 7.
+const cajaRow = z.tuple([str, str, z.number(), str, str, str, z.number()]).rest(z.union([str, z.number(), z.boolean()]))
+
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
   gastos: z.array(gastoRow),
   catalogo: z.array(catRow),
   medios: z.array(z.tuple([str, z.boolean()])),
-  cajas: z.array(z.tuple([str, str, z.number(), str, str, str, z.number()])),
+  cajas: z.array(cajaRow),
   presupuestos: z.array(z.tuple([str, str, z.number()])),
   config: z.record(str, str),
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
@@ -150,10 +153,12 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 }
 
 const FILTRO_CAMPOS = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'] as const
-const toCaja = (r: [string, string, number, string, string, string, number]): Caja => ({
+const toCaja = (r: z.infer<typeof cajaRow>): Caja => ({
   id: r[0], nombre: r[1], presupuesto: r[2],
   filtroCampo: (FILTRO_CAMPOS as readonly string[]).includes(r[3]) ? (r[3] as Caja['filtroCampo']) : 'Todos',
   filtroValor: r[4], color: r[5] || '#1e3a8a', orden: r[6],
+  activo: r[7] === undefined || r[7] === '' ? true : r[7] === true || String(r[7]).toUpperCase() === 'TRUE',
+  descripcion: r[8] === undefined ? '' : String(r[8]),
 })
 
 export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'> & {
@@ -221,7 +226,14 @@ export function createApi(t: Transport) {
       return { nombre, activo }
     },
     async saveCaja(c: Caja): Promise<Caja> {
-      return toCaja(parse(z.tuple([str, str, z.number(), str, str, str, z.number()]), await t('saveCaja', c)))
+      return toCaja(parse(cajaRow, await t('saveCaja', c)))
+    },
+    async deleteCaja(id: string): Promise<void> {
+      await t('deleteCaja', { id })
+    },
+    /** Orden manual de las subcajas (la general queda primera), en una sola escritura. */
+    async reorderCajas(ids: string[]): Promise<void> {
+      await t('reorderCajas', { ids })
     },
     async savePresupuesto(p: Presupuesto): Promise<Presupuesto> {
       const [periodo, cajaId, monto] = parse(z.tuple([str, str, z.number()]), await t('savePresupuesto', p))

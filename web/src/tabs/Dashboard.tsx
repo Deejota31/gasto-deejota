@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
-  Activity, AlertTriangle, Baby, Calculator, CalendarDays, Car, Cloud, Hash, Layers, Lock, Pencil,
+  Activity, AlertTriangle, Calculator, ChevronRight, CalendarDays, Hash, Layers, Lock, Pencil,
   Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
 import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
@@ -11,18 +11,15 @@ import type { Caja, Filters } from '../lib/types'
 import { categoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList, SubLabel } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
-import { Button, Card, ErrorBox, Field, IconButton, InfoTooltip, inputCls, Modal, Skeleton, Switch } from '../components/ui'
+import { Button, Card, ErrorBox, IconButton, InfoTooltip, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
+import { CajaModal, cajaIcon, styleFor } from '../components/cajas'
 
 const toggle = (xs: string[], v: string) => (xs.includes(v) ? xs.filter(x => x !== v) : [...xs, v])
 
-const cajaIcon = (c: Caja) => {
-  const k = `${c.id} ${c.filtroValor}`.toLowerCase()
-  return k.includes('auto') ? Car : k.includes('beb') ? Baby : k.includes('nube') ? Cloud : Wallet
-}
-
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales }: {
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onIrCajas }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
+  onIrCajas?: () => void
 }) {
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const data = store.data
@@ -93,7 +90,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               info={<p>Cantidad de gastos activos que cumplen los filtros.</p>} />
           </div>
 
-          <Cajas c={a.cajas} money={money} onEdit={(caja, asignado) => setEditCaja({ caja, asignado })} periodo={periodoTxt} />
+          <Cajas c={a.cajas} money={money} onEdit={(caja, asignado) => setEditCaja({ caja, asignado })} periodo={periodoTxt} onIrCajas={onIrCajas} />
 
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>
@@ -182,17 +179,9 @@ function Kpi({ icon, label, value, hint, info, tone, progress, tag }: { icon: Re
   )
 }
 
-const CAJA_STYLE: Record<string, { bg: string; fg: string }> = {
-  auto: { bg: 'linear-gradient(135deg, #F1F5F9, #E2E8F0)', fg: '#475569' },
-  bebe: { bg: 'linear-gradient(135deg, #FDF0F6, #FCE1EE)', fg: '#C2457F' },
-  nube: { bg: 'linear-gradient(135deg, #F4F1FF, #E9E3FF)', fg: '#6D5BD0' },
-}
-const styleFor = (c: Caja) => {
-  const k = `${c.id} ${c.filtroValor}`.toLowerCase()
-  return k.includes('auto') ? CAJA_STYLE.auto : k.includes('beb') ? CAJA_STYLE.bebe : k.includes('nube') ? CAJA_STYLE.nube : { bg: `linear-gradient(135deg, ${c.color}14, ${c.color}29)`, fg: c.color }
-}
+const MAX_SUBCAJAS_DASHBOARD = 6
 
-function Cajas({ c, money, onEdit, periodo }: { c: CajasResumen; money: (n: number) => string; onEdit: (c: Caja, asignado: number) => void; periodo: string }) {
+function Cajas({ c, money, onEdit, periodo, onIrCajas }: { c: CajasResumen; money: (n: number) => string; onEdit: (c: Caja, asignado: number) => void; periodo: string; onIrCajas?: () => void }) {
   const P = c.presupuesto
   const seg = (v: number) => `${P ? Math.max(0, Math.min(100, (v / P) * 100)) : 0}%`
   const reservaRestante = Math.max(0, c.reservado - c.gastadoSubcajas + c.excesoSubcajas)
@@ -248,9 +237,17 @@ function Cajas({ c, money, onEdit, periodo }: { c: CajasResumen; money: (n: numb
         )}
       </section>
 
+      {/* En el resumen se ven las primeras; todas (crear, editar, ordenar, filtrar) están en la pestaña Cajas. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {c.subcajas.map(s => <Subcaja key={s.caja.id} s={s} money={money} onEdit={() => onEdit(s.caja, s.asignado)} />)}
+        {c.subcajas.slice(0, MAX_SUBCAJAS_DASHBOARD).map(s => <Subcaja key={s.caja.id} s={s} money={money} onEdit={() => onEdit(s.caja, s.asignado)} />)}
       </div>
+      {onIrCajas && (
+        <div className="flex justify-end">
+          <Button variant="ghost" className="text-xs" onClick={onIrCajas}>
+            {c.subcajas.length > MAX_SUBCAJAS_DASHBOARD ? `Ver las ${c.subcajas.length} cajas` : 'Administrar cajas'} <ChevronRight className="size-3.5" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -293,49 +290,5 @@ function Subcaja({ s, money, onEdit }: { s: SubcajaResumen; money: (n: number) =
         <span className="font-medium text-ink">{s.pct === null ? '—' : `${s.pct}%`}</span>
       </p>
     </section>
-  )
-}
-
-function CajaModal({ store, target, cajas, mes, money, onClose }: {
-  store: AppStore; target: { caja: Caja; asignado: number }; cajas: CajasResumen; mes: string | null; money: (n: number) => string; onClose: () => void
-}) {
-  const esGeneral = target.caja.filtroCampo === 'Todos'
-  const [monto, setMonto] = useState(String(target.asignado / 100))
-  // Siempre empieza en ON (solo el mes elegido) cada vez que se abre; si lo apagas, se respeta mientras esté abierto.
-  const [soloMes, setSoloMes] = useState(true)
-  const [error, setError] = useState('')
-  const n = Number(monto)
-  const cents = Math.round(n * 100)
-  const otrasReservas = cajas.reservado - (esGeneral ? 0 : target.asignado)
-  const aviso = !Number.isFinite(n) ? '' : esGeneral
-    ? cents < cajas.reservado ? `Las reservas de subcajas (${money(cajas.reservado)}) superarían este presupuesto.` : ''
-    : otrasReservas + cents > cajas.presupuesto ? `Con este monto las reservas sumarían ${money(otrasReservas + cents)}, más que la caja general (${money(cajas.presupuesto)}).` : ''
-
-  // No bloquea: valida, cierra y la escritura sigue en segundo plano con su notificación de resultado.
-  function save() {
-    if (!/^\d+(\.\d{1,2})?$/.test(monto.trim()) || n < 0) return setError('Ingresa un monto válido (hasta 2 decimales, sin negativos).')
-    if (soloMes && !mes) return setError('Para ajustar solo un mes, elige un único mes en el filtro de período, o apaga “Solo este mes” para cambiar el presupuesto base.')
-    const ok = store.track(`caja:${target.caja.id}`, { pending: `Guardando ${target.caja.nombre}…`, ok: `${target.caja.nombre} actualizada correctamente.`, error: `No se pudo guardar ${target.caja.nombre}.` },
-      () => soloMes && mes ? store.actions.savePresupuesto({ periodo: mes, cajaId: target.caja.id, monto: n }) : store.actions.saveCaja({ ...target.caja, presupuesto: n }))
-    if (ok) onClose()
-  }
-  return (
-    <Modal open onClose={onClose} size="sm" title={`Ajustar ${target.caja.nombre}`} icon={<Wallet className="size-5" />}
-      subtitle={esGeneral ? 'Presupuesto mensual total' : 'Reserva mensual dentro de la caja general'}
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>Guardar</Button></>}>
-      <div className="space-y-3">
-        <Field label={esGeneral ? 'Presupuesto mensual' : 'Monto asignado'} htmlFor="caja-monto">
-          <div className="relative">
-            <span className="pointer-events-none absolute top-2 left-3 text-sm font-semibold text-muted">S/</span>
-            <input id="caja-monto" className={`${inputCls} tabular pl-9 text-base font-semibold`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value)} />
-          </div>
-        </Field>
-        <Switch checked={soloMes} onChange={setSoloMes} label={mes ? `Solo para ${monthLabel(mes, true)}` : 'Solo este mes (elige un mes en el período)'} />
-        {!mes && soloMes && <p className="text-xs text-muted">Para un ajuste puntual, primero elige un único mes en el filtro de período.</p>}
-        {!esGeneral && <p className="text-xs text-muted">Incluye gastos con {target.caja.filtroCampo} = “{target.caja.filtroValor}”. Asignar dinero aquí no crea ningún gasto.</p>}
-        {aviso && <ErrorBox tone="warning" message={aviso} />}
-        {error && <ErrorBox message={error} />}
-      </div>
-    </Modal>
   )
 }

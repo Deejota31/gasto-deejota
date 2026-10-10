@@ -11,7 +11,7 @@ import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.6.0'
+export const APP_VERSION = '1.7.0'
 const FILTROS: FiltroCampo[] = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago']
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
