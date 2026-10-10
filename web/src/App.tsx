@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { FileSpreadsheet, HeartPulse, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
+import { Boxes, FileSpreadsheet, HeartPulse, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
@@ -19,11 +19,13 @@ import Configuracion from './tabs/Configuracion'
 // Recharts es la dependencia más pesada: el Dashboard se carga aparte para que Gastos abra rápido.
 const Dashboard = lazy(() => import('./tabs/Dashboard'))
 const Salud = lazy(() => import('./tabs/Salud'))
+const CajasTab = lazy(() => import('./tabs/Cajas'))
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'gastos', label: 'Gastos', icon: Receipt },
   { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
+  { id: 'cajas', label: 'Cajas', icon: Boxes },
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'config', label: 'Configuración', icon: Settings },
 ] as const
@@ -102,7 +104,8 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} /></Suspense>}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
+        {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
           foco={foco} onVolverFoco={foco ? () => irATab(foco.desde) : undefined} />}
         {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}

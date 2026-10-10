@@ -55,7 +55,7 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000))
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10))
   const falla = q.get('falla') === '1' || q.get('falla') === 'timeout'
   const codigo = q.get('falla') === 'timeout' ? { code: 'TIMEOUT', msg: 'Apps Script tardó demasiado en responder.' } : { code: 'NETWORK', msg: 'No se pudo conectar con Google Sheets.' }
   return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
@@ -197,6 +197,18 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async saveCaja(c: Caja) {
       const s = await api.saveCaja(c)
       patch(d => ({ ...d, cajas: d.cajas.some(x => x.id === s.id) ? d.cajas.map(x => x.id === s.id ? s : x) : [...d.cajas, s] }))
+    },
+    /** Elimina una subcaja. Sus gastos pasan a "fuera de subcajas" (u otra caja que coincida); no se borra ningún gasto. */
+    async deleteCaja(id: string) {
+      await api.deleteCaja(id)
+      patch(d => ({ ...d, cajas: d.cajas.filter(c => c.id !== id) }))
+    },
+    /** Orden manual de subcajas: se ve al instante; si falla, vuelve al anterior. */
+    async reorderCajas(ids: string[]) {
+      let previo: Caja[] = []
+      const aplicar = (d: AppData) => ({ ...d, cajas: d.cajas.map(c => c.filtroCampo === 'Todos' ? { ...c, orden: 1 } : { ...c, orden: ids.indexOf(c.id) >= 0 ? ids.indexOf(c.id) + 2 : ids.length + 2 }) })
+      setData(d => { previo = d?.cajas ?? []; return d && aplicar(d) })
+      try { await api.reorderCajas(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, cajas: previo }); throw e }
     },
     async savePresupuesto(p: Presupuesto) {
       const s = await api.savePresupuesto(p)

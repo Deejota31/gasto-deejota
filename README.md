@@ -28,6 +28,20 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.7.0
+
+| Punto | Qué cambió |
+|---|---|
+| Pestaña Cajas | Nueva pestaña **Cajas** (`#cajas`): cabecera con período y resumen (presupuesto, reservado, libre inicial, gasto fuera de cajas), caja general destacada (presupuesto, reservado, libre inicial, gastado fuera de subcajas, saldo libre, % consumido, barra con leyenda) y subcajas en grilla 1/2/3 columnas o vista lista, con búsqueda, filtro por alcance y estado, y orden (manual, nombre, monto, más/menos gastadas, % de uso). Probado con 3, 6 y 13 cajas. |
+| Cajas personalizadas | Crear, editar, eliminar (con confirmación), activar/desactivar y reordenar (Subir/Bajar, una solicitud). Cada caja tiene nombre, color, monto asignado, alcance (Ámbito, Categoría, Subcategoría o Medio de pago), valor, descripción y estado. Subcategoría se elige como “Categoría › Subcategoría” para no mezclar los “Otros”. No se permiten dos cajas activas con el mismo alcance y valor, ni otra caja general. |
+| Lógica | La caja general manda: lo asignado a subcajas activas se descuenta del libre inicial y nunca se suma. Cada gasto cae en **una sola** subcaja, la más específica: **Subcategoría > Categoría > Ámbito > Medio de pago** (a igual nivel, el orden manual); lo demás va a “gastado fuera de subcajas”. Una caja inactiva no reserva ni toma gastos. Eliminar una caja no borra gastos ni presupuestos. Las tarjetas avisan con quién se solapa cada caja y quién gana. |
+| Sodexo | Se modela como **Medio de pago** (Sodexo es un medio en tu catálogo, no un ámbito): toma lo pagado con Sodexo que no caiga en una caja por clasificación. |
+| Dashboard | Muestra las primeras 6 subcajas y un acceso “Administrar cajas / Ver las N cajas”. |
+| Hoja CAJAS | Agrega las columnas **Activo** y **Descripción** sola al primer guardado (las cajas existentes quedan activas). Acciones nuevas: `deleteCaja`, `reorderCajas`. |
+
+### Despliegue de v1.7.0
+Pega el `Code.gs` nuevo y publica una **Nueva versión**. La web se publica al fusionar en `main`.
+
 ## Novedades v1.6.0
 
 | Punto | Qué cambió |
@@ -198,7 +212,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
 | `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 103) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (45), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (48), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas

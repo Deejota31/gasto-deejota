@@ -53,6 +53,9 @@ export interface Caja {
   filtroValor: string
   color: string
   orden: number
+  /** false = inactiva: no reserva dinero ni toma gastos (queda guardada para reactivarla). Sin valor = activa. */
+  activo?: boolean
+  descripcion?: string
 }
 export interface Presupuesto { periodo: string; cajaId: string; monto: number }
 

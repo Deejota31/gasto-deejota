@@ -1,5 +1,5 @@
 import { daysInMonth, monthEnd, monthsInRange, shiftMonth } from './dates'
-import { cajaMatches, matchesDims, subKey, type Aggregates } from './engine'
+import { cajaDe, matchesDims, prioridadCajas, subKey, type Aggregates } from './engine'
 import { toBaseCents } from './money'
 import { normName } from './orden'
 import type { Caja, CatalogoItem, Filters, Gasto, Medio, Plantilla, Revision } from './types'
@@ -337,10 +337,10 @@ export function calcularPresupuesto(a: Aggregates, comp: Compromisos): MiPresupu
   const pendiente = comp.pendiente
   const pctUsado = pct1(gastado, P)
   // Igual que el motor: cada compromiso se imputa solo a la PRIMERA subcaja que coincide (sin contarlo dos veces).
-  const subs = a.cajas.subcajas.map(s => s.caja)
-  const cajaDe = new Map(comp.items.map(i => [i.plantilla.id, subs.find(c => cajaMatches(c, i.plantilla as unknown as Gasto))?.id]))
+  const subs = prioridadCajas(a.cajas.subcajas.map(s => s.caja))
+  const dueñaDe = new Map(comp.items.map(i => [i.plantilla.id, cajaDe(subs, i.plantilla)?.id]))
   const cajas = a.cajas.subcajas.map(s => {
-    const pend = comp.items.filter(i => cajaDe.get(i.plantilla.id) === s.caja.id).reduce((x, i) => x + i.pendiente, 0)
+    const pend = comp.items.filter(i => dueñaDe.get(i.plantilla.id) === s.caja.id).reduce((x, i) => x + i.pendiente, 0)
     const pct = pct1(s.gastado, s.asignado)
     return { caja: s.caja, asignado: s.asignado, gastado: s.gastado, pendiente: pend, disponibleTrasCompromisos: s.asignado - s.gastado - pend, pct, nivel: nivelPresupuesto(s.asignado ? pct : null) }
   })
