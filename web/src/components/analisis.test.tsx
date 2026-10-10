@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { aggregate } from '../lib/engine'
 import type { Filters, Gasto } from '../lib/types'
-import { AnalisisDetallado, jitter, layoutSankey, niceMax, SIN_DATOS } from './analisis'
+import { reiniciarJerarquia, AnalisisDetallado, jitter, layoutSankey, niceMax, SIN_DATOS } from './analisis'
 
 const f: Filters = { preset: 'custom', desde: '2026-10-01', hasta: '2026-10-31', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
 const ctx = { base: 'PEN', rates: { USD: 3.75 }, today: '2026-10-09', cajas: [], presupuestos: [] }
@@ -41,18 +41,33 @@ describe('Análisis detallado', () => {
     expect(c.textContent).toContain('Filtros: Personal')
   })
 
-  it('jerarquía: totales y porcentajes por nivel; expandir y contraer', () => {
-    render(<AnalisisDetallado a={aggregate(datos, f, ctx)} currency="PEN" catalogo={[]} periodo={periodo} filtros={[]} onPickCategoria={() => {}} />)
+  it('jerarquía: empieza totalmente contraída; expandir/contraer solo con clic; Expandir todo / Contraer todo; nueva consulta vuelve a contraer', () => {
+    reiniciarJerarquia()
+    const { rerender } = render(<AnalisisDetallado a={aggregate(datos, f, ctx)} currency="PEN" catalogo={[]} periodo={periodo} filtros={[]} onPickCategoria={() => {}} />)
     // Personal = 100 + 75 = 175 de 255 → 68.6 %; Familia = 80 → 31.4 %
-    const personal = screen.getByRole('button', { name: /Personal/ })
+    const personal = screen.getByRole('button', { name: /^Personal/ })
     expect(personal.textContent).toContain('68.6%')
-    expect(personal.getAttribute('aria-expanded')).toBe('true')       // el más importante abierto por defecto
-    const familia = screen.getByRole('button', { name: /Familia/ })
+    expect(personal.getAttribute('aria-expanded')).toBe('false')       // ni el primero se abre solo
+    const familia = screen.getByRole('button', { name: /^Familia/ })
     expect(familia.textContent).toContain('31.4%')
     expect(familia.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: /^Servicios/ })).toBeNull()
     fireEvent.click(familia)
     expect(familia.getAttribute('aria-expanded')).toBe('true')
+    const servicios = screen.getByRole('button', { name: /^Servicios/ })
+    expect(servicios.getAttribute('aria-expanded')).toBe('false')     // la categoría tampoco se abre sola
+    expect(screen.queryByTitle(/Luz: S\/ 50\.00/)).toBeNull()
+    fireEvent.click(servicios)
     expect(screen.getByTitle(/Luz: S\/ 50\.00 · 62.5% de Servicios/)).toBeTruthy()
+    fireEvent.click(familia)
+    expect(screen.queryByRole('button', { name: /^Servicios/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Expandir todo/ }))
+    expect(screen.getAllByRole('button', { expanded: true }).length).toBeGreaterThanOrEqual(4)
+    fireEvent.click(screen.getByRole('button', { name: /Contraer todo/ }))
+    expect(screen.queryAllByRole('button', { expanded: true })).toHaveLength(0)
+    fireEvent.click(familia)
+    rerender(<AnalisisDetallado a={aggregate(datos, f, ctx)} currency="PEN" catalogo={[]} periodo={periodo} filtros={['Familia']} onPickCategoria={() => {}} />)
+    expect(screen.getByRole('button', { name: /^Familia/ }).getAttribute('aria-expanded')).toBe('false')
   })
 
   it('estado vacío elegante en las tres vistas', () => {

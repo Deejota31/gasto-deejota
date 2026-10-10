@@ -30,6 +30,8 @@ export interface Ctx {
 
 export interface Item { name: string; cents: number; count: number }
 export interface SubItem extends Item { categoria: string; subcategoria: string; key: string }
+/** Subcategoría identificada por ámbito + categoría + subcategoría: "Otros" de dos categorías o ámbitos nunca se mezclan. */
+export interface RankSub extends SubItem { ambito: string }
 export interface DayPoint { date: string; label: string; diario: number; acumulado: number | null; ideal: number | null; proyeccion: number | null }
 export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; count: number; disponible: number; pct: number | null; excedido: boolean }
 export interface CajasResumen {
@@ -42,6 +44,10 @@ export interface CajasResumen {
   excesoSubcajas: number     // gasto de subcajas por encima de lo asignado: sale del saldo libre
   saldoLibre: number         // P − R − Gl − exceso
   disponible: number         // P − Gs − Gl
+  /** Gs + Gl: todo lo gastado del período (sin filtros de dimensión), cada movimiento una vez. */
+  gastadoPeriodo: number
+  /** Σ max(0, asignado − gastado) de las subcajas activas. Conciliación: disponible = saldoLibre + reservasSinUsar. */
+  reservasSinUsar: number
   pct: number | null
   sobreasignado: boolean     // R > P
   subcajas: SubcajaResumen[]
@@ -104,6 +110,8 @@ export interface Aggregates {
   porAmbito: Item[]
   porCategoria: Item[]
   porSubcategoria: SubItem[]
+  /** Ranking de subcategorías por ámbito › categoría › subcategoría (mayor a menor, máx. 20). */
+  rankingSubcategorias: RankSub[]
   jerarquia: { name: string; cents: number; count: number; children: { name: string; cents: number; count: number; children: Item[] }[] }[]
   /** Flujo medio de pago → ámbito. Nodos ordenados de mayor a menor monto. */
   sankey: { medios: Item[]; ambitos: Item[]; links: FlowLink[] }
@@ -206,6 +214,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const daily = new Array<number>(totalDays).fill(0)
   const amb = new Map<string, Item>(), cat = new Map<string, Item>(), med = new Map<string, Item>()
   const sub = new Map<string, SubItem>()
+  const rsub = new Map<string, RankSub>()
   const hier = new Map<string, Map<string, Map<string, Item>>>()
   const flow = new Map<string, FlowLink>()
   const catAmb = new Map<string, Map<string, number>>()
@@ -271,6 +280,9 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     const key = subKey(g.categoria, g.subcategoria)
     const s = sub.get(key)
     if (s) { s.cents += cents; s.count++ } else sub.set(key, { name: key, key, categoria: g.categoria, subcategoria: subName, cents, count: 1 })
+    const rk = `${g.ambito} › ${key}`
+    const rs = rsub.get(rk)
+    if (rs) { rs.cents += cents; rs.count++ } else rsub.set(rk, { name: rk, key, ambito: g.ambito, categoria: g.categoria, subcategoria: subName, cents, count: 1 })
     const a = hier.get(g.ambito) ?? new Map<string, Map<string, Item>>()
     hier.set(g.ambito, a)
     const c = a.get(g.categoria) ?? new Map<string, Item>()
@@ -302,7 +314,8 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const exceso = subResumen.reduce((s, x) => s + Math.max(0, x.gastado - x.asignado), 0)
   const cajas: CajasResumen = {
     general, presupuesto: P, reservado: R, libreInicial: P - R, gastadoSubcajas: Gs, gastadoLibre, excesoSubcajas: exceso,
-    saldoLibre: P - R - gastadoLibre - exceso, disponible: P - Gs - gastadoLibre, pct: percent(Gs + gastadoLibre, P),
+    saldoLibre: P - R - gastadoLibre - exceso, disponible: P - Gs - gastadoLibre,
+    gastadoPeriodo: Gs + gastadoLibre, reservasSinUsar: subResumen.reduce((s, x) => s + Math.max(0, x.asignado - x.gastado), 0), pct: percent(Gs + gastadoLibre, P),
     sobreasignado: R > P, subcajas: subResumen, inactivas, origen,
     fuentes: { lista: fResumen, total: totalFuentes, activas: fResumen.filter(r => r.fuente.activo).length, gastadoInactivas, countInactivas, gastadoSinFuente, countSinFuente },
   }
@@ -341,6 +354,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     porAmbito: [...amb.values()].sort(sortDesc),
     porCategoria: [...cat.values()].sort(sortDesc),
     porSubcategoria: [...sub.values()].sort(sortDesc).slice(0, 10),
+    rankingSubcategorias: [...rsub.values()].sort(sortDesc).slice(0, 20),
     jerarquia: [...hier.entries()].map(([name, cats]) => {
       const children = [...cats.entries()].map(([cn, subs]) => {
         const items = [...subs.values()].sort(sortDesc)

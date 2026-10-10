@@ -1,20 +1,22 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
-  Activity, AlertTriangle, Calculator, ChevronRight, CalendarDays, Hash, Layers, Lock, Pencil,
-  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, TrendingUp, Trophy, Wallet,
+  Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
+  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
-import { subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
+import { subKey } from '../lib/engine'
 import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, Filters } from '../lib/types'
-import { categoriaLook } from '../lib/visual'
-import { AcumuladoChart, AmbitoDonut, BarList, SubLabel } from '../components/charts'
+import { categoriaLook, subcategoriaLook } from '../lib/visual'
+import { AcumuladoChart, AmbitoDonut, BarList } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
-import { Button, Card, ErrorBox, IconButton, InfoTooltip, Skeleton } from '../components/ui'
+import { Button, Card, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
-import { CajaModal, cajaIcon, styleFor } from '../components/cajas'
+import { CajaModal } from '../components/cajas'
+import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
+import { ResumenCajas } from '../components/ResumenCajas'
 
 const toggle = (xs: string[], v: string) => (xs.includes(v) ? xs.filter(x => x !== v) : [...xs, v])
 
@@ -23,6 +25,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
   onIrCajas?: () => void
 }) {
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
+  const [ranking, setRanking] = useState(rankingSesion)
   const data = store.data
   const base = data?.config.moneda || 'PEN'
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
@@ -91,7 +94,11 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               info={<p>Cantidad de gastos activos que cumplen los filtros.</p>} />
           </div>
 
-          <Cajas c={a.cajas} money={money} onEdit={(caja, asignado) => setEditCaja({ caja, asignado })} periodo={periodoTxt} onIrCajas={onIrCajas} />
+          <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
+            accion={a.cajas.origen !== 'fuentes' && a.cajas.general
+              ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
+              : undefined} />
+          <ResumenCajas c={a.cajas} money={money} onIrCajas={onIrCajas} />
 
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>
@@ -110,25 +117,23 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               <AmbitoDonut items={a.porAmbito} catalogo={catalogo} currency={base} total={a.total} selected={filters.ambitos}
                 onToggle={v => setFilters({ ...filters, ambitos: toggle(filters.ambitos, v) })} />
             </Card>
-            <Card title="Top 5 categorías" icon={<Shapes className="size-4 text-coral" />}
-              info={{ title: 'Top 5 categorías', body: <>
-                <p>Las 5 categorías en las que más gastaste en el período, de mayor a menor (si hay menos de 5 con gastos, solo esas). Muestra monto, porcentaje sobre el total filtrado y cantidad de movimientos.</p>
-                <p>Haz clic en una barra para filtrar por esa categoría.</p></> }}>
-              <BarList ariaLabel="Top 5 categorías" items={a.porCategoria.slice(0, 5)} total={a.total} currency={base}
-                lookFor={it => categoriaLook(it.name, catalogo)} selected={it => filters.categorias.includes(it.name)}
-                onToggle={it => setFilters({ ...filters, categorias: toggle(filters.categorias, it.name) })} />
+            <Card title={ranking === 'categorias' ? 'Top 5 categorías' : 'Top 5 subcategorías'} icon={<Shapes className="size-4 text-coral" />}
+              action={<Segmented label="Ranking" value={ranking} onChange={v => { rankingSesion = v; setRanking(v) }}
+                options={[{ value: 'categorias', label: 'Categorías' }, { value: 'subcategorias', label: 'Subcategorías' }]} />}
+              info={{ title: 'Top 5', body: <>
+                <p>Las 5 categorías o subcategorías con más gasto en el período y con los filtros elegidos, de mayor a menor. Muestra monto, porcentaje sobre el total filtrado y movimientos. Si hay menos de 5 con gastos, solo esas.</p>
+                <p>Cada subcategoría se identifica por ámbito + categoría + subcategoría: “Otros” de Alimentación y “Otros” de Auto no se mezclan.</p>
+                <p>Haz clic en una barra para filtrar por ella.</p></> }}>
+              {ranking === 'categorias'
+                ? <BarList ariaLabel="Top 5 categorías" items={a.porCategoria.slice(0, 5)} total={a.total} currency={base}
+                    lookFor={it => categoriaLook(it.name, catalogo)} selected={it => filters.categorias.includes(it.name)}
+                    onToggle={it => setFilters({ ...filters, categorias: toggle(filters.categorias, it.name) })} />
+                : <BarList ariaLabel="Top 5 subcategorías" items={a.rankingSubcategorias.slice(0, 5)} total={a.total} currency={base}
+                    lookFor={it => subcategoriaLook(it.subcategoria, it.categoria, catalogo, it.ambito)} selected={it => filters.subcategorias.includes(it.key)}
+                    onToggle={it => setFilters({ ...filters, subcategorias: toggle(filters.subcategorias, subKey(it.categoria, it.subcategoria === 'Sin subcategoría' ? '' : it.subcategoria)) })}
+                    renderLabel={it => <span className="flex min-w-0 flex-col leading-tight"><span className="truncate">{it.subcategoria}</span><span className="truncate text-[11px] font-normal text-muted">{it.ambito} › {it.categoria}</span></span>} />}
             </Card>
           </div>
-
-          <Card title="Top 10 subcategorías" icon={<Tag className="size-4 text-turquesa" />}
-            info={{ title: 'Top 10 subcategorías', body: <>
-              <p>Las 10 subcategorías con más gasto, de mayor a menor. Cada una se identifica por categoría + subcategoría, así "Otros" de Alimentación y "Otros" de Auto no se mezclan.</p>
-              <p>Haz clic para filtrar el dashboard y la tabla de gastos por esa subcategoría.</p></> }}>
-            <BarList ariaLabel="Top 10 subcategorías" items={a.porSubcategoria} total={a.total} currency={base}
-              lookFor={it => categoriaLook(it.categoria, catalogo)} selected={it => filters.subcategorias.includes(it.key)}
-              onToggle={it => setFilters({ ...filters, subcategorias: toggle(filters.subcategorias, subKey(it.categoria, it.subcategoria === 'Sin subcategoría' ? '' : it.subcategoria)) })}
-              renderLabel={it => <SubLabel it={it} />} />
-          </Card>
 
           <Card title="Análisis detallado" icon={<Layers className="size-4 text-morado" />}
             info={{ title: 'Análisis detallado', body: <>
@@ -180,130 +185,5 @@ function Kpi({ icon, label, value, hint, info, tone, progress, tag }: { icon: Re
   )
 }
 
-const MAX_SUBCAJAS_DASHBOARD = 6
-
-function Cajas({ c, money, onEdit, periodo, onIrCajas }: { c: CajasResumen; money: (n: number) => string; onEdit: (c: Caja, asignado: number) => void; periodo: string; onIrCajas?: () => void }) {
-  const P = c.presupuesto
-  const seg = (v: number) => `${P ? Math.max(0, Math.min(100, (v / P) * 100)) : 0}%`
-  const reservaRestante = Math.max(0, c.reservado - c.gastadoSubcajas + c.excesoSubcajas)
-  return (
-    <div className="space-y-3">
-      <section className="overflow-hidden rounded-2xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)]">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-[linear-gradient(120deg,#294690,#4F6FC8)] px-4 py-3 text-white">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/15"><Wallet className="size-5" /></span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{c.origen === 'fuentes' ? 'Presupuesto consolidado' : c.general?.nombre ?? 'Caja general'}</p>
-            <p className="truncate text-xs text-white/75">{c.origen === 'fuentes' ? `${c.fuentes.activas} fuente${c.fuentes.activas === 1 ? '' : 's'} activa${c.fuentes.activas === 1 ? '' : 's'}` : 'Presupuesto principal'} · {periodo}</p>
-          </div>
-          <div className="order-last w-full text-left sm:order-none sm:w-auto sm:text-right">
-            <p className="text-[11px] text-white/75">Disponible global</p>
-            <p className="tabular text-xl font-bold">{P ? money(c.disponible) : 'Sin definir'}</p>
-          </div>
-          <div className="flex items-center gap-1">
-            {c.origen === 'fuentes' ? onIrCajas && <button type="button" onClick={onIrCajas} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Fuentes</button>
-              : c.general && <button type="button" onClick={() => onEdit(c.general!, P)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>}
-            <InfoBadge />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-5">
-          {[
-            ['Presupuesto (P)', P ? money(P) : '—', ''],
-            ['Reservado en subcajas', money(c.reservado), 'text-morado'],
-            ['Libre inicial (P − R)', P ? money(c.libreInicial) : '—', ''],
-            ['Gastado fuera de subcajas', money(c.gastadoLibre), 'text-coral'],
-            ['Saldo libre actual', P ? money(c.saldoLibre) : '—', c.saldoLibre < 0 ? 'text-[#D2463C]' : 'text-verde'],
-          ].map(([l, v, cls], i) => (
-            <div key={l} className={`bg-card px-4 py-3 ${i === 4 ? 'col-span-2 sm:col-span-1' : ''}`}>
-              <p className="text-[11px] text-muted">{l}</p>
-              <p className={`tabular text-sm font-semibold ${cls || 'text-ink'}`}>{v}</p>
-            </div>
-          ))}
-        </div>
-        {c.origen === 'fuentes' && (() => {
-          const act = c.fuentes.lista.filter(r => r.fuente.activo && r.asignado > 0)
-          return act.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-4 py-2.5" data-testid="dash-fuentes" aria-label="Fuentes del período">
-              {act.slice(0, 6).map(r => (
-                <span key={r.fuente.id} className="inline-flex items-center gap-1.5 rounded-full bg-bg px-2.5 py-1 text-[11px] text-muted">
-                  <i className="size-2 rounded-full" style={{ background: r.fuente.color }} />{r.fuente.nombre} <b className="tabular text-ink">{money(r.aporta)}</b>
-                </span>
-              ))}
-              {act.length > 6 && <span className="text-[11px] text-muted">y {act.length - 6} más</span>}
-            </div>
-          )
-        })()}
-        {P > 0 && (
-          <div className="px-4 py-3">
-            <div className="flex h-3 overflow-hidden rounded-full bg-bg" role="img"
-              aria-label={`Gastado libre ${money(c.gastadoLibre)}, gastado en subcajas ${money(c.gastadoSubcajas)}, reservas sin usar ${money(reservaRestante)}`}>
-              <span className="bar-grow h-full bg-coral" style={{ width: seg(c.gastadoLibre) }} />
-              <span className="bar-grow h-full bg-morado" style={{ width: seg(c.gastadoSubcajas) }} />
-              <span className="bar-grow h-full bg-morado/25" style={{ width: seg(reservaRestante) }} />
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
-              <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-coral" /> Gastado libre</span>
-              <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-morado" /> Gastado en subcajas</span>
-              <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-morado/25" /> Reservado sin usar</span>
-              <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-bg ring-1 ring-line" /> Libre</span>
-              <span className="ml-auto font-medium text-ink">{c.pct ?? 0}% consumido</span>
-            </div>
-            {c.sobreasignado && <p className="mt-2 flex items-center gap-1.5 text-xs text-[#B4541A]"><AlertTriangle className="size-3.5" /> Las reservas de subcajas superan el presupuesto consolidado.</p>}
-          </div>
-        )}
-      </section>
-
-      {/* En el resumen se ven las primeras; todas (crear, editar, ordenar, filtrar) están en la pestaña Cajas. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {c.subcajas.slice(0, MAX_SUBCAJAS_DASHBOARD).map(s => <Subcaja key={s.caja.id} s={s} money={money} onEdit={() => onEdit(s.caja, s.asignado)} />)}
-      </div>
-      {onIrCajas && (
-        <div className="flex justify-end">
-          <Button variant="ghost" className="text-xs" onClick={onIrCajas}>
-            {c.subcajas.length > MAX_SUBCAJAS_DASHBOARD ? `Ver las ${c.subcajas.length} cajas` : 'Administrar cajas'} <ChevronRight className="size-3.5" />
-          </Button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function InfoBadge() {
-  return (
-    <span className="rounded-full bg-white/15 text-white [&_button]:text-white [&_button:hover]:bg-white/20">
-      <InfoTooltip title="Cómo funcionan las cajas">
-        <p>La caja general (P) es tu presupuesto total. Auto, Bebé y Plan Nube son reservas (R) apartadas de ese mismo dinero: no se suman.</p>
-        <p>Un gasto de una subcaja baja esa reserva y el disponible global, pero no el saldo libre (ya estaba reservado). Un gasto sin subcaja baja el saldo libre.</p>
-        <p>Si una subcaja se excede, el exceso sale del saldo libre. Fórmulas: libre inicial = P − R; saldo libre = P − R − gasto libre − exceso; disponible global = P − todo lo gastado.</p>
-      </InfoTooltip>
-    </span>
-  )
-}
-
-function Subcaja({ s, money, onEdit }: { s: SubcajaResumen; money: (n: number) => string; onEdit: () => void }) {
-  const st = styleFor(s.caja)
-  const Icon = cajaIcon(s.caja)
-  return (
-    <section className="rounded-2xl border border-line p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04)] dark:!bg-card" style={{ background: st.bg }}>
-      <div className="flex items-center gap-2.5">
-        <span className="grid size-10 place-items-center rounded-xl bg-white/70 dark:bg-white/10" style={{ color: st.fg }}><Icon className="size-5" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ink">{s.caja.nombre}</p>
-          <p className="flex items-center gap-1 text-[11px] text-muted"><Lock className="size-3" /> Reserva de la caja general · {s.caja.filtroCampo} {s.caja.filtroValor}</p>
-        </div>
-        <IconButton label={`Ajustar ${s.caja.nombre}`} onClick={onEdit} className="bg-white/60 dark:bg-white/10"><Pencil className="size-3.5" /></IconButton>
-      </div>
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-muted">
-        <div><dt>Asignado</dt><dd className="tabular text-sm font-semibold text-ink">{s.asignado ? money(s.asignado) : '—'}</dd></div>
-        <div><dt>Gastado</dt><dd className="tabular text-sm font-semibold text-ink">{money(s.gastado)}</dd></div>
-        <div><dt>Disponible</dt><dd className={`tabular text-sm font-semibold ${s.disponible < 0 ? 'text-[#D2463C]' : 'text-ink'}`}>{s.asignado ? money(s.disponible) : '—'}</dd></div>
-      </dl>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/70 dark:bg-white/10" role="progressbar" aria-valuenow={s.pct ?? 0} aria-valuemin={0} aria-valuemax={100} aria-label={`Consumido ${s.caja.nombre}`}>
-        <div className="bar-grow h-full rounded-full" style={{ width: `${Math.min(s.pct ?? 0, 100)}%`, background: s.excedido ? '#D2463C' : st.fg }} />
-      </div>
-      <p className="mt-1.5 flex items-center justify-between text-[11px] text-muted">
-        <span>{s.asignado ? (s.excedido ? <span className="font-medium text-[#D2463C]">Excedida en {money(-s.disponible)}</span> : 'Dentro del presupuesto') : 'Sin asignación'}</span>
-        <span className="font-medium text-ink">{s.pct === null ? '—' : `${s.pct}%`}</span>
-      </p>
-    </section>
-  )
-}
+// Opción del ranking recordada durante la sesión (al cambiar filtros, datos o de pestaña).
+let rankingSesion: 'categorias' | 'subcategorias' = 'categorias'

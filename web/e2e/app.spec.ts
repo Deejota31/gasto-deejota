@@ -76,13 +76,15 @@ test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) 
   expect(await total(page)).toBeGreaterThanOrEqual(t0)
 })
 
-test('cajas: libre inicial = presupuesto − reservado; disponible global = P − gastado', async ({ page }) => {
-  const val = async (l: string) => money(await page.locator('p', { hasText: new RegExp(`^${l.replace(/[()]/g, '\\$&')}$`) }).locator('xpath=following-sibling::p[1]').first().innerText())
-  const P = await val('Presupuesto (P)')
-  const R = await val('Reservado en subcajas')
-  expect(await val('Libre inicial (P − R)')).toBeCloseTo(P - R, 2)
-  const disp = money(await page.getByText('Disponible global').locator('xpath=following-sibling::p[1]').innerText())
-  expect(disp).toBeCloseTo(P - (await total(page)), 2)
+test('presupuesto consolidado: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin usar', async ({ page }) => {
+  const c = (id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
+  const P = await c('presupuesto-consolidado'), R = await c('reservado-en-subcajas')
+  expect(await c('libre-inicial')).toBeCloseTo(P - R, 2)
+  const disp = money(await page.getByTestId('disponible-consolidado').innerText())
+  expect(disp).toBeCloseTo(P - (await total(page)), 2)                    // sin filtros, gastado del período = Total gastado
+  expect(await c('disponible-consolidado')).toBeCloseTo(disp, 2)
+  expect(await c('gastado-del-período')).toBeCloseTo(await total(page), 2)
+  expect(money(await kpi(page, 'Disponible').innerText())).toBeCloseTo(disp, 2)
 })
 
 test('medios de pago: orden pedido y sin opciones en blanco', async ({ page }) => {
@@ -248,7 +250,7 @@ test('Dashboard: "+ Nuevo gasto" abre el mismo formulario y actualiza los KPI si
   await expect.poll(() => total(page)).toBeCloseTo(antes + 15.25, 2)
 })
 
-test('notificaciones arriba a la derecha, verdes al confirmar; Top 5 categorías y Top 10 subcategorías', async ({ page }) => {
+test('notificaciones arriba a la derecha, verdes al confirmar; Top 5 alternable categorías/subcategorías (sin Top 10)', async ({ page }) => {
   await newGasto(page, { ambito: 'Familia', categoria: 'Hogar', sub: 'Muebles', monto: '9', medio: 'Yape', desc: 'Toast' })
   const ok = page.locator('[data-kind="success"]').first()
   await expect(ok).toBeVisible()
@@ -262,7 +264,21 @@ test('notificaciones arriba a la derecha, verdes al confirmar; Top 5 categorías
   await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este año' }).click()
   await expect(page.getByRole('heading', { name: 'Top 5 categorías' }).or(page.getByText('Top 5 categorías', { exact: true })).first()).toBeVisible()
   expect(await page.getByLabel('Top 5 categorías').getByRole('button').count()).toBe(5)
-  expect(await page.getByLabel('Top 10 subcategorías').getByRole('button').count()).toBe(10)
+  await expect(page.getByText('Top 10 subcategorías')).toHaveCount(0)
+  const ranking = page.getByRole('radiogroup', { name: 'Ranking' })
+  await ranking.getByRole('radio', { name: 'Subcategorías' }).click()
+  const subs = page.getByLabel('Top 5 subcategorías').getByRole('button')
+  await expect(subs).toHaveCount(5)
+  const montos = await subs.evaluateAll(els => els.map(e => Number((e.getAttribute('title') ?? '').split(': ').slice(1).join(': ').split(' · ')[0].replace(/[^\d.]/g, ''))))
+  expect([...montos].sort((a, b) => b - a)).toEqual(montos)                 // de mayor a menor
+  // la opción se mantiene al cambiar filtros y al volver al Dashboard
+  await page.getByRole('button', { name: 'Período', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este mes' }).click()
+  await expect(ranking.getByRole('radio', { name: 'Subcategorías' })).toHaveAttribute('aria-checked', 'true')
+  await go(page, 'Gastos'); await go(page, 'Dashboard')
+  await expect(page.getByRole('radiogroup', { name: 'Ranking' }).getByRole('radio', { name: 'Subcategorías' })).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('radiogroup', { name: 'Ranking' }).getByRole('radio', { name: 'Categorías', exact: true }).click()
+  await expect(page.getByLabel('Top 5 categorías')).toBeVisible()
 })
 
 test('formulario y filtros: "Otros" al final, Transporte nuevo y catálogo por ámbito', async ({ page }) => {
@@ -703,8 +719,11 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     await expect(page.getByRole('tab', { name: 'Por medio de pago' })).toHaveCount(0)
     const movs = await kpi(page, 'Movimientos').innerText()
     await expect(page.getByTestId('analisis-contexto')).toContainText(`${movs} movimiento`)
-    // Jerarquía: el ámbito más importante abierto; su porcentaje coincide con la dona
-    await expect(page.getByRole('list', { name: 'Jerarquía del gasto' }).getByRole('button', { expanded: true })).toHaveCount(1)
+    // Jerarquía: empieza totalmente contraída
+    const arbol = page.getByRole('list', { name: 'Jerarquía del gasto' })
+    await expect(arbol.getByRole('button', { expanded: true })).toHaveCount(0)
+    await arbol.getByRole('button', { expanded: false }).first().click()
+    await expect(arbol.getByRole('button', { expanded: true })).toHaveCount(1)
     // Sankey: hover sobre un medio → tooltip con monto, movimientos y %
     await page.getByRole('tab', { name: 'Flujo de medios de pago' }).click()
     await page.getByTestId('sankey-medio').first().hover()
@@ -888,7 +907,9 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     await expect(page.getByRole('heading', { name: /Salud financiera/ })).toBeVisible()
     await expect(page.getByText('Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.')).toBeVisible()
     await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' }).getByRole('tab')).toHaveCount(4)
-    const periodo = await page.getByTestId('salud-periodo').innerText()
+    await expect(page.getByTestId('salud-periodo')).toHaveCount(0)               // sin fecha duplicada en el encabezado
+    const picker = page.getByRole('button', { name: 'Período', exact: true })
+    const periodo = await picker.innerText()
     // cambiar de pestaña no vuelve a leer la hoja de gastos (las plantillas se leen una vez)
     const c1 = await calls(page)
     expect((c1.data ?? 0) - (c0.data ?? 0)).toBe(0)
@@ -898,10 +919,11 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     // el período es el mismo filtro global
     await page.getByRole('button', { name: 'Período', exact: true }).click()
     await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).click()
-    await expect(page.getByTestId('salud-periodo')).not.toHaveText(periodo)
-    const nuevo = await page.getByTestId('salud-periodo').innerText()
+    await page.keyboard.press('Escape')
+    await expect(picker).not.toHaveText(periodo)
+    const nuevo = (await picker.innerText()).split('\n').at(-1)!.trim()
     await go(page, 'Dashboard')
-    await expect(page.getByText(nuevo.split('·')[0].trim(), { exact: false }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Período', exact: true })).toContainText(nuevo)
   })
 
   test('guardar plantillas no bloquea: con 5 s de latencia se navega libremente y el éxito llega al final', async ({ page }) => {
@@ -1034,9 +1056,14 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     // la caja por medio de pago se explica en su tarjeta; las de clasificación muestran con quién se solapan
     await expect(tarjeta(page, 'Caja Sodexo').getByTestId('solape')).toContainText('Toma lo pagado con Sodexo')
     await expect(tarjeta(page, 'Caja Bebé').getByTestId('solape')).toContainText('Caja Familia')
-    // el Dashboard muestra 6 y enlaza a todas
+    // el Dashboard las resume en un acordeón cerrado y enlaza a Cajas
     await go(page, 'Dashboard')
-    await page.getByRole('button', { name: 'Ver las 13 cajas' }).click()
+    const acc = page.getByRole('button', { name: /Subcajas \/ reservas/ })
+    await expect(acc).toHaveAttribute('aria-expanded', 'false')
+    await expect(acc).toContainText('13 activas')
+    await acc.click()
+    await expect(page.getByRole('list', { name: 'Subcajas del período' }).getByRole('listitem')).toHaveCount(13)
+    await page.getByRole('region', { name: 'Subcajas / reservas' }).getByRole('button', { name: 'Administrar en Cajas' }).click()
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Cajas' })).toHaveAttribute('aria-current', 'page')
   })
 
@@ -1059,15 +1086,15 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
   test('General 3500 + Sodexo 280 + Extra 1 1000 = 4780; desactivar Extra 1 → 3780 con aviso; reactivar → 4780; mismas cifras en Dashboard y Salud', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
     await expect(page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente')).toHaveCount(3)
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4780)
-    const gastado = await cons(page, 'total-gastado')
-    expect(await cons(page, 'disponible')).toBeCloseTo(4780 - gastado, 2)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
+    const gastado = await cons(page, 'gastado-del-período')
+    expect(await cons(page, 'disponible-consolidado')).toBeCloseTo(4780 - gastado, 2)
     // apagar Extra 1: se informa el impacto antes, y la fuente queda guardada
     await fuente(page, 'Extra 1').getByRole('switch', { name: 'Desactivar Extra 1' }).click()
     await expect(dialog(page).getByTestId('impacto-desactivar')).toContainText('S/ 4,780.00')
     await expect(dialog(page).getByTestId('impacto-desactivar')).toContainText('S/ 3,780.00')
     await dialog(page).getByRole('button', { name: 'Desactivar' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(3780)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)
     await expect(fuente(page, 'Extra 1').getByTestId('estado-fuente')).toHaveText('Inactiva')
     await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivada' })).toBeVisible()
     // Dashboard y Salud financiera usan el mismo cálculo
@@ -1081,33 +1108,33 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     // reactivar
     await go(page, 'Cajas')
     await fuente(page, 'Extra 1').getByRole('switch', { name: 'Activar Extra 1' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4780)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await go(page, 'Dashboard')
     expect(money(await kpi(page, 'Presupuesto').innerText())).toBe(4780)
   })
 
   test('por mes: Extra 1 no se arrastra; ajustar General solo en noviembre no cambia octubre', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4780)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(3780)                  // Extra 1 era solo de octubre
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)                  // Extra 1 era solo de octubre
     await fuente(page, 'General').getByRole('button', { name: 'Editar fuente General' }).click()
     const d = dialog(page)
     await d.getByLabel(/^Importe de /).fill('4000')
     await d.getByRole('radiogroup', { name: 'Aplicar el importe' }).getByRole('radio', { name: /^Solo / }).click()
     await d.getByRole('button', { name: 'Guardar cambios' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4280)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4280)
     await expect(fuente(page, 'General')).toContainText('Ajustado')
     await page.getByRole('button', { name: 'Mes anterior' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4780)                  // octubre intacto
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)                  // octubre intacto
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(3780)                  // diciembre: importe habitual
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)                  // diciembre: importe habitual
   })
 
   test('nueva fuente: valida, suma sin tocar General, doble clic no duplica y no bloquea la navegación', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3&latencia=2500#cajas')
-    await expect.poll(() => cons(page, 'total-fuentes'), { timeout: 15_000 }).toBe(4780)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     await page.getByRole('button', { name: 'Nueva fuente' }).click()
     const d = dialog(page)
     await d.getByRole('button', { name: 'Crear fuente' }).click()
@@ -1130,7 +1157,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Gastos' })).toHaveAttribute('aria-current', 'page')
     await go(page, 'Cajas')
     await expect(page.getByRole('status').filter({ hasText: 'Bonificación creada' })).toBeVisible({ timeout: 15_000 })
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4980)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4980)
     await expect(fuente(page, 'General').getByTestId('fuente-aporte')).toHaveText('S/ 3,500.00')
     expect(((await calls(page)).saveFuente ?? 0) - (c0.saveFuente ?? 0)).toBe(1)
     await expect(page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente')).toHaveCount(4)
@@ -1139,12 +1166,12 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
   test('sin fuentes: sigue la caja general; migrar crea General con el mismo importe (idempotente) y no convierte Sodexo', async ({ page }) => {
     await page.goto('/?demo=60#cajas')
     await expect(page.getByTestId('sin-fuentes')).toBeVisible()
-    const p0 = await cons(page, 'presupuesto')
+    const p0 = await cons(page, 'presupuesto-consolidado')
     expect(p0).toBe(7000)
     await page.getByRole('button', { name: /Crear fuente General con/ }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Fuente General creada' })).toBeVisible()
     await expect(page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente')).toHaveCount(1)
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(p0)                     // ningún mes cambia
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(p0)                     // ningún mes cambia
     await expect(page.getByRole('button', { name: /Crear fuente General/ })).toHaveCount(0)
     expect((await calls(page)).migrarGeneralAFuente).toBe(1)
   })
@@ -1173,29 +1200,29 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
 
   test('gasto con Sodexo: se atribuye a la fuente Sodexo, descuenta una sola vez; eliminar y restaurar lo devuelven exacto', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
-    await expect.poll(() => cons(page, 'total-fuentes')).toBe(4780)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     const gSodexo = () => fuente(page, 'Sodexo').innerText().then(t => money(/Gastado\s+S\/\s*([\d,.]+)/.exec(t)![1]))
-    const s0 = await gSodexo(), g0 = await cons(page, 'total-gastado'), d0 = await cons(page, 'disponible')
+    const s0 = await gSodexo(), g0 = await cons(page, 'gastado-del-período'), d0 = await cons(page, 'disponible-consolidado')
     await go(page, 'Gastos')
     await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: '25', medio: 'Sodexo', desc: 'Menú Sodexo E2E' })
     await expect(page.getByRole('row', { name: /Menú Sodexo E2E/ })).toBeVisible()
     await go(page, 'Cajas')
     await expect.poll(gSodexo).toBeCloseTo(s0 + 25, 2)
-    expect(await cons(page, 'total-gastado')).toBeCloseTo(g0 + 25, 2)
-    expect(await cons(page, 'disponible')).toBeCloseTo(d0 - 25, 2)
-    expect(await cons(page, 'total-fuentes')).toBe(4780)                          // gastar no cambia el presupuesto
+    expect(await cons(page, 'gastado-del-período')).toBeCloseTo(g0 + 25, 2)
+    expect(await cons(page, 'disponible-consolidado')).toBeCloseTo(d0 - 25, 2)
+    expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)                          // gastar no cambia el presupuesto
     await go(page, 'Gastos')
     await page.getByRole('row', { name: /Menú Sodexo E2E/ }).getByRole('button', { name: 'Eliminar' }).click()
     await dialog(page).getByRole('button', { name: 'Eliminar' }).click()
     await expect(page.getByRole('row', { name: /Menú Sodexo E2E/ })).toHaveCount(0)
     await go(page, 'Cajas')
-    await expect.poll(() => cons(page, 'disponible')).toBeCloseTo(d0, 2)
+    await expect.poll(() => cons(page, 'disponible-consolidado')).toBeCloseTo(d0, 2)
     await go(page, 'Gastos')
     await page.getByRole('radio', { name: 'Eliminados' }).click()
     await page.getByRole('row', { name: /Menú Sodexo E2E/ }).getByRole('button', { name: 'Restaurar' }).click()
     await page.getByRole('radio', { name: 'Activos' }).click()
     await go(page, 'Cajas')
-    await expect.poll(() => cons(page, 'disponible')).toBeCloseTo(d0 - 25, 2)
+    await expect.poll(() => cons(page, 'disponible-consolidado')).toBeCloseTo(d0 - 25, 2)
     await expect.poll(gSodexo).toBeCloseTo(s0 + 25, 2)
   })
 
@@ -1208,5 +1235,95 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await page.setViewportSize({ width: 768, height: 1024 })
     const b2 = await nav.locator('div').first().boundingBox()
     expect(Math.abs(b2!.x + b2!.width / 2 - 768 / 2)).toBeLessThan(40)
+  })
+})
+
+// ───────────────────────────── v1.9 ─────────────────────────────
+test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e iconos', () => {
+  const celdas = async (page: Page) => Object.fromEntries(await page.getByTestId('consolidado').locator('[data-testid^="cons-"]').evaluateAll(els =>
+    els.map(e => [e.getAttribute('data-testid'), e.querySelectorAll('p')[1]?.textContent ?? ''])))
+
+  test('orden: KPIs → Presupuesto consolidado → acordeones → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3')
+    const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y
+    const kpiY = await y(page.getByText('Total gastado', { exact: true }).first())
+    const consY = await y(page.getByTestId('caja-general'))
+    const accY = await y(page.getByTestId('resumen-cajas'))
+    const chartY = await y(page.getByText(/^Gasto acumulado/).first())
+    expect(kpiY).toBeLessThan(consY); expect(consY).toBeLessThan(accY); expect(accY).toBeLessThan(chartY)
+    await expect(page.getByTestId('consolidado-subtitulo')).toContainText(/3 fuentes activas · \w+ \d{4}/)
+    const fuentes = page.getByRole('button', { name: /^Fuentes de dinero/ }), subcajas = page.getByRole('button', { name: /^Subcajas \/ reservas/ })
+    await expect(fuentes).toHaveAttribute('aria-expanded', 'false')
+    await expect(subcajas).toHaveAttribute('aria-expanded', 'false')
+    await expect(fuentes).toContainText('3 activas · S/ 4,780.00')
+    await expect(page.getByRole('list', { name: 'Fuentes del período' })).toHaveCount(0)            // no se renderiza cerrado
+    await fuentes.click()
+    await expect(page.getByRole('list', { name: 'Fuentes del período' }).getByRole('listitem')).toHaveCount(3)
+    await expect(subcajas).toHaveAttribute('aria-expanded', 'false')                                   // no abre ambos
+    await subcajas.focus(); await page.keyboard.press('Enter')
+    await expect(subcajas).toHaveAttribute('aria-expanded', 'true')
+    await fuentes.click()
+    await expect(fuentes).toHaveAttribute('aria-expanded', 'false')
+    // ya no están las tarjetas grandes de subcajas ni el Top 10
+    await expect(page.getByRole('button', { name: /^Ajustar Caja/ })).toHaveCount(0)
+    await expect(page.getByText('Top 10 subcategorías')).toHaveCount(0)
+    await go(page, 'Gastos'); await go(page, 'Dashboard')
+    await expect(page.getByRole('button', { name: /^Subcajas \/ reservas/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  for (const q of ['?demo=60&fuentes=3', '?demo=60', '?demo=60&fuentes=20&cajas=10']) {
+    test(`Presupuesto consolidado idéntico en Dashboard, Cajas y Salud (${q})`, async ({ page }) => {
+      await page.goto(q)
+      await expect(page.getByTestId('consolidado')).toBeVisible()
+      const dash = await celdas(page), dispDash = await page.getByTestId('disponible-consolidado').innerText()
+      await go(page, 'Cajas')
+      await expect(page.getByTestId('consolidado')).toBeVisible()
+      expect(await celdas(page)).toEqual(dash)
+      expect(await page.getByTestId('disponible-consolidado').innerText()).toBe(dispDash)
+      await go(page, 'Salud financiera')
+      await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
+      expect(money(await page.getByTestId('pres-presupuesto').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
+      expect(money(await page.getByTestId('pres-disponible').innerText())).toBe(money(dash['cons-disponible-consolidado']))
+      expect(money(await page.getByTestId('pres-gastado').innerText())).toBe(money(dash['cons-gastado-del-período']))
+    })
+  }
+
+  test('cambiar un gasto actualiza igual Dashboard y Cajas (sin recargar, una sola vez)', async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3')
+    const d0 = money(await page.getByTestId('disponible-consolidado').innerText())
+    const c0 = await calls(page)
+    await newGasto(page, { ambito: 'Personal', categoria: 'Auto', sub: 'Gasolina', monto: '40', medio: 'Plin', desc: 'Grifo v1.9' })
+    await expect.poll(async () => money(await page.getByTestId('disponible-consolidado').innerText())).toBeCloseTo(d0 - 40, 2)
+    const dash = await celdas(page)
+    await go(page, 'Cajas')
+    await expect(page.getByTestId('consolidado')).toBeVisible()
+    expect(await celdas(page)).toEqual(dash)
+    expect(((await calls(page)).data ?? 0) - (c0.data ?? 0)).toBe(0)                                  // sin lecturas extra del Sheet
+  })
+
+  test('iconos: buscar por sinónimo, sugerencias según el nombre y guardar el icono de una subcategoría', async ({ page }) => {
+    await go(page, 'Categorías')
+    await page.getByRole('button', { name: 'Gasolina', exact: true }).first().click()
+    const d = dialog(page)
+    await expect(d.getByRole('region', { name: 'Sugeridos' }).or(d.getByLabel('Sugeridos'))).toBeVisible()
+    await expect(d.getByLabel('Sugeridos').getByRole('button', { name: 'Icono fuel' })).toBeVisible()
+    await d.getByLabel('Buscar icono').fill('mascota')
+    await expect(d.getByRole('button', { name: 'Icono dog' })).toBeVisible()
+    await d.getByLabel('Buscar icono').fill('')
+    await d.getByLabel('Sugeridos').getByRole('button', { name: 'Icono fuel' }).click()
+    await d.getByRole('button', { name: 'Guardar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Subcategoría actualizada correctamente.' })).toBeVisible()
+    await page.getByRole('button', { name: 'Gasolina', exact: true }).first().click()
+    await expect(dialog(page).getByRole('button', { name: 'Icono fuel' }).first()).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('responsive: Dashboard sin scroll horizontal (360, 390, 768) con acordeones abiertos', async ({ page }) => {
+    for (const vp of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 768, height: 1024 }]) {
+      await page.setViewportSize(vp)
+      await page.goto('/?demo=60&fuentes=20&cajas=10')
+      await page.getByRole('button', { name: /^Fuentes de dinero/ }).click()
+      await page.getByRole('button', { name: /^Subcajas \/ reservas/ }).click()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    }
   })
 })

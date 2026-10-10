@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import vm from 'node:vm'
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CATALOGO_INICIAL } from './lib/catalogo'
 
@@ -73,7 +74,7 @@ function load() {
   let uuid = 0
   const ctx = {
     SpreadsheetApp: { create: () => { created++; return ss }, openById: () => ss },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => props.get(k) ?? null, setProperty: (k: string, v: string) => props.set(k, v) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => props.get(k) ?? null, setProperty: (k: string, v: string) => props.set(k, v), deleteProperty: (k: string) => props.delete(k) }) },
     CacheService: { getScriptCache: () => ({
       get: (k: string) => cache.get(k) ?? null,
       getAll: (ks: string[]) => Object.fromEntries(ks.filter(k => cache.has(k)).map(k => [k, cache.get(k)])),
@@ -85,6 +86,8 @@ function load() {
     Utilities: {
       getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}`,
       formatDate: (d: Date) => d.toISOString().slice(0, 10),
+      DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
+      computeDigest: (alg: string, s: string) => [...createHash(alg).update(s, 'utf8').digest()].map(b => (b > 127 ? b - 256 : b)),
     },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s: string) => ({ setMimeType: () => ({ body: s }) }) },
     Logger: { log: () => {} },
@@ -703,6 +706,88 @@ describe('backend Apps Script', () => {
       const r = b.post('migrarGeneralAFuente')
       expect(r.error.message).toMatch(/no se migró nada/)
       expect(b.post('data', { fresh: true }).data.fuentes).toHaveLength(1)
+    })
+  })
+
+  describe('v1.9 atajo de iPhone', () => {
+    const atajo = (action: string, payload: unknown, token = b.props.get('ATAJO_TOKEN')!) =>
+      JSON.parse(b.g.doPost({ postData: { contents: JSON.stringify({ token, action, payload }) } }).body)
+    const ok = { clave: 'atajo-20261010-1234', ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', monto: '25.5', moneda: 'PEN', medioPago: 'Yape', fecha: '2026-10-10' }
+
+    it('sin token creado está deshabilitado; el token de la web no sirve para el atajo ni el del atajo para la web', () => {
+      expect(atajo('atajoCatalogo', {}, b.props.get('API_TOKEN')!).error.code).toBe('NOT_ENABLED')
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      expect(atajo('atajoCatalogo', {}, b.props.get('API_TOKEN')!).error.code).toBe('UNAUTHORIZED')
+      expect(b.post('data', {}, b.props.get('ATAJO_TOKEN')!).error.code).toBe('UNAUTHORIZED')
+      expect(b.post('saveGasto', gasto(), b.props.get('ATAJO_TOKEN')!).error.code).toBe('UNAUTHORIZED')
+      expect(atajo('atajoCatalogo', {}).ok).toBe(true)
+    })
+
+    it('catálogo: solo activos, dependiente por ámbito y categoría, "Otros" al final, sin movimientos', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      b.post('saveGasto', gasto())
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Cena', activo: false })
+      b.post('saveMedio', { nombre: 'Plin', activo: false })
+      const c = atajo('atajoCatalogo', {}).data
+      expect(Object.keys(c).sort()).toEqual(['ambitos', 'categorias', 'hoy', 'medios', 'moneda', 'monedas', 'subcategorias', 'version'])
+      expect(JSON.stringify(c)).not.toContain('11111111-2222')                 // ningún gasto ni ID de movimiento
+      expect(c.ambitos).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
+      expect(c.categorias.Personal).toContain('Alimentación')
+      const subs = c.subcategorias['Personal|Alimentación']
+      expect(subs).toContain('Almuerzo')
+      expect(subs).not.toContain('Cena')
+      expect(subs.at(-1)).toBe('Otros')
+      expect(c.subcategorias['Familia|Bebé']).toContain('Pañales')
+      expect(c.medios).not.toContain('Plin')
+      expect(c.medios.at(-1)).toBe('Otros')
+      expect(c.monedas).toEqual(['PEN', 'USD'])
+    })
+
+    it('registrar: valida todo contra el catálogo, una escritura, origen "atajo"; la misma clave no duplica', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const sh = b.ss.getSheetByName('GASTOS')!
+      const r1 = atajo('atajoGasto', ok)
+      expect(r1.ok).toBe(true)
+      expect(r1.data.estado).toBe('registrado')
+      expect(r1.data.mensaje).toContain('S/ 25.50')
+      const filas = () => sh.rows.slice(1).filter(x => x[13])
+      expect(filas()).toHaveLength(1)
+      expect(filas()[0].slice(0, 12)).toEqual(['2026-10-10', 25.5, 'PEN', 'Alimentación', 'Almuerzo', 'Almuerzo', 'Yape', 'Variable', 'Personal', false, 'Activo', 'atajo'])
+      const r2 = atajo('atajoGasto', ok)                                         // reintento / doble toque
+      expect(r2.data.estado).toBe('ya-registrado')
+      expect(r2.data.id).toBe(r1.data.id)
+      expect(filas()).toHaveLength(1)
+      expect(atajo('atajoGasto', { ...ok, clave: 'atajo-20261010-9999', descripcion: 'Menú del día' }).data.estado).toBe('registrado')
+      expect(filas()).toHaveLength(2)
+      // la web lo ve igual que cualquier gasto
+      expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(2)
+    })
+
+    it('rechaza datos inválidos sin escribir', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const sh = b.ss.getSheetByName('GASTOS')!
+      const w = sh.writes
+      const bad = (o: Record<string, unknown>) => atajo('atajoGasto', { ...ok, ...o }).error
+      expect(bad({ clave: 'x' }).code).toBe('VALIDATION')
+      expect(bad({ ambito: 'Nada' }).message).toMatch(/Ámbito no válido/)
+      expect(bad({ categoria: 'Bebé' }).message).toMatch(/Categoría no válida para Personal/)
+      expect(bad({ subcategoria: 'Pañales' }).message).toMatch(/Subcategoría no válida/)
+      expect(bad({ medioPago: 'Bitcoin' }).message).toMatch(/Medio de pago no válido/)
+      expect(bad({ moneda: 'EUR' }).message).toMatch(/Moneda no permitida/)
+      for (const m of ['0', '-3', 'abc', '1.234', '']) expect(bad({ monto: m }).code).toBe('VALIDATION')
+      expect(bad({ fecha: '2026-02-30' }).code).toBe('VALIDATION')
+      expect(sh.writes).toBe(w)
+      expect(atajo('atajoGasto', { ...ok, monto: '12,40', fecha: '' }).data.mensaje).toContain('S/ 12.40')
+    })
+
+    it('token inválido repetido bloquea; revocar deshabilita', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      for (let i = 0; i < 10; i++) expect(atajo('atajoCatalogo', {}, 'atj_malo').error.code).toBe('UNAUTHORIZED')
+      expect(atajo('atajoCatalogo', {}).error.code).toBe('LOCKED')
+      b.cache.delete('atajo:fallos')
+      expect(atajo('atajoCatalogo', {}).ok).toBe(true)
+      ;(b.g as unknown as { revocarTokenAtajo: () => void }).revocarTokenAtajo()
+      expect(atajo('atajoCatalogo', {}, 'atj_x').error.code).toBe('NOT_ENABLED')
     })
   })
 

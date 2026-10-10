@@ -133,3 +133,74 @@ describe('fuentes de dinero: presupuesto consolidado', () => {
     expect(a.cajas.disponible).toBe(p.disponible)
   })
 })
+
+describe('invariantes del presupuesto consolidado (mismas cifras en todas las pestañas)', () => {
+  const inv = (c: ReturnType<typeof aggregate>['cajas']) => {
+    expect(c.disponible).toBe(c.presupuesto - c.gastadoPeriodo)
+    expect(c.libreInicial).toBe(c.presupuesto - c.reservado)
+    expect(c.gastadoPeriodo).toBe(c.gastadoSubcajas + c.gastadoLibre)
+    expect(c.saldoLibre).toBe(c.libreInicial - c.gastadoLibre - c.excesoSubcajas)
+    // conciliación: lo disponible es lo libre más lo reservado que aún no se usó
+    expect(c.disponible).toBe(c.saldoLibre + c.reservasSinUsar)
+    expect(c.reservado).toBe(c.subcajas.reduce((s, x) => s + x.asignado, 0))
+    for (const x of c.subcajas) expect(x.disponible).toBe(x.asignado - x.gastado)
+  }
+
+  it('escenario de regresión: 3,392.65 − 2,808.57 = 584.08; reservado 950; saldo libre 453.85', () => {
+    const fs = [fu('general', 3110, { orden: 1 }), fu('sodexo', 282.65, { orden: 2, medioPago: 'Sodexo' })]
+    const cajas = [caja('g', 0), caja('auto', 500, 'Categoría', 'Auto', 2), caja('bebe', 450, 'Categoría', 'Bebé', 3)]
+    const gastos = [g({ monto: 400, categoria: 'Auto' }), g({ monto: 419.77, categoria: 'Bebé' }), g({ monto: 1988.80, medioPago: 'Plin' })]
+    const c = aggregate(gastos, oct, ctx(fs, { cajas })).cajas
+    expect([c.presupuesto, c.gastadoPeriodo, c.disponible, c.reservado, c.saldoLibre]).toEqual([339265, 280857, 58408, 95000, 45385])
+    inv(c)
+  })
+
+  it('aleatorio: 200 escenarios con reservas excedidas, solapes, USD, anulados y fuentes apagadas cumplen las identidades', () => {
+    let seed = 7
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    const cats = ['Auto', 'Bebé', 'Alimentación', 'Salud', 'Plan Nube']
+    for (let k = 0; k < 200; k++) {
+      const fs = Array.from({ length: 1 + Math.floor(rnd() * 5) }, (_, i) => fu(`f${i}`, Math.round(rnd() * 400000) / 100, { orden: i, activo: rnd() > 0.2, moneda: rnd() > 0.85 ? 'USD' : 'PEN' }))
+      const cajas = [caja('g', 0), ...cats.slice(0, 1 + Math.floor(rnd() * 4)).map((c, i) => caja(`c${i}`, Math.round(rnd() * 80000) / 100, i % 3 === 2 ? 'Ámbito' : 'Categoría', i % 3 === 2 ? 'Familia' : c, i + 2))]
+      const gastos = Array.from({ length: Math.floor(rnd() * 40) }, () => g({
+        monto: Math.round(rnd() * 50000) / 100, categoria: cats[Math.floor(rnd() * cats.length)], ambito: rnd() > 0.5 ? 'Familia' : 'Personal',
+        medioPago: rnd() > 0.7 ? 'Sodexo' : 'Yape', moneda: rnd() > 0.9 ? 'USD' : 'PEN', estado: rnd() > 0.9 ? 'Anulado' : 'Activo',
+      }))
+      inv(aggregate(gastos, oct, ctx(fs, { cajas })).cajas)
+    }
+  })
+})
+
+describe('ranking Top 5', () => {
+  it('subcategorías por ámbito › categoría › subcategoría: homónimos no se mezclan; respeta filtros; empates estables; sin datos = vacío', () => {
+    const gastos = [
+      g({ monto: 50, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Otros' }),
+      g({ monto: 30, ambito: 'Familia', categoria: 'Alimentación', subcategoria: 'Otros' }),
+      g({ monto: 30, ambito: 'Personal', categoria: 'Auto', subcategoria: 'Otros' }),
+      g({ monto: 20, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Otros' }),
+      g({ monto: 999, ambito: 'Personal', categoria: 'Auto', subcategoria: 'Gas', estado: 'Anulado' }),
+    ]
+    const a = aggregate(gastos, oct, ctx([]))
+    expect(a.rankingSubcategorias.map(x => [x.name, x.cents, x.count])).toEqual([
+      ['Personal › Alimentación › Otros', 7000, 2], ['Familia › Alimentación › Otros', 3000, 1], ['Personal › Auto › Otros', 3000, 1]])
+    const soloFamilia = aggregate(gastos, { ...oct, ambitos: ['Familia'] }, ctx([]))
+    expect(soloFamilia.rankingSubcategorias.map(x => x.name)).toEqual(['Familia › Alimentación › Otros'])
+    expect(aggregate([], oct, ctx([])).rankingSubcategorias).toEqual([])
+    expect(aggregate(gastos, oct, ctx([])).porCategoria.slice(0, 5).map(x => x.name)).toEqual(['Alimentación', 'Auto'])
+  })
+})
+
+describe('rendimiento del motor', () => {
+  it('20,000 movimientos con 20 fuentes y 13 cajas: una pasada en < 400 ms', () => {
+    const cats = ['Auto', 'Bebé', 'Alimentación', 'Salud', 'Plan Nube', 'Servicios']
+    const gastos = Array.from({ length: 20000 }, (_, i) => g({ id: String(i), fecha: `2026-10-${String(1 + (i % 28)).padStart(2, '0')}`, monto: (i % 97) + 0.5, categoria: cats[i % 6], subcategoria: `S${i % 13}`, medioPago: i % 5 ? 'Yape' : 'Sodexo' }))
+    const fs = Array.from({ length: 20 }, (_, i) => fu(`f${i}`, 100 + i, { orden: i, medioPago: i === 1 ? 'Sodexo' : '' }))
+    const cajas = [caja('g', 0), ...Array.from({ length: 13 }, (_, i) => caja(`c${i}`, 100, i % 2 ? 'Categoría' : 'Subcategoría', i % 2 ? cats[i % 6] : `${cats[i % 6]} › S${i}`, i + 2))]
+    const t0 = performance.now()
+    const a = aggregate(gastos, oct, ctx(fs, { cajas }))
+    const ms = performance.now() - t0
+    expect(a.count).toBe(20000)
+    expect(a.cajas.disponible).toBe(a.cajas.saldoLibre + a.cajas.reservasSinUsar)
+    expect(ms).toBeLessThan(400)
+  })
+})
