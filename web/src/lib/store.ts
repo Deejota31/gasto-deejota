@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createApi, httpTransport, type Api, type Connection, type GastoInput, type PlantillaInput } from './api'
+import { createApi, httpTransport, type Api, type Connection, type FuenteInput, type GastoInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
-import type { AppData, Caja, CatalogoItem, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
+import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { sortCatalogo } from './orden'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
@@ -55,7 +55,7 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10))
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fuentes')) || 0, 25))
   const falla = q.get('falla') === '1' || q.get('falla') === 'timeout'
   const codigo = q.get('falla') === 'timeout' ? { code: 'TIMEOUT', msg: 'Apps Script tardó demasiado en responder.' } : { code: 'NETWORK', msg: 'No se pudo conectar con Google Sheets.' }
   return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
@@ -213,6 +213,39 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async savePresupuesto(p: Presupuesto) {
       const s = await api.savePresupuesto(p)
       patch(d => ({ ...d, presupuestos: [...d.presupuestos.filter(x => !(x.periodo === s.periodo && x.cajaId === s.cajaId)), s] }))
+    },
+    /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
+    async saveFuente(f: FuenteInput) {
+      const s = await api.saveFuente(f)
+      patch(d => {
+        const fs = d.fuentes ?? []
+        return { ...d, fuentes: fs.some(x => x.id === s.id) ? fs.map(x => x.id === s.id ? s : x) : [...fs, s] }
+      })
+      return s
+    },
+    /** Importe de una fuente para un mes ("solo") o desde un mes ("desde"). Nunca toca otros meses. */
+    async saveFuenteMes(m: FuenteMes, quitar = false) {
+      await api.saveFuenteMes(m, quitar)
+      const mismo = (x: FuenteMes) => x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo
+      patch(d => ({ ...d, fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => !mismo(x)), ...(quitar ? [] : [m])] }))
+    },
+    /** Orden de las fuentes: se ve al instante; si falla, vuelve al anterior. */
+    async reorderFuentes(ids: string[]) {
+      let previo: Fuente[] = []
+      const aplicar = (d: AppData) => ({ ...d, fuentes: (d.fuentes ?? []).map(f => ({ ...f, orden: ids.indexOf(f.id) >= 0 ? ids.indexOf(f.id) + 1 : ids.length + 1 })) })
+      setData(d => { previo = d?.fuentes ?? []; return d && aplicar(d) })
+      try { await api.reorderFuentes(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, fuentes: previo }); throw e }
+    },
+    /** Migración pedida por el usuario: fuente General desde la caja general (con sus ajustes mensuales). Idempotente. */
+    async migrarGeneralAFuente() {
+      const r = await api.migrarGeneralAFuente()
+      const f = r.fuente
+      if (f) patch(d => ({
+        ...d,
+        fuentes: [...(d.fuentes ?? []).filter(x => x.id !== f.id), f],
+        fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => x.fuenteId !== f.id), ...r.ajustes],
+      }))
+      return r
     },
     async saveConfig(clave: string, valor: string) {
       await api.saveConfig(clave, valor)

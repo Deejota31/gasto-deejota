@@ -116,7 +116,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -603,6 +603,107 @@ describe('backend Apps Script', () => {
     const d = b.post('data', { fresh: true }).data
     expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-salud2').slice(7)).toEqual([false, ''])
     expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[7]).toBe(true)  // fila antigua sin Activo = activa
+  })
+
+  describe('v1.8 fuentes de dinero', () => {
+    // Instalación anterior a v1.8: todavía no existen las hojas de fuentes.
+    beforeEach(() => { b.ss.sheets.delete('FUENTES'); b.ss.sheets.delete('FUENTES_MESES') })
+    const fuente = (o: Record<string, unknown>) => b.post('saveFuente', { nombre: 'X', monto: 0, moneda: 'PEN', color: '#16A085', orden: 1, recurrencia: 'mensual', mes: '', ...o })
+
+    it('la primera fuente crea las hojas con respaldo previo (una sola vez) sin tocar GASTOS, CAJAS ni PRESUPUESTOS', () => {
+      b.post('saveGasto', gasto())
+      const otras = ['GASTOS', 'CAJAS', 'PRESUPUESTOS'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))
+      expect(b.post('data', { fresh: true }).data.fuentes).toEqual([])
+      const r = fuente({ id: 'f-sodexo', nombre: 'Sodexo', monto: 280, medioPago: 'Sodexo' })
+      expect(r.ok).toBe(true)
+      expect(b.ss.copies).toHaveLength(1)
+      expect(b.ss.getSheetByName('FUENTES')!.rows[0]).toHaveLength(13)
+      expect(b.ss.getSheetByName('FUENTES_MESES')!.rows[0]).toEqual(['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en'])
+      fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10' })
+      expect(b.ss.copies).toHaveLength(1)                      // idempotente: no vuelve a respaldar
+      expect(['GASTOS', 'CAJAS', 'PRESUPUESTOS'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))).toEqual(otras)
+      const d = b.post('data', { fresh: true }).data
+      expect(d.fuentes.map((f: unknown[]) => [f[0], f[1], f[2], f[6], f[8], f[9], f[10]])).toEqual([
+        ['f-sodexo', 'Sodexo', 280, true, 'mensual', '', 'Sodexo'], ['f-extra1', 'Extra 1', 1000, true, 'unica', '2026-10', '']])
+    })
+
+    it('upsert por ID (doble clic no duplica), conserva Creado en, valida y desactiva sin borrar', () => {
+      const a = fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10' })
+      const b2 = fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10' })
+      expect(b.ss.getSheetByName('FUENTES')!.rows.slice(1).filter(r => r[0] === 'f-extra1')).toHaveLength(1)
+      expect(b2.data[11]).toBe(a.data[11])
+      expect(fuente({ id: 'f-otra', nombre: ' extra  1 ' }).error.message).toMatch(/Ya existe una fuente/)
+      expect(fuente({ id: 'f-x', nombre: '' }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f-x', monto: -5 }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f-x', moneda: 'EUR' }).error.message).toMatch(/no permitida/)
+      expect(fuente({ id: 'f-x', moneda: 'pen' }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f-x', mes: '2026-13' }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f-x', recurrencia: 'unica', mes: '' }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f x!' }).error.code).toBe('VALIDATION')
+      expect(fuente({ id: 'f-usd', nombre: 'Dólares', moneda: 'USD' }).ok).toBe(true)
+      // mismo medio en dos fuentes activas → ambiguo; inactiva sí
+      expect(fuente({ id: 'f-s1', nombre: 'Sodexo', medioPago: 'Sodexo' }).ok).toBe(true)
+      expect(fuente({ id: 'f-s2', nombre: 'Sodexo 2', medioPago: 'sodexo' }).error.message).toMatch(/ya está asociada/)
+      expect(fuente({ id: 'f-s2', nombre: 'Sodexo 2', medioPago: 'sodexo', activo: false }).ok).toBe(true)
+      const off = fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10', activo: false })
+      expect(off.data[6]).toBe(false)
+      expect(b.post('data', { fresh: true }).data.fuentes.some((f: unknown[]) => f[0] === 'f-extra1')).toBe(true)
+    })
+
+    it('importes por mes: upsert por fuente+mes+modo, no pisa otros meses, quitar borra solo ese ajuste', () => {
+      fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10' })
+      const mes = (o: Record<string, unknown>) => b.post('saveFuenteMes', { fuenteId: 'f-extra1', modo: 'solo', ...o })
+      expect(mes({ mes: '2026-12', monto: 500 }).ok).toBe(true)
+      expect(mes({ mes: '2026-11', monto: 0 }).ok).toBe(true)
+      expect(mes({ mes: '2026-12', monto: 600 }).ok).toBe(true)          // re-guardar = actualizar
+      expect(mes({ mes: '2026-12', monto: 700, modo: 'desde' }).ok).toBe(true)
+      expect(mes({ mes: '2026-1', monto: 1 }).error.code).toBe('VALIDATION')
+      expect(mes({ mes: '2026-10', monto: -1 }).error.code).toBe('VALIDATION')
+      expect(b.post('saveFuenteMes', { fuenteId: 'nada', mes: '2026-10', monto: 1 }).error.code).toBe('NOT_FOUND')
+      let d = b.post('data', { fresh: true }).data
+      expect(d.fuentesMeses).toEqual([['f-extra1', '2026-12', 600, 'solo'], ['f-extra1', '2026-11', 0, 'solo'], ['f-extra1', '2026-12', 700, 'desde']])
+      expect(mes({ mes: '2026-11', quitar: true }).data.quitado).toBe(true)
+      d = b.post('data', { fresh: true }).data
+      expect(d.fuentesMeses).toEqual([['f-extra1', '2026-12', 600, 'solo'], ['f-extra1', '2026-12', 700, 'desde']])
+    })
+
+    it('reordenar en una escritura', () => {
+      fuente({ id: 'f-a', nombre: 'A' }); fuente({ id: 'f-b', nombre: 'B' }); fuente({ id: 'f-c', nombre: 'C' })
+      const sh = b.ss.getSheetByName('FUENTES')!
+      const w = sh.writes
+      expect(b.post('reorderFuentes', { ids: ['f-c', 'f-a'] }).ok).toBe(true)
+      expect(sh.writes - w).toBe(1)
+      expect(['f-a', 'f-b', 'f-c'].map(id => sh.rows.find(r => r[0] === id)![7])).toEqual([2, 3, 1])
+    })
+
+    it('migrarGeneralAFuente: respaldo, copia caja general y sus ajustes mensuales, idempotente, no convierte Sodexo', () => {
+      b.post('savePresupuesto', { periodo: '2026-09', cajaId: 'general', monto: 3200 })
+      b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 300 })
+      const cajas0 = JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows), pres0 = JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)
+      const general = b.ss.getSheetByName('CAJAS')!.rows.find(r => r[3] === 'Todos')!
+      const r = b.post('migrarGeneralAFuente')
+      expect(r.ok).toBe(true)
+      expect(r.data.creada).toBe(true)
+      expect(r.data.meses).toBe(1)
+      expect(b.ss.copies.length).toBe(2)                         // respaldo al crear hojas + respaldo de la migración
+      const d = b.post('data', { fresh: true }).data
+      expect(d.fuentes).toHaveLength(1)
+      expect(d.fuentes[0].slice(0, 4)).toEqual(['fuente-general', 'General', general[2], 'PEN'])
+      expect(d.fuentesMeses).toEqual([['fuente-general', '2026-09', 3200, 'solo']])
+      expect(JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows)).toBe(cajas0)
+      expect(JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)).toBe(pres0)
+      const again = b.post('migrarGeneralAFuente')
+      expect(again.data.creada).toBe(false)
+      expect(b.post('data', { fresh: true }).data.fuentes).toHaveLength(1)
+      expect(b.post('data', { fresh: true }).data.fuentesMeses).toHaveLength(1)
+    })
+
+    it('migrar se detiene si ya hay una fuente llamada General creada a mano', () => {
+      fuente({ id: 'f-mia', nombre: 'General', monto: 3500 })
+      const r = b.post('migrarGeneralAFuente')
+      expect(r.error.message).toMatch(/no se migró nada/)
+      expect(b.post('data', { fresh: true }).data.fuentes).toHaveLength(1)
+    })
   })
 
   it('reorderGastos: guarda el orden en su propia hoja sin tocar GASTOS', () => {

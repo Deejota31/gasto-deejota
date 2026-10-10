@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { useAgregado } from '../lib/useAgregado'
 import {
   Activity, AlertTriangle, Calculator, ChevronRight, CalendarDays, Hash, Layers, Lock, Pencil,
   Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, Tag, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
-import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
-import { formatMoney, ratesFromConfig } from '../lib/money'
+import { subKey, type CajasResumen, type SubcajaResumen } from '../lib/engine'
+import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, Filters } from '../lib/types'
@@ -29,10 +30,8 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
 
   // Una sola agregación por combinación de filtros; KPIs, cajas y gráficos reutilizan este resultado.
   // Dependencias explícitas: un cambio en vínculos o revisiones (Salud financiera) no recalcula el dashboard.
-  const gastos = data?.gastos, config = data?.config, cajas = data?.cajas, presupuestos = data?.presupuestos
-  const a = useMemo(() => gastos && config && cajas && presupuestos ? aggregate(gastos, filters, {
-    base, rates: ratesFromConfig(config), today, cajas, presupuestos,
-  }) : null, [gastos, config, cajas, presupuestos, filters, base, today])
+  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  const a = useAgregado(data, filters, today)
 
   const money = (c: number) => formatMoney(c, base)
   const mes = singleMonth(filters.desde, filters.hasta)
@@ -65,13 +64,15 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           )}
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi tone="blue" icon={<Wallet />} label="Caja mensual" value={a.cajas.presupuesto ? money(a.cajas.presupuesto) : 'Sin definir'}
-              hint={a.cajas.presupuesto ? `Reservado ${money(a.cajas.reservado)}` : 'Defínela en la caja general'}
-              info={<><p>Presupuesto total de la caja general para {periodoTxt}. Si el período abarca varios meses, suma el presupuesto de cada mes.</p><p>Las subcajas (Auto, Bebé, Plan Nube) son reservas dentro de este monto, no dinero adicional.</p></>} />
+            <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : 'Sin definir'}
+              hint={a.cajas.origen === 'fuentes' ? `${a.cajas.fuentes.activas} fuente${a.cajas.fuentes.activas === 1 ? '' : 's'} · reservado ${money(a.cajas.reservado)}` : a.cajas.presupuesto ? `Reservado ${money(a.cajas.reservado)}` : 'Defínela en Cajas'}
+              info={a.cajas.origen === 'fuentes'
+                ? <><p>Presupuesto consolidado de {periodoTxt}: la suma de lo que aportan tus fuentes activas (General, Sodexo, extras…). Si el período abarca varios meses, suma cada mes.</p><p>Las subcajas son reservas dentro de este monto, no dinero adicional.</p></>
+                : <><p>Presupuesto total de la caja general para {periodoTxt}. Si el período abarca varios meses, suma el presupuesto de cada mes.</p><p>Las subcajas (Auto, Bebé, Plan Nube) son reservas dentro de este monto, no dinero adicional.</p></>} />
             <Kpi tone="coral" icon={<TrendingUp />} label="Total gastado" value={money(a.total)}
               hint={a.filtrado ? `De ${money(a.totalPeriodo)} en el período` : `${a.count} movimientos`}
               info={<><p>Suma de los gastos activos del período con todos los filtros aplicados. Los eliminados no cuentan.</p><p>Montos en otra moneda se convierten con el tipo de cambio de Configuración.</p></>} />
-            <Kpi tone={a.cajas.disponible < 0 ? 'red' : 'green'} icon={<PiggyBank />} label="Disponible" value={a.cajas.presupuesto ? money(a.cajas.disponible) : '—'}
+            <Kpi tone={a.cajas.disponible < 0 ? 'red' : 'green'} icon={<PiggyBank />} label="Disponible" value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.disponible) : '—'}
               hint={a.cajas.presupuesto ? `Saldo libre ${money(a.cajas.saldoLibre)}` : undefined} tag={a.filtrado ? 'Período completo' : undefined}
               info={<><p>Disponible = Caja mensual − todo lo gastado en el período (en subcajas y fuera de ellas).</p><p>Saldo libre = lo que queda fuera de las reservas de subcajas. No cambia con los filtros de categoría, ámbito o medio, porque el presupuesto es del período completo.</p></>} />
             <Kpi tone="violet" icon={<Percent />} label="Consumido" value={a.cajas.pct === null ? '—' : `${a.cajas.pct}%`} progress={a.cajas.pct}
@@ -191,15 +192,16 @@ function Cajas({ c, money, onEdit, periodo, onIrCajas }: { c: CajasResumen; mone
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-[linear-gradient(120deg,#294690,#4F6FC8)] px-4 py-3 text-white">
           <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/15"><Wallet className="size-5" /></span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{c.general?.nombre ?? 'Caja general'}</p>
-            <p className="truncate text-xs text-white/75">Presupuesto principal · {periodo}</p>
+            <p className="truncate text-sm font-semibold">{c.origen === 'fuentes' ? 'Presupuesto consolidado' : c.general?.nombre ?? 'Caja general'}</p>
+            <p className="truncate text-xs text-white/75">{c.origen === 'fuentes' ? `${c.fuentes.activas} fuente${c.fuentes.activas === 1 ? '' : 's'} activa${c.fuentes.activas === 1 ? '' : 's'}` : 'Presupuesto principal'} · {periodo}</p>
           </div>
           <div className="order-last w-full text-left sm:order-none sm:w-auto sm:text-right">
             <p className="text-[11px] text-white/75">Disponible global</p>
             <p className="tabular text-xl font-bold">{P ? money(c.disponible) : 'Sin definir'}</p>
           </div>
           <div className="flex items-center gap-1">
-            {c.general && <button type="button" onClick={() => onEdit(c.general!, P)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>}
+            {c.origen === 'fuentes' ? onIrCajas && <button type="button" onClick={onIrCajas} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Fuentes</button>
+              : c.general && <button type="button" onClick={() => onEdit(c.general!, P)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>}
             <InfoBadge />
           </div>
         </div>
@@ -217,6 +219,19 @@ function Cajas({ c, money, onEdit, periodo, onIrCajas }: { c: CajasResumen; mone
             </div>
           ))}
         </div>
+        {c.origen === 'fuentes' && (() => {
+          const act = c.fuentes.lista.filter(r => r.fuente.activo && r.asignado > 0)
+          return act.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-4 py-2.5" data-testid="dash-fuentes" aria-label="Fuentes del período">
+              {act.slice(0, 6).map(r => (
+                <span key={r.fuente.id} className="inline-flex items-center gap-1.5 rounded-full bg-bg px-2.5 py-1 text-[11px] text-muted">
+                  <i className="size-2 rounded-full" style={{ background: r.fuente.color }} />{r.fuente.nombre} <b className="tabular text-ink">{money(r.aporta)}</b>
+                </span>
+              ))}
+              {act.length > 6 && <span className="text-[11px] text-muted">y {act.length - 6} más</span>}
+            </div>
+          )
+        })()}
         {P > 0 && (
           <div className="px-4 py-3">
             <div className="flex h-3 overflow-hidden rounded-full bg-bg" role="img"
@@ -232,7 +247,7 @@ function Cajas({ c, money, onEdit, periodo, onIrCajas }: { c: CajasResumen; mone
               <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-bg ring-1 ring-line" /> Libre</span>
               <span className="ml-auto font-medium text-ink">{c.pct ?? 0}% consumido</span>
             </div>
-            {c.sobreasignado && <p className="mt-2 flex items-center gap-1.5 text-xs text-[#B4541A]"><AlertTriangle className="size-3.5" /> Las reservas de subcajas superan el presupuesto general.</p>}
+            {c.sobreasignado && <p className="mt-2 flex items-center gap-1.5 text-xs text-[#B4541A]"><AlertTriangle className="size-3.5" /> Las reservas de subcajas superan el presupuesto consolidado.</p>}
           </div>
         )}
       </section>

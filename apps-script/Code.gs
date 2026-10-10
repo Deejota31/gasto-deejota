@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.7.0';
+var APP_VERSION = '1.8.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -26,11 +26,18 @@ var SHEETS = {
   // Qué gasto pagó qué plantilla (compromiso). Hoja aparte: no cambia el esquema de GASTOS. Plantilla vacía = sin vínculo.
   VINCULOS_PLANTILLAS: ['Gasto ID', 'Plantilla ID', 'Creado en'],
   // Decisiones sobre alertas de calidad (p. ej. "estos movimientos similares son legítimos"). Nunca toca GASTOS.
-  REVISIONES_CALIDAD: ['ID revisión', 'Tipo alerta', 'IDs movimientos', 'Estado revisión', 'Firma', 'Creado en', 'Actualizado en']
+  REVISIONES_CALIDAD: ['ID revisión', 'Tipo alerta', 'IDs movimientos', 'Estado revisión', 'Firma', 'Creado en', 'Actualizado en'],
+  // Fuentes de dinero (v1.8): de dónde sale el presupuesto del mes (General, Sodexo, Extra 1…). Una fuente es
+  // configuración reutilizable; su aporte a cada mes se calcula con Recurrencia + Mes de aplicación + FUENTES_MESES.
+  FUENTES: ['ID', 'Nombre', 'Monto', 'Moneda', 'Color', 'Icono', 'Activo', 'Orden', 'Recurrencia', 'Mes de aplicación',
+    'Medio de pago', 'Creado en', 'Actualizado en'],
+  // Importes por mes de cada fuente. Modo "solo" = únicamente ese mes; "desde" = ese mes en adelante (hasta otro "desde").
+  // Una fila por fuente + mes + modo: volver a guardar actualiza, nunca duplica ni toca otros meses.
+  FUENTES_MESES: ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en']
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -633,6 +640,10 @@ function getData_(fresh) {
       .filter(function (r) { return str_(r[1]) !== ''; }).map(function (r) { return [str_(r[0]), str_(r[1])]; }) : [],
     revisiones: ss.getSheetByName('REVISIONES_CALIDAD') ? readRows_(ss, 'REVISIONES_CALIDAD').map(function (r) {
       return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), r[5] instanceof Date ? r[5].toISOString() : str_(r[5]), r[6] instanceof Date ? r[6].toISOString() : str_(r[6])];
+    }) : [],
+    fuentes: ss.getSheetByName('FUENTES') ? readRows_(ss, 'FUENTES').map(fuenteOut_) : [],
+    fuentesMeses: ss.getSheetByName('FUENTES_MESES') ? readRows_(ss, 'FUENTES_MESES').map(function (r) {
+      return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
     }) : []
   };
   writeCache_(data, gen);
@@ -748,7 +759,11 @@ var ACTIONS = {
   saveGastosBatch: saveGastosBatch_,
   reorderGastos: reorderGastos_,
   vincularGasto: vincularGasto_,
-  saveRevision: saveRevision_
+  saveRevision: saveRevision_,
+  saveFuente: saveFuente_,
+  saveFuenteMes: saveFuenteMes_,
+  reorderFuentes: reorderFuentes_,
+  migrarGeneralAFuente: migrarGeneralAFuente_
 };
 
 function saveGasto_(p) {
@@ -919,6 +934,152 @@ function savePresupuesto_(p) {
   }
   appendRows_(sh, [[p.periodo, cajaId, monto]]);
   return [p.periodo, cajaId, monto];
+}
+
+/* ===================== Fuentes de dinero (v1.8) ===================== */
+
+var FUENTE_GENERAL_ID = 'fuente-general';
+var MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function iso_(v) { return v instanceof Date ? v.toISOString() : str_(v); }
+
+// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn]
+function fuenteOut_(r) {
+  return [str_(r[0]), str_(r[1]).replace(/^'/, ''), num_(r[2]), str_(r[3]) || 'PEN', str_(r[4]), str_(r[5]).replace(/^'/, ''),
+    str_(r[6]) === '' ? true : bool_(r[6]), num_(r[7]), str_(r[8]) === 'unica' ? 'unica' : 'mensual',
+    periodo_(r[9], 'America/Lima'), str_(r[10]).replace(/^'/, ''), iso_(r[11]), iso_(r[12])];
+}
+
+/**
+ * Hojas de fuentes. La primera vez que se crean (migración compatible: solo agrega hojas nuevas, no toca
+ * CAJAS, PRESUPUESTOS ni GASTOS) se hace antes un respaldo completo. Es idempotente: si ya existen, solo valida encabezados.
+ */
+function fuentesSheets_() {
+  var ss = openSpreadsheet_(false);
+  if (!ss.getSheetByName('FUENTES') || !ss.getSheetByName('FUENTES_MESES')) {
+    var props = PropertiesService.getScriptProperties();
+    if (!props.getProperty('FUENTES_RESPALDO')) props.setProperty('FUENTES_RESPALDO', backup_().url);
+  }
+  return { ss: ss, fuentes: ensureSheet_(ss, 'FUENTES', SHEETS.FUENTES), meses: ensureSheet_(ss, 'FUENTES_MESES', SHEETS.FUENTES_MESES) };
+}
+
+function monedaPermitida_(ss, moneda) {
+  moneda = str_(moneda) || 'PEN';
+  if (!/^[A-Z]{3}$/.test(moneda)) throw appError_('VALIDATION', 'Moneda inválida.');
+  var cfg = readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {});
+  var lista = (cfg.monedas || '').split(',').map(str_).filter(Boolean);
+  if (cfg.moneda) lista.push(cfg.moneda);
+  if (lista.length && lista.indexOf(moneda) < 0) throw appError_('VALIDATION', 'Moneda no permitida: ' + moneda + '. Agrégala en Configuración.');
+  return moneda;
+}
+
+function fuentesRows_(sh) {
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  return n ? sh.getRange(2, 1, n, SHEETS.FUENTES.length).getValues() : [];
+}
+
+// Crea o edita una fuente (upsert por ID: un doble clic con el mismo ID actualiza, no duplica).
+// No cambia gastos ni importes de otros meses. Desactivar solo marca Activo = FALSE.
+function saveFuente_(p) {
+  var id = text_(p.id, 'ID de fuente', 64, true);
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw appError_('VALIDATION', 'ID de fuente inválido.');
+  var nombre = text_(p.nombre, 'Nombre de la fuente', 40, true);
+  var monto = amount_(p.monto, true);
+  var recurrencia = p.recurrencia === 'unica' ? 'unica' : 'mensual';
+  var mes = str_(p.mes);
+  if (mes && !MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes de aplicación inválido (AAAA-MM).');
+  if (recurrencia === 'unica' && !mes) throw appError_('VALIDATION', 'Una fuente de un solo mes necesita su mes de aplicación.');
+  var activo = p.activo === undefined ? true : p.activo === true;
+  var medio = text_(p.medioPago, 'Medio de pago', 60, false);
+  var h = fuentesSheets_();
+  var moneda = monedaPermitida_(h.ss, p.moneda);
+  var rows = fuentesRows_(h.fuentes);
+  var idx = -1;
+  for (var i = 0; i < rows.length; i++) {
+    var rid = str_(rows[i][0]);
+    if (!rid) continue;
+    if (rid === id) { idx = i; continue; }
+    if (norm_(String(rows[i][1]).replace(/^'/, '')) === norm_(nombre)) throw appError_('VALIDATION', 'Ya existe una fuente llamada “' + str_(rows[i][1]) + '”.');
+    var rActivo = str_(rows[i][6]) === '' ? true : bool_(rows[i][6]);
+    if (medio && activo && rActivo && norm_(String(rows[i][10]).replace(/^'/, '')) === norm_(medio)) {
+      throw appError_('VALIDATION', 'La fuente “' + str_(rows[i][1]) + '” ya está asociada a ' + medio + '. Desactívala o quita su medio primero.');
+    }
+  }
+  var now = new Date().toISOString();
+  var prev = idx >= 0 ? rows[idx] : null;
+  var row = [id, nombre, monto, moneda, /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', text_(p.icono, 'Icono', 30, false),
+    activo, p.orden === undefined && prev ? num_(prev[7]) : num_(p.orden), recurrencia, mes, medio, prev ? (iso_(prev[11]) || now) : now, now];
+  if (idx >= 0) h.fuentes.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(h.fuentes, [row]);
+  return fuenteOut_(row);
+}
+
+// Importe de una fuente para un mes ("solo") o desde un mes en adelante ("desde"). Upsert por fuente + mes + modo.
+// quitar = true borra solo ese ajuste (el mes vuelve a usar el importe habitual); nunca toca otros meses.
+function saveFuenteMes_(p) {
+  var fuenteId = text_(p.fuenteId, 'Fuente', 64, true);
+  var mes = str_(p.mes);
+  if (!MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes inválido (AAAA-MM).');
+  var modo = p.modo === 'desde' ? 'desde' : 'solo';
+  var h = fuentesSheets_();
+  if (!findRowByValue_(h.fuentes, 1, fuenteId)) throw appError_('NOT_FOUND', 'La fuente ya no existe. Actualiza los datos.');
+  var n = Math.max(lastDataRow_(h.meses) - 1, 0);
+  var rows = n ? h.meses.getRange(2, 1, n, SHEETS.FUENTES_MESES.length).getValues() : [];
+  var idx = -1;
+  for (var i = 0; i < rows.length; i++) {
+    if (str_(rows[i][0]) === fuenteId && periodo_(rows[i][1], 'America/Lima') === mes && (str_(rows[i][3]) === 'desde' ? 'desde' : 'solo') === modo) idx = i;
+  }
+  if (p.quitar === true) {
+    if (idx >= 0) h.meses.deleteRow(idx + 2);
+    return { fuenteId: fuenteId, mes: mes, modo: modo, quitado: idx >= 0 };
+  }
+  var row = [fuenteId, mes, amount_(p.monto, true), modo, new Date().toISOString()];
+  if (idx >= 0) h.meses.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(h.meses, [row]);
+  return [fuenteId, mes, row[2], modo];
+}
+
+function reorderFuentes_(p) {
+  var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
+  if (!ids.length || ids.length > 500) throw appError_('VALIDATION', 'Orden de fuentes inválido.');
+  var sh = fuentesSheets_().fuentes;
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  if (!n) return { ok: true };
+  var rows = sh.getRange(2, 1, n, 8).getValues();
+  var pos = {};
+  ids.forEach(function (id, i) { pos[id] = i + 1; });
+  var extra = ids.length + 1;
+  sh.getRange(2, 8, n, 1).setValues(rows.map(function (r) {
+    var id = str_(r[0]);
+    if (!id) return [r[7]];
+    return [pos[id] !== undefined ? pos[id] : extra++];
+  }));
+  return { ok: true };
+}
+
+/**
+ * Migración explícita (la pide el usuario con un botón): crea la fuente "General" con el presupuesto de la caja
+ * general y copia sus ajustes mensuales de PRESUPUESTOS como importes "solo ese mes", para que ningún mes cambie.
+ * Respaldo antes de escribir. Idempotente: si la fuente ya existe no hace nada. No convierte Sodexo ni otras cajas.
+ */
+function migrarGeneralAFuente_() {
+  var h = fuentesSheets_();
+  if (findRowByValue_(h.fuentes, 1, FUENTE_GENERAL_ID)) return { creada: false, meses: 0 };
+  var general = readRows_(h.ss, 'CAJAS').filter(function (r) { return str_(r[3]) === 'Todos'; })[0];
+  if (!general) throw appError_('NOT_FOUND', 'No hay caja general que migrar.');
+  fuentesRows_(h.fuentes).forEach(function (r) {
+    if (str_(r[0]) && norm_(String(r[1]).replace(/^'/, '')) === 'general') throw appError_('VALIDATION', 'Ya tienes una fuente llamada “General”. Revisa sus importes a mano: no se migró nada.');
+  });
+  var respaldo = backup_();
+  var cfg = readRows_(h.ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {});
+  var now = new Date().toISOString();
+  var fila = [FUENTE_GENERAL_ID, 'General', num_(general[2]), cfg.moneda || 'PEN', /^#[0-9a-fA-F]{6}$/.test(str_(general[5])) ? str_(general[5]) : '#1e3a8a', '',
+    true, 0, 'mensual', '', '', now, now];
+  appendRows_(h.fuentes, [fila]);
+  var ajustes = readRows_(h.ss, 'PRESUPUESTOS').filter(function (r) { return str_(r[1]) === str_(general[0]); })
+    .map(function (r) { return [FUENTE_GENERAL_ID, periodo_(r[0], 'America/Lima'), num_(r[2]), 'solo', now]; })
+    .filter(function (r) { return MES_RE.test(r[1]); });
+  appendRows_(h.meses, ajustes);
+  return { creada: true, meses: ajustes.length, respaldo: respaldo.url, fuente: fuenteOut_(fila),
+    ajustes: ajustes.map(function (r) { return [r[0], r[1], r[2], r[3]]; }) };
 }
 
 function saveConfig_(p) {

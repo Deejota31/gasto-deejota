@@ -70,7 +70,22 @@ const CAJAS_EXTRA: unknown[][] = [
   ['caja-viajes', 'Caja Viajes', 0, 'Ámbito', 'Amigos', '#64748B'], ['caja-emergencia', 'Caja Emergencia', 200, 'Subcategoría', 'Otros › Imprevistos', '#C0362C'],
 ]
 
-export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0): Transport {
+// Fuentes de ejemplo (?fuentes=N): las tres primeras son el caso real (General + Sodexo + Extra 1 = S/ 4,780 en el mes).
+const FUENTES_EXTRA = ['Bonificación', 'Reembolso', 'Trabajo independiente', 'Extra 2', 'Ingreso adicional', 'Otro ingreso', 'Freelance', 'Venta', 'Premio',
+  'Devolución', 'Aguinaldo', 'Gratificación', 'CTS', 'Comisión', 'Regalo', 'Alquiler', 'Intereses', 'Dividendos', 'Extra 3', 'Extra 4', 'Extra 5', 'Extra 6']
+const COLORES_FUENTE = ['#16A085', '#0EA5E9', '#E25563', '#F59E0B', '#4F7BE8', '#E8664F', '#8B7CF6', '#64748B', '#C0362C', '#84CC16']
+function demoFuentes(n: number, mes: string): unknown[][] {
+  const t = '2026-01-01T00:00:00.000Z'
+  const base: unknown[][] = [
+    ['fuente-general', 'General', 3500, 'PEN', '#1e3a8a', '', true, 1, 'mensual', '', '', t, t],
+    ['f-sodexo', 'Sodexo', 280, 'PEN', '#84CC16', '', true, 2, 'mensual', '', 'Sodexo', t, t],
+    ['f-extra-1', 'Extra 1', 1000, 'PEN', '#F59E0B', '', true, 3, 'unica', mes, '', t, t],
+  ]
+  const extra = FUENTES_EXTRA.map((nombre, i): unknown[] => [`f-demo-${i + 1}`, nombre, 50 * (i + 1), 'PEN', COLORES_FUENTE[i % COLORES_FUENTE.length], '', i % 4 !== 3, i + 4, i % 2 ? 'unica' : 'mensual', i % 2 ? mes : '', '', t, t])
+  return [...base, ...extra].slice(0, n)
+}
+
+export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0, nFuentes = 0): Transport {
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
@@ -86,6 +101,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       ...CAJAS_EXTRA.slice(0, Math.max(0, extraCajas)).map((r, i) => [...r, i + 5, true, '']),
     ] as unknown[][],
     presupuestos: [] as unknown[][],
+    fuentes: demoFuentes(nFuentes, today.slice(0, 7)),
+    fuentesMeses: [] as unknown[][],
     // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto, moneda, medio, orden]
     plantillas: ([
       ['Familia', 'Servicios', 'Luz', 'Luz', 120, 'PEN', 'Yape'],
@@ -185,6 +202,56 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       return { ok: true }
     },
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
+    // Mismas validaciones que saveFuente_ en Code.gs (upsert por ID: un doble clic no duplica).
+    saveFuente: p => {
+      const nombre = String(p.nombre ?? '').trim(), mes = String(p.mes ?? ''), medio = String(p.medioPago ?? '').trim()
+      const monedas = [db.config.moneda, ...String(db.config.monedas ?? '').split(',')].map(x => x.trim()).filter(Boolean)
+      if (!nombre) throw fail('VALIDATION', 'Nombre de la fuente es obligatorio.')
+      if (!(Number(p.monto) >= 0) || Number(p.monto) > 1e9) throw fail('VALIDATION', 'Monto inválido.')
+      if (!monedas.includes(String(p.moneda))) throw fail('VALIDATION', `Moneda no permitida: ${p.moneda}. Agrégala en Configuración.`)
+      if (mes && !/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) throw fail('VALIDATION', 'Mes de aplicación inválido (AAAA-MM).')
+      if (p.recurrencia === 'unica' && !mes) throw fail('VALIDATION', 'Una fuente de un solo mes necesita su mes de aplicación.')
+      const activo = p.activo !== false
+      for (const r of db.fuentes) {
+        if (r[0] === p.id) continue
+        if (normName(String(r[1])) === normName(nombre)) throw fail('VALIDATION', `Ya existe una fuente llamada “${r[1]}”.`)
+        if (medio && activo && r[6] !== false && normName(String(r[10])) === normName(medio)) throw fail('VALIDATION', `La fuente “${r[1]}” ya está asociada a ${medio}. Desactívala o quita su medio primero.`)
+      }
+      const now = new Date().toISOString()
+      const prev = db.fuentes.find(r => r[0] === p.id)
+      const row = [p.id, nombre, Math.round(Number(p.monto) * 100) / 100, p.moneda, p.color || '#1e3a8a', p.icono ?? '', activo,
+        p.orden === undefined && prev ? prev[7] : Number(p.orden ?? 0), p.recurrencia === 'unica' ? 'unica' : 'mensual', mes, medio, prev ? prev[11] : now, now]
+      return upsert(db.fuentes, 1, row)
+    },
+    saveFuenteMes: p => {
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.mes))) throw fail('VALIDATION', 'Mes inválido (AAAA-MM).')
+      if (!db.fuentes.some(r => r[0] === p.fuenteId)) throw fail('NOT_FOUND', 'La fuente ya no existe. Actualiza los datos.')
+      const modo = p.modo === 'desde' ? 'desde' : 'solo'
+      const same = (r: unknown[]) => r[0] === p.fuenteId && r[1] === p.mes && r[3] === modo
+      if (p.quitar === true) { const had = db.fuentesMeses.some(same); db.fuentesMeses = db.fuentesMeses.filter(r => !same(r)); return { quitado: had } }
+      if (!(Number(p.monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
+      const row = [p.fuenteId, p.mes, Math.round(Number(p.monto) * 100) / 100, modo]
+      const i = db.fuentesMeses.findIndex(same)
+      if (i >= 0) db.fuentesMeses[i] = row; else db.fuentesMeses.push(row)
+      return row
+    },
+    reorderFuentes: p => {
+      const ids = p.ids as string[]
+      db.fuentes.forEach(r => { r[7] = ids.indexOf(String(r[0])) + 1 || ids.length + 1 })
+      return { ok: true }
+    },
+    migrarGeneralAFuente: () => {
+      if (db.fuentes.some(r => r[0] === 'fuente-general')) return { creada: false, meses: 0 }
+      if (db.fuentes.some(r => normName(String(r[1])) === 'general')) throw fail('VALIDATION', 'Ya tienes una fuente llamada “General”. Revisa sus importes a mano: no se migró nada.')
+      const g = db.cajas.find(r => r[3] === 'Todos')
+      if (!g) throw fail('NOT_FOUND', 'No hay caja general que migrar.')
+      const now = new Date().toISOString()
+      const fila = ['fuente-general', 'General', Number(g[2]), db.config.moneda || 'PEN', g[5], '', true, 0, 'mensual', '', '', now, now]
+      db.fuentes.push(fila)
+      const ajustes = db.presupuestos.filter(r => r[1] === g[0]).map(r => ['fuente-general', r[0], Number(r[2]), 'solo'])
+      db.fuentesMeses.push(...ajustes)
+      return { creada: true, meses: ajustes.length, fuente: fila, ajustes }
+    },
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
     plantillas: () => [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10])),
     savePlantilla: p => {
