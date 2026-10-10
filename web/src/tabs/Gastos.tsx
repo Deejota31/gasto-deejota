@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowDown, CalendarDays, ChevronDown, ChevronUp, GripVertical, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowLeft, CalendarDays, ChevronDown, ChevronUp, GripVertical, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
@@ -50,9 +50,11 @@ function useDebounced<T>(value: T, ms = 250): T {
   return v
 }
 
-export default function Gastos({ store, openGasto, filters, setFilters, today, onGastosMensuales }: {
+export default function Gastos({ store, openGasto, filters, setFilters, today, onGastosMensuales, foco, onVolverFoco }: {
   store: AppStore; openGasto: (mode: ModalMode, gasto: Gasto | null) => void; filters: Filters; setFilters: (f: Filters) => void; today: string
   onGastosMensuales: () => void
+  /** Movimiento a revisar que llega desde Salud financiera: se resalta y se puede volver. */
+  foco?: { id: string } | null; onVolverFoco?: () => void
 }) {
   const cfg = store.data?.config ?? {}
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
@@ -93,6 +95,15 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
 
   // Al cambiar filtros, búsqueda, orden o tamaño, volver a la primera página.
   useEffect(() => { setPage(0) }, [filters, q, estado, sort, pageSize])
+  // Localizar el movimiento a revisar: ir a su página y desplazarlo a la vista (sin cambiar el período ni los filtros).
+  const focoIdx = foco ? rows.findIndex(g => g.id === foco.id) : -1
+  useEffect(() => {
+    if (focoIdx < 0) return
+    setPage(Math.floor(focoIdx / pageSize))
+    const t = setTimeout(() => document.querySelector(`[data-foco="true"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120)
+    return () => clearTimeout(t)
+  }, [focoIdx, pageSize])
+  const gastoFoco = foco ? store.data?.gastos.find(g => g.id === foco.id) : undefined
   const pages = Math.max(1, Math.ceil(rows.length / pageSize))
   const current = Math.min(page, pages - 1)
   const visible = rows.slice(current * pageSize, current * pageSize + pageSize)
@@ -187,6 +198,16 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
           <Button onClick={() => open('create', null)} disabled={!store.data}><Plus className="size-4" /> Nuevo gasto</Button>
           <Button variant="soft" onClick={onGastosMensuales} disabled={!store.data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
         </div>
+        {foco && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy" role="status" data-testid="foco-banner">
+            <span>Revisando un movimiento desde Salud financiera{gastoFoco ? `: ${gastoFoco.descripcion || gastoFoco.subcategoria} (${gastoFoco.fecha})` : ''}.
+              {focoIdx < 0 && ' No aparece con el período, filtros o búsqueda actuales.'}</span>
+            <span className="flex gap-2">
+              {gastoFoco && !gastoFoco.problemaId && <Button variant="outline" className="h-8 px-2.5 text-xs" onClick={() => open('edit', gastoFoco)}><Pencil className="size-3.5" /> Abrir formulario</Button>}
+              {onVolverFoco && <Button className="h-8 px-2.5 text-xs" onClick={onVolverFoco}><ArrowLeft className="size-3.5" /> Volver a Salud financiera</Button>}
+            </span>
+          </div>
+        )}
         {personal && (
           <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${bloqueo ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-primary-soft text-navy'}`}>
             {bloqueo || 'Orden personalizado: arrastra ⋮⋮ (o usa ↑ ↓) para mover un movimiento. Se guarda al soltar; no cambia fechas ni montos, ni el orden de tu hoja.'}
@@ -215,13 +236,13 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                     const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                     const off = g.estado === 'Anulado'
                     return (
-                      <tr key={g.uid ?? g.id} data-id={g.id}
+                      <tr key={g.uid ?? g.id} data-id={g.id} data-foco={foco?.id === g.id || undefined}
                         draggable={puedeOrdenar && drag?.from === g.id}
                         onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.id) }}
                         onDragOver={e => { if (drag) { e.preventDefault(); if (drag.over !== g.id) setDrag({ ...drag, over: g.id }) } }}
                         onDrop={e => { e.preventDefault(); if (drag && drag.from !== g.id) mover(drag.from, g.id); setDrag(null) }}
                         onDragEnd={() => setDrag(null)}
-                        className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${off ? 'opacity-60' : ''} ${drag?.over === g.id && drag.from !== g.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === g.id ? 'opacity-50' : ''}`}>
+                        className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${foco?.id === g.id ? 'bg-primary-soft/70 outline-2 -outline-offset-2 outline-navy/50' : ''} ${off ? 'opacity-60' : ''} ${drag?.over === g.id && drag.from !== g.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === g.id ? 'opacity-50' : ''}`}>
                         {personal && (
                           <td className="px-1">
                             <button type="button" aria-label={`Arrastrar ${g.descripcion || g.subcategoria}`} disabled={!puedeOrdenar}
@@ -260,7 +281,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                 const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                 const off = g.estado === 'Anulado'
                 return (
-                  <li key={g.uid ?? g.id} className="relative rounded-2xl border border-line">
+                  <li key={g.uid ?? g.id} data-foco={foco?.id === g.id || undefined} className={`relative rounded-2xl border ${foco?.id === g.id ? 'border-navy/60 ring-2 ring-navy/30' : 'border-line'}`}>
                     {/* Móvil: subir/bajar en lugar de arrastrar (mismas reglas y la misma petición única) */}
                     {puedeOrdenar && (
                       <div className="absolute top-1/2 left-1 z-10 flex -translate-y-1/2 flex-col">

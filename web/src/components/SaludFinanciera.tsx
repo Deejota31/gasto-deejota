@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleDashed, ExternalLink, HeartPulse, Link2, Link2Off, Lightbulb, ListChecks,
+  AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, CircleDashed, ExternalLink, Link2, Link2Off, Lightbulb, ListChecks,
   PiggyBank, Repeat, Search, ShieldCheck, Sparkles, TrendingUp,
 } from 'lucide-react'
 import type { Aggregates } from '../lib/engine'
@@ -13,9 +13,10 @@ import {
 } from '../lib/salud'
 import type { AppStore } from '../lib/store'
 import type { EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
-import { Button, Card, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
+import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
 
 type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos'
+let vistaSesion: Vista = 'presupuesto'
 
 const NIVEL: Record<NivelPresupuesto, { txt: string; color: string; bg: string }> = {
   'sin-presupuesto': { txt: 'Sin presupuesto definido', color: 'var(--muted)', bg: 'var(--bg)' },
@@ -31,15 +32,19 @@ const pctTxt = (n: number | null) => (n === null ? '—' : `${n.toLocaleString('
  * Todo se calcula con los datos ya cargados (memoizado); la única lectura adicional son las plantillas,
  * una vez por sesión y solo si aún no estaban en memoria.
  */
-export default function SaludFinanciera({ store, a, filters, today, onEditGasto, onGastosMensuales }: {
-  store: AppStore; a: Aggregates; filters: Filters; today: string; onEditGasto: (g: Gasto) => void; onGastosMensuales: () => void
+export default function SaludFinanciera({ store, a, filters, today, onRevisarGasto, onGastosMensuales }: {
+  store: AppStore; a: Aggregates; filters: Filters; today: string
+  /** Abre el movimiento en la pestaña Gastos (con su formulario) y permite volver aquí. */
+  onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
   const data = store.data!
   const base = data.config.moneda || 'PEN'
   const rates = useMemo(() => ratesFromConfig(data.config), [data.config])
   const fmt = data.config.formato_fecha
   const money = (c: number) => formatMoney(c, base)
-  const [vista, setVista] = useState<Vista>('presupuesto')
+  // La sección elegida se recuerda mientras la app esté abierta (al ir a Gastos y volver).
+  const [vista, setVistaState] = useState<Vista>(vistaSesion)
+  const setVista = (v: Vista) => { vistaSesion = v; setVistaState(v) }
   const [revisar, setRevisar] = useState(false)
   const { loadPlantillas } = store
   useEffect(() => { void loadPlantillas() }, [loadPlantillas])
@@ -120,10 +125,7 @@ export default function SaludFinanciera({ store, a, filters, today, onEditGasto,
   ]
 
   return (
-    <Card title={`Salud financiera — ${periodo}`} icon={<HeartPulse className="size-4 text-coral" />}
-      info={{ title: 'Salud financiera', body: <>
-        <p>Responde tres preguntas: cuánto puedes gastar todavía, qué gastos están aumentando y cuánto necesitas reservar para tus compromisos. Además evalúa la calidad de tus datos.</p>
-        <p>Usa los mismos datos y filtros del dashboard, sin consultas adicionales a tu hoja, y nunca modifica movimientos.</p></> }}>
+    <section className="rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)]" aria-label={`Salud financiera — ${periodo}`}>
       <div role="tablist" aria-label="Vistas de salud financiera" className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {tiles.map(t => {
           const on = vista === t.id
@@ -151,12 +153,12 @@ export default function SaludFinanciera({ store, a, filters, today, onEditGasto,
         )}
         {vista === 'compromisos' && (
           <PanelCompromisos store={store} comp={comp} money={money} fmt={fmt} filters={filters} vinculos={vinculos} loaded={store.plantillas.loaded}
-            onEditGasto={onEditGasto} onGastosMensuales={onGastosMensuales} />
+            onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales} />
         )}
       </div>
 
-      {revisar && <RevisionDatos store={store} c={calidad} fmt={fmt} onClose={() => setRevisar(false)} onEditGasto={onEditGasto} />}
-    </Card>
+      {revisar && <RevisionDatos store={store} c={calidad} fmt={fmt} onClose={() => setRevisar(false)} onRevisarGasto={onRevisarGasto} />}
+    </section>
   )
 }
 
@@ -385,9 +387,9 @@ function ListaEvolucion({ titulo, icon, filas, money, vacio, soloActual }: { tit
 
 /* ================================ Compromisos ================================ */
 
-function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, onEditGasto, onGastosMensuales }: {
+function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, onRevisarGasto, onGastosMensuales }: {
   store: AppStore; comp: Compromisos; money: (c: number) => string; fmt?: string; filters: Filters; vinculos: Map<string, string>; loaded: boolean
-  onEditGasto: (g: Gasto) => void; onGastosMensuales: () => void
+  onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
   const [asociar, setAsociar] = useState<Plantilla | null>(null)
   if (!loaded && !comp.n) return <p className="text-sm text-muted">Cargando plantillas…</p>
@@ -413,15 +415,15 @@ function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, 
       </div>
       {comp.meses.length > 1 && <p className="text-[11px] text-muted">El período abarca {comp.meses.length} meses: cada compromiso se espera una vez por mes y un pago solo cubre el mes de su fecha.</p>}
       <ul className="space-y-2" aria-label="Compromisos">
-        {comp.items.map(i => <FilaCompromiso key={i.plantilla.id} i={i} money={money} fmt={fmt} onAsociar={() => setAsociar(i.plantilla)} onEditGasto={onEditGasto} onQuitar={quitar} />)}
+        {comp.items.map(i => <FilaCompromiso key={i.plantilla.id} i={i} money={money} fmt={fmt} onAsociar={() => setAsociar(i.plantilla)} onRevisarGasto={onRevisarGasto} onQuitar={quitar} />)}
       </ul>
       {asociar && <AsociarModal store={store} plantilla={asociar} filters={filters} vinculos={vinculos} money={money} fmt={fmt} onClose={() => setAsociar(null)} />}
     </div>
   )
 }
 
-function FilaCompromiso({ i, money, fmt, onAsociar, onEditGasto, onQuitar }: {
-  i: CompromisoItem; money: (c: number) => string; fmt?: string; onAsociar: () => void; onEditGasto: (g: Gasto) => void; onQuitar: (g: Gasto) => void
+function FilaCompromiso({ i, money, fmt, onAsociar, onRevisarGasto, onQuitar }: {
+  i: CompromisoItem; money: (c: number) => string; fmt?: string; onAsociar: () => void; onRevisarGasto: (g: Gasto) => void; onQuitar: (g: Gasto) => void
 }) {
   const estado = i.previsto === null ? { txt: 'Sin monto', color: 'var(--muted)', Icon: CircleDashed }
     : i.cubiertoCompleto ? { txt: 'Cubierto', color: '#0F7A5F', Icon: CheckCircle2 }
@@ -447,7 +449,7 @@ function FilaCompromiso({ i, money, fmt, onAsociar, onEditGasto, onQuitar }: {
               <span className="min-w-0 truncate text-muted">{formatDate(g.fecha, fmt)} · {g.descripcion || g.subcategoria} · {g.medioPago}</span>
               <span className="flex items-center gap-1">
                 <b className="tabular">{formatMoney(Math.round(g.monto * 100), g.moneda)}</b>
-                <button type="button" className="rounded-lg p-1.5 text-muted hover:bg-bg hover:text-navy" aria-label={`Abrir ${g.descripcion || 'gasto'} del ${g.fecha}`} onClick={() => onEditGasto(g)}><ExternalLink className="size-3.5" /></button>
+                <button type="button" className="rounded-lg p-1.5 text-muted hover:bg-bg hover:text-navy" aria-label={`Abrir ${g.descripcion || 'gasto'} del ${g.fecha}`} onClick={() => onRevisarGasto(g)}><ExternalLink className="size-3.5" /></button>
                 <button type="button" className="rounded-lg p-1.5 text-muted hover:bg-bg hover:text-[#C0362C]" aria-label={`Quitar vínculo de ${g.descripcion || 'gasto'} del ${g.fecha}`} onClick={() => onQuitar(g)}><Link2Off className="size-3.5" /></button>
               </span>
             </li>
@@ -509,7 +511,7 @@ function AsociarModal({ store, plantilla, filters, vinculos, money, fmt, onClose
 
 /* ================================ Revisión de datos ================================ */
 
-function RevisionDatos({ store, c, fmt, onClose, onEditGasto }: { store: AppStore; c: CalidadDatos; fmt?: string; onClose: () => void; onEditGasto: (g: Gasto) => void }) {
+function RevisionDatos({ store, c, fmt, onClose, onRevisarGasto }: { store: AppStore; c: CalidadDatos; fmt?: string; onClose: () => void; onRevisarGasto: (g: Gasto) => void }) {
   const pendientes = c.similares.filter(s => s.estado === 'sin-revisar' || s.estado === 'pendiente')
   const revisados = c.similares.filter(s => s.estado === 'legitimo' || s.estado === 'duplicado')
   const marcar = (s: GrupoSimilar, estado: EstadoRevision) => {
@@ -527,7 +529,7 @@ function RevisionDatos({ store, c, fmt, onClose, onEditGasto }: { store: AppStor
       <span className="flex items-center gap-2">
         <b className="tabular">{Number.isFinite(g.monto) ? formatMoney(Math.round(g.monto * 100), g.moneda || 'PEN') : '—'}</b>
         <Button variant="outline" className="h-9 px-3 text-xs" disabled={!!g.problemaId} title={g.problemaId ? 'Su ID está repetido o es inválido: repáralo primero (repararIds en Apps Script)' : 'Abrir para revisar o corregir'}
-          onClick={() => onEditGasto(g)} aria-label={`Abrir ${g.descripcion || 'gasto'}`}><ExternalLink className="size-3.5" /> Abrir</Button>
+          onClick={() => onRevisarGasto(g)} aria-label={`Abrir ${g.descripcion || 'gasto'}`}><ExternalLink className="size-3.5" /> Abrir</Button>
       </span>
     </li>
   )

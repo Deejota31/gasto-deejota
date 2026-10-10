@@ -1018,6 +1018,9 @@ function migrarPlantillasHoja_(ss, sh, opts) {
   var esperado = SHEETS.PLANTILLAS_MENSUALES;
   var lastCol = Math.max(sh.getLastColumn(), 1);
   var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  // Camino rápido (cada escritura): si los encabezados ya son exactamente los esperados, no se lee nada más.
+  // Los IDs repetidos se detectan igual al guardar (savePlantilla_ recorre las filas que ya leyó).
+  if (esperado.every(function (e, i) { return str_(header[i]) === e; })) return { cambios: 0, detalle: [] };
   var lastRow = lastDataRow_(sh);
   var datos = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, Math.max(lastCol, esperado.length)).getValues() : [];
   var nuevos = [];
@@ -1114,7 +1117,10 @@ function savePlantilla_(p) {
   var key = [plain(ambito), plain(categoria), plain(sub), plain(desc), montoKey(monto), plain(moneda), plain(medio)].join('|');
   var idx = -1;
   for (var i = 0; i < rows.length; i++) {
-    if (str_(rows[i][0]) === id) { idx = i; continue; }
+    if (str_(rows[i][0]) === id) {
+      if (idx >= 0) throw schemaError_('el ID ' + id + ' está repetido en las filas ' + (idx + 2) + ' y ' + (i + 2) + '.');
+      idx = i; continue;
+    }
     var k = [plain(rows[i][1]), plain(rows[i][2]), plain(rows[i][3]), plain(rows[i][4]), montoKey(rows[i][7]), plain(str_(rows[i][8]) || 'PEN'), plain(rows[i][9])].join('|');
     if (str_(rows[i][0]) && k === key) throw appError_('VALIDATION', 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.');
   }

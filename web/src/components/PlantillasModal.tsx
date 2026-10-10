@@ -3,7 +3,7 @@
 // - Selección de una, algunas o todas; resumen fijo con totales por moneda; registro en UNA petición.
 // - Orden manual global (arrastrar o Subir/Bajar) que también define el orden de inserción del lote.
 // Una plantilla no es un movimiento: no suma en KPIs, cajas ni gráficos.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, GripVertical, ListChecks,
   Loader2, MoreHorizontal, Pencil, Plus, Repeat, Save, Search, Send, Trash2, Zap,
@@ -391,10 +391,6 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   const [esCompromiso, setEsCompromiso] = useState(base?.esCompromiso ?? false)
   // ID generado una sola vez al abrir: si la escritura falla y reintentas, el backend no duplica la plantilla.
   const [id] = useState(() => draft?.id ?? plantilla?.id ?? nuevoId())
-  const [guardando, setGuardando] = useState(false)
-  const [errorGuardar, setErrorGuardar] = useState<string | null>(null)
-  const montado = useRef(true)
-  useEffect(() => { montado.current = true; return () => { montado.current = false } }, [])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function change(next: Clasif) {
@@ -421,22 +417,21 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
     const key = (x: PlantillaInput) => [x.ambito, x.categoria, x.subcategoria, x.descripcion, x.moneda || 'PEN', x.medioPago].map(normName).join('|') + `|${x.monto === null ? '' : toCents(x.monto)}`
     if (!Object.keys(errs).length && items.some(p => p.id !== id && key(p) === key(data))) errs.descripcion = 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.'
     setErrors(errs)
-    if (Object.keys(errs).length || guardando) return // doble clic: una sola solicitud
-    const msg = existente
-      ? { ok: 'Plantilla actualizada correctamente.', error: 'Error al actualizar la plantilla.' }
-      : { ok: cloneOf ? 'Plantilla clonada correctamente.' : 'Plantilla creada correctamente.', error: 'No se pudo crear la plantilla.' }
-    // El formulario espera la confirmación real de Apps Script: solo se cierra si la hoja guardó la plantilla.
-    setGuardando(true)
-    setErrorGuardar(null)
-    store.plantillaActions.save(data, existente ? 'update' : 'create', existente ? undefined : afterId).then(() => {
-      if (store.data?.config.notificaciones !== 'false') showToast('success', msg.ok)
-      if (montado.current) onDone()
-    }, (e: unknown) => {
-      const detalle = e instanceof Error ? e.message : String(e ?? '')
-      if (montado.current) { setErrorGuardar(`${msg.error} ${detalle}`.trim()); setGuardando(false) }
-      // Si cerraste el formulario mientras se guardaba, el error llega como notificación para reabrirlo con lo escrito.
-      else showToast('error', `${msg.error} ${detalle}`.trim(), [{ label: 'Abrir formulario', run: () => onReopen({ ...data, existente, afterId }) }])
-    })
+    if (Object.keys(errs).length) return
+    // No bloquea: el formulario se cierra en cuanto la operación queda registrada y puedes seguir navegando.
+    // El éxito solo se anuncia cuando Apps Script confirma; si falla, la notificación permite reintentar (mismo ID:
+    // no duplica) o reabrir el formulario con lo que escribiste. Una segunda operación sobre la MISMA plantilla
+    // mientras la primera sigue en curso se rechaza; plantillas distintas pueden guardarse a la vez.
+    const tipo = existente ? 'update' : cloneOf ? 'clone' : 'create'
+    const msg = {
+      create: { pending: 'Guardando plantilla…', ok: 'Plantilla creada correctamente.', error: 'No se pudo crear la plantilla.' },
+      update: { pending: 'Guardando plantilla…', ok: 'Plantilla actualizada correctamente.', error: 'No se pudo actualizar la plantilla.' },
+      clone: { pending: 'Guardando plantilla…', ok: 'Plantilla clonada correctamente.', error: 'No se pudo clonar la plantilla.' },
+    }[tipo]
+    const ok = store.track(`plantilla:${id}`, msg,
+      () => store.plantillaActions.save(data, existente ? 'update' : 'create', existente ? undefined : afterId),
+      { onErrorActions: [{ label: 'Reabrir formulario', run: () => onReopen({ ...data, existente, afterId }) }] })
+    if (ok) onDone()
   }
 
   return (
@@ -476,14 +471,13 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
           })}
         </div>
       </div>
-      {errorGuardar && <ErrorBox message={<>{errorGuardar} <span className="block text-xs">Tus datos siguen aquí: corrige o vuelve a intentar (no se duplicará).</span></>} />}
       <div className="rounded-xl border border-line p-3">
         <Switch checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
         <p className="mt-1 text-[11px] text-muted">Actívalo para pagos que haces cada mes (luz, internet, apoyo familiar…). Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.</p>
       </div>
       <div className="flex justify-between gap-2 border-t border-line pt-3">
         <Button type="button" variant="outline" onClick={onDone}><ArrowLeft className="size-4" /> Volver</Button>
-        <Button type="submit" loading={guardando} disabled={guardando}>{!guardando && <Save className="size-4" />} {guardando ? 'Guardando…' : existente ? 'Guardar cambios' : cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
+        <Button type="submit"><Save className="size-4" /> {existente ? 'Guardar cambios' : cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
       </div>
     </form>
   )

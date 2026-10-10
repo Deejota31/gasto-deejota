@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('navega por las pestañas; ya no existe el gráfico "Últimos 6 meses"', async ({ page }) => {
-  for (const tab of ['Gastos', 'Categorías', 'Configuración', 'Dashboard']) {
+  for (const tab of ['Gastos', 'Salud financiera', 'Categorías', 'Configuración', 'Dashboard']) {
     await go(page, tab)
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: tab })).toHaveAttribute('aria-current', 'page')
   }
@@ -354,8 +354,9 @@ test.describe('Apps Script lento o caído', () => {
     expect(await err.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(253, 240, 239)')
     await expect(page.getByText('Gasto registrado correctamente.')).toHaveCount(0)
     expect(await total(page)).toBe(antes)
-    // con otro formulario abierto, el error sigue visible y usable (se muestra dentro del modal)
-    await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    // con otro formulario abierto, el error sigue visible y usable (se muestra dentro del modal).
+    // (El aviso de error, más largo por "resultado incierto", tapa el botón: se abre el formulario sin cerrarlo.)
+    await page.getByRole('button', { name: 'Nuevo gasto' }).dispatchEvent('click')
     await expect(dialog(page).getByRole('alert').filter({ hasText: 'No se pudo registrar el gasto.' })).toBeVisible()
     await dialog(page).getByRole('button', { name: 'Cancelar' }).click()
     await err.getByRole('button', { name: 'Abrir formulario' }).click()
@@ -535,7 +536,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
   })
 })
 
-test('plantillas con Apps Script caído: el formulario sigue abierto con el error y lo escrito; reintentar no duplica', async ({ page }) => {
+test('plantillas con Apps Script caído: el formulario se cierra, sin éxito falso; error con Reintentar y Reabrir formulario con lo escrito', async ({ page }) => {
   await page.goto('/?demo=60&falla=1')
   await expect(kpi(page, 'Total gastado')).toContainText('S/')
   await page.getByRole('button', { name: 'Gastos mensuales' }).click()
@@ -546,18 +547,36 @@ test('plantillas con Apps Script caído: el formulario sigue abierto con el erro
   await m.getByLabel('Descripción').fill('spotify familiar')
   await m.getByLabel('Monto predeterminado').fill('25.90')
   await m.getByRole('button', { name: 'Guardar plantilla' }).click()
-  // no hay éxito anticipado: el error se ve dentro del formulario, que sigue abierto con lo escrito
-  await expect(m.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })).toBeVisible()
+  await expect(m.getByRole('list', { name: 'Plantillas' })).toBeVisible()                // no bloquea: vuelve a la lista al instante
+  const err = page.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })
+  await expect(err).toBeVisible()
+  await expect(err).toContainText('Resultado incierto')                                   // sin respuesta: pudo haberse guardado
   await expect(page.getByRole('status').filter({ hasText: 'Plantilla creada correctamente.' })).toHaveCount(0)
-  await expect(m.getByLabel('Descripción')).toHaveValue('Spotify Familiar')
-  await expect(m.getByLabel('Monto predeterminado')).toHaveValue('25.90')
-  await expect(m.getByRole('radio', { name: 'Spotify', exact: true })).toHaveAttribute('aria-checked', 'true')
-  const c0 = await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla ?? 0)
-  await m.getByRole('button', { name: 'Guardar plantilla' }).click()        // reintento con el mismo ID
-  await expect(m.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })).toBeVisible()
-  expect(await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla)).toBe(c0 + 1)
-  await m.getByRole('button', { name: 'Volver' }).click()
   await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(11) // no aparece como creada
+  const c0 = await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla ?? 0)
+  await expect(err.getByRole('button', { name: 'Reintentar' })).toBeVisible()
+  await err.getByRole('button', { name: 'Reabrir formulario' }).click()
+  await expect(dialog(page).getByLabel('Descripción')).toHaveValue('Spotify Familiar')
+  await expect(dialog(page).getByLabel('Monto predeterminado')).toHaveValue('25.90')
+  await expect(dialog(page).getByRole('radio', { name: 'Spotify', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()          // reintento con el mismo ID
+  await expect(page.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' }).first()).toBeVisible()
+  expect(await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla)).toBe(c0 + 1)
+})
+
+test('plantillas con tiempo agotado: el error dice que el resultado es incierto y no bloquea', async ({ page }) => {
+  await page.goto('/?demo=60&falla=timeout')
+  await expect(kpi(page, 'Total gastado')).toContainText('S/')
+  await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+  const m = dialog(page)
+  await m.getByRole('button', { name: 'Más acciones de Luz' }).click()
+  await m.getByRole('menuitem', { name: 'Editar' }).click()
+  await m.getByLabel('Monto predeterminado').fill('130')
+  await m.getByRole('button', { name: 'Guardar cambios' }).click()
+  const err = page.getByRole('alert').filter({ hasText: 'No se pudo actualizar la plantilla.' })
+  await expect(err).toContainText('tardó demasiado')
+  await expect(err).toContainText('Resultado incierto')
+  await expect(m.getByLabel('Monto de Luz')).toHaveValue('120.00')                      // sin éxito, no cambia en pantalla
 })
 
 // ───────────────────────────── v1.4 ─────────────────────────────
@@ -716,6 +735,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
   const valor = (page: Page, id: string) => page.getByTestId(id).innerText().then(money)
 
   test('compromisos: pagar desde la plantilla baja lo pendiente sin doble conteo en el disponible', async ({ page }) => {
+    await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     const lista = page.getByRole('list', { name: 'Compromisos' })
     await expect(lista.getByTestId('compromiso').filter({ hasText: 'Luz' })).toContainText('Cubierto')
@@ -725,6 +745,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     const gastado0 = await valor(page, 'pres-gastado'), tras0 = await valor(page, 'pres-tras'), pres = await valor(page, 'pres-presupuesto')
     expect(tras0).toBeCloseTo(pres - gastado0 - pend0, 2)
     // pagar los S/ 50 que faltan de Internet desde "Usar" (monto temporal: la plantilla sigue en 100)
+    await go(page, 'Dashboard')
     await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
     await dialog(page).getByRole('button', { name: 'Usar plantilla Internet' }).click()
     const g = dialog(page)
@@ -733,12 +754,14 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     await g.getByLabel('Monto', { exact: true }).fill('50')
     await g.getByRole('button', { name: 'Registrar gasto' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible()
+    await go(page, 'Salud financiera')                                                     // vuelve a la última sección vista
     await expect.poll(() => valor(page, 'pres-gastado')).toBeCloseTo(gastado0 + 50, 2)
     expect(await valor(page, 'pres-pendiente')).toBeCloseTo(pend0 - 50, 2)
     expect(await valor(page, 'pres-tras')).toBeCloseTo(tras0, 2)          // no se descuenta dos veces
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     await expect(lista.getByTestId('compromiso').filter({ hasText: 'Internet' })).toContainText('Cubierto')
     // la plantilla conserva su monto predeterminado
+    await go(page, 'Dashboard')
     await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
     await expect(dialog(page).getByLabel('Monto de Internet')).toHaveValue('100.00')
   })
@@ -754,6 +777,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Plantilla actualizada correctamente.' })).toBeVisible()
     await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem').filter({ hasText: 'Spotify' })).toContainText('Compromiso')
     await page.keyboard.press('Escape')
+    await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     const spotify = page.getByRole('list', { name: 'Compromisos' }).getByTestId('compromiso').filter({ hasText: 'Spotify' })
     await expect(spotify).toContainText('Pendiente')
@@ -765,6 +789,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
 
   test('salud de datos: Propina Madre aparece como coincidencia, se marca legítima y no se elimina nada', async ({ page }) => {
     const total0 = await total(page)
+    await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Calidad de datos/ }).click()
     const indice0 = Number(await page.getByTestId('indice-calidad').innerText().then(t => t.split('/')[0]))
     await page.getByRole('button', { name: /^Revisar datos/ }).click()
@@ -778,12 +803,23 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     expect(((await calls(page)).saveRevision ?? 0) - (c0.saveRevision ?? 0)).toBe(1)
     // la clasificación antigua "Cuidado Darielita" se reconoce como histórica (no inválida)
     await expect(dialog(page).getByText(/clasificación\(es\) histórica\(s\) reconocida\(s\)/)).toBeVisible()
-    await page.keyboard.press('Escape')
-    expect(await total(page)).toBeCloseTo(total0, 2)                     // los tres registros siguen sumando
     expect(Number(await page.getByTestId('indice-calidad').innerText().then(t => t.split('/')[0]))).toBe(indice0) // una coincidencia legítima no penaliza
+    // "Abrir" lleva a Gastos con el movimiento resaltado y su formulario; se puede volver sin perder el período
+    await grupo.getByRole('button', { name: /^Abrir/ }).first().click()
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Gastos' })).toHaveAttribute('aria-current', 'page')
+    await expect(dialog(page).getByText('Editar gasto', { exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('foco-banner')).toContainText('Propina Madre')
+    await expect(page.locator('[data-foco="true"]').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Volver a Salud financiera' }).click()
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Salud financiera' })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('tab', { name: /Calidad de datos/ })).toHaveAttribute('aria-selected', 'true')
+    await go(page, 'Dashboard')
+    expect(await total(page)).toBeCloseTo(total0, 2)                     // los tres registros siguen sumando
   })
 
   test('evolución: compara tramos equivalentes y muestra ahorro como simulación', async ({ page }) => {
+    await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Evolución/ }).click()
     await expect(page.getByTestId('evo-rangos')).toContainText('contra del')
     await page.getByRole('radio', { name: 'Subcategoría' }).click()
@@ -839,4 +875,82 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
       await expect.poll(sinScrollH).toBe(true)
     })
   }
+})
+
+// ───────────────────────────── v1.6 ─────────────────────────────
+test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () => {
+  test('Salud financiera es una pestaña propia; el Dashboard ya no la muestra y comparte el período', async ({ page }) => {
+    await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' })).toHaveCount(0)
+    await expect(page.getByText('Análisis detallado').first()).toBeVisible()
+    const c0 = await calls(page)
+    await go(page, 'Salud financiera')
+    expect(page.url()).toContain('#salud')
+    await expect(page.getByRole('heading', { name: /Salud financiera/ })).toBeVisible()
+    await expect(page.getByText('Analiza la calidad de tus datos, controla tu presupuesto y descubre oportunidades de ahorro.')).toBeVisible()
+    await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' }).getByRole('tab')).toHaveCount(4)
+    const periodo = await page.getByTestId('salud-periodo').innerText()
+    // cambiar de pestaña no vuelve a leer la hoja de gastos (las plantillas se leen una vez)
+    const c1 = await calls(page)
+    expect((c1.data ?? 0) - (c0.data ?? 0)).toBe(0)
+    expect((c1.plantillas ?? 0) - (c0.plantillas ?? 0)).toBeLessThanOrEqual(1)
+    await go(page, 'Dashboard'); await go(page, 'Salud financiera')
+    expect(((await calls(page)).plantillas ?? 0) - (c1.plantillas ?? 0)).toBe(0)
+    // el período es el mismo filtro global
+    await page.getByRole('button', { name: 'Período', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).click()
+    await expect(page.getByTestId('salud-periodo')).not.toHaveText(periodo)
+    const nuevo = await page.getByTestId('salud-periodo').innerText()
+    await go(page, 'Dashboard')
+    await expect(page.getByText(nuevo.split('·')[0].trim(), { exact: false }).first()).toBeVisible()
+  })
+
+  test('guardar plantillas no bloquea: con 5 s de latencia se navega libremente y el éxito llega al final', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.goto('/?demo=60&latencia=5000')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 15_000 })
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    const m = dialog(page)
+    await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(11, { timeout: 15_000 })
+    await m.getByRole('button', { name: 'Más acciones de Luz' }).click()
+    await m.getByRole('menuitem', { name: 'Editar' }).click()
+    await m.getByLabel('Monto predeterminado').fill('55')
+    await m.getByRole('radiogroup', { name: 'Medio de pago predeterminado' }).getByRole('radio', { name: 'Plin', exact: true }).click()
+    await m.getByRole('button', { name: 'Guardar cambios' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Guardando plantilla…' })).toBeVisible()
+    // mientras se guarda, esa plantilla no admite otra edición (evita cambios simultáneos incompatibles); las demás sí
+    await expect(m.getByRole('button', { name: 'Más acciones de Luz' })).toHaveCount(0)
+    await expect(m.getByRole('button', { name: 'Más acciones de Agua' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    for (const t of ['Gastos', 'Salud financiera', 'Configuración', 'Dashboard']) {
+      await go(page, t)
+      await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: t })).toHaveAttribute('aria-current', 'page')
+    }
+    await expect(page.getByRole('status').filter({ hasText: 'Plantilla actualizada correctamente.' })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    await expect(dialog(page).getByLabel('Monto de Luz')).toHaveValue('55.00')
+    await expect(dialog(page).getByLabel('Medio de pago de Luz')).toHaveValue('Plin')
+  })
+
+  test('con 15 s de latencia: crear y clonar siguen sin bloquear y no se duplican', async ({ page }) => {
+    test.setTimeout(90_000)
+    await page.goto('/?demo=60&latencia=15000')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 25_000 })
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    const m = dialog(page)
+    const filas = m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')
+    await expect(filas).toHaveCount(11, { timeout: 25_000 })
+    await m.getByRole('button', { name: 'Más acciones de Netflix' }).click()
+    await m.getByRole('menuitem', { name: 'Clonar' }).click()
+    await m.getByLabel('Monto predeterminado').fill('45')
+    await m.getByRole('button', { name: 'Guardar copia' }).click()
+    await expect(filas).toHaveCount(11)                                                    // aún sin confirmar
+    await page.keyboard.press('Escape')
+    await go(page, 'Salud financiera')
+    await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'Plantilla clonada correctamente.' })).toBeVisible({ timeout: 25_000 })
+    await go(page, 'Dashboard')
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    await expect(filas).toHaveCount(12)
+    expect(await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla)).toBe(1)
+  })
 })

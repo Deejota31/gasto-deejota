@@ -453,7 +453,7 @@ describe('backend Apps Script', () => {
         () => { sh.rows[0][7] = 'Notas' },                                 // desconocido
         () => { sh.rows[0][11] = 'Monto' },                                // repetido
         () => { sh.rows[0][7] = ''; sh.rows[1][7] = 'abc' },               // sin encabezado y datos de otro tipo
-        () => { sh.rows[2][0] = sh.rows[1][0] },                           // ID repetido
+        () => { sh.rows[2][0] = sh.rows[1][0]; sh.rows[0][11] = '' },      // ID repetido (con migración pendiente)
         () => { sh.rows[0][10] = ''; sh.rows[1][10] = true },               // Orden sin encabezado con casillas: no es Orden
       ]) {
         const prev = JSON.stringify(sh.rows)
@@ -466,6 +466,13 @@ describe('backend Apps Script', () => {
         expect(JSON.stringify(sh.rows)).toBe(snap)
         void prev
       }
+      // con la hoja ya migrada, editar una plantilla cuyo ID está repetido también se detiene sin escribir
+      hojaReal(); sh.rows[0] = [...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso']
+      sh.rows[2][0] = sh.rows[1][0]
+      const snap = JSON.stringify(sh.rows)
+      const e = b.post('savePlantilla', { id: sh.rows[1][0], mode: 'update', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz' })
+      expect(e.error.code).toBe('SCHEMA')
+      expect(JSON.stringify(sh.rows)).toBe(snap)
     })
 
     it('eliminar sigue funcionando con un ID repetido (es como se corrige) y setup usa la migración segura', () => {
