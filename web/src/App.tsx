@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { FileSpreadsheet, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
+import { FileSpreadsheet, HeartPulse, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
@@ -18,10 +18,12 @@ import Configuracion from './tabs/Configuracion'
 
 // Recharts es la dependencia más pesada: el Dashboard se carga aparte para que Gastos abra rápido.
 const Dashboard = lazy(() => import('./tabs/Dashboard'))
+const Salud = lazy(() => import('./tabs/Salud'))
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'gastos', label: 'Gastos', icon: Receipt },
+  { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
   { id: 'categorias', label: 'Categorías', icon: Tags },
   { id: 'config', label: 'Configuración', icon: Settings },
 ] as const
@@ -34,13 +36,26 @@ export default function App({ api }: { api?: Api }) {
   // Un solo formulario de gasto para toda la app (Dashboard y Gastos lo abren igual).
   const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; preset?: GastoPreset; key: number } | null>(null)
   const openGasto = useCallback((mode: ModalMode, gasto: Gasto | null, draft?: GastoDraft, preset?: GastoPreset) => setModal({ mode, gasto, draft, preset, key: Date.now() }), [])
+  // "Revisar movimiento" desde Salud financiera: abre Gastos con ese movimiento resaltado y su formulario, y permite volver.
+  const [foco, setFoco] = useState<{ id: string; desde: TabId } | null>(null)
+  const irATab = useCallback((t: TabId) => { setTab(t); if (t !== 'gastos') setFoco(null) }, [])
   const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number }>(false)
   const tz = store.data?.config.zona_horaria || 'America/Lima'
   const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
   const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
 
-  useEffect(() => { history.replaceState(null, '', `#${tab}`) }, [tab])
+  useEffect(() => {
+    history.replaceState(null, '', `#${tab}`)
+    // En el móvil el menú se desplaza de lado: la pestaña activa queda siempre a la vista.
+    document.querySelector('nav[aria-label="Secciones"] [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [tab])
+  // Enlaces directos (#salud, #gastos…) y cambios manuales de la dirección: cambia de pestaña sin recargar.
+  useEffect(() => {
+    const onHash = () => { const h = location.hash.slice(1); if (TABS.some(t => t.id === h)) irATab(h as TabId) }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [irATab])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
   const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') showToast('success', m) }
 
@@ -61,7 +76,7 @@ export default function App({ api }: { api?: Api }) {
           </div>
           <nav className="order-last -mx-1 flex w-full gap-1 overflow-x-auto sm:order-none sm:mx-0 sm:w-auto" aria-label="Secciones">
             {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
+              <button key={id} onClick={() => irATab(id)} aria-current={tab === id ? 'page' : undefined}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${tab === id ? 'bg-navy text-white dark:text-[#0E1525]' : 'text-muted hover:bg-bg hover:text-ink'}`}>
                 <Icon className="size-4" />{label}
               </button>
@@ -87,8 +102,12 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onEditGasto={g => openGasto('edit', g)} /></Suspense>}
-        {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} />}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} /></Suspense>}
+        {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
+          foco={foco} onVolverFoco={foco ? () => irATab(foco.desde) : undefined} />}
+        {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}
+          onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
+          onRevisarGasto={g => { setFoco({ id: g.id, desde: 'salud' }); setTab('gastos'); if (!g.problemaId) openGasto('edit', g) }} /></Suspense>}
         {tab === 'categorias' && <Categorias store={store} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}
       </main>

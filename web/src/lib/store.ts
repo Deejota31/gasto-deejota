@@ -55,13 +55,14 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 10000))
-  const falla = q.get('falla') === '1'
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000))
+  const falla = q.get('falla') === '1' || q.get('falla') === 'timeout'
+  const codigo = q.get('falla') === 'timeout' ? { code: 'TIMEOUT', msg: 'Apps Script tardó demasiado en responder.' } : { code: 'NETWORK', msg: 'No se pudo conectar con Google Sheets.' }
   return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
     : (() => {
       const w = globalThis as unknown as { __gdDemoCalls?: Record<string, number> } // también cuenta los intentos fallidos
       w.__gdDemoCalls = { ...w.__gdDemoCalls, [action]: (w.__gdDemoCalls?.[action] ?? 0) + 1 }
-      return new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('No se pudo conectar con Google Sheets.'), { code: 'NETWORK' })), 300))
+      return new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error(codigo.msg), { code: codigo.code })), 300))
     })()) : demo)
 }
 
@@ -93,6 +94,13 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const [plantillas, setPlantillas] = useState<{ items: Plantilla[]; loading: boolean; error: string | null; loaded: boolean }>(
     { items: [], loading: false, error: null, loaded: false })
   const plantillasReq = useRef<Promise<void> | null>(null)
+  // Cambios de plantillas confirmados mientras una lectura de la hoja estaba en curso: se reaplican sobre su
+  // resultado para que una respuesta antigua no pise un estado más reciente.
+  const plJournal = useRef<((items: Plantilla[]) => Plantilla[])[]>([])
+  const aplicarPl = (fn: (items: Plantilla[]) => Plantilla[]) => {
+    if (plantillasReq.current) plJournal.current.push(fn)
+    setPlantillas(st => ({ ...st, items: fn(st.items) }))
+  }
   const plantillasRef = useRef(plantillas.items)
   plantillasRef.current = plantillas.items
   const plantillasLoaded = useRef(false)
@@ -232,7 +240,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       done()
       const actions: ToastAction[] = [...(extra?.retry !== false ? [{ label: 'Reintentar', run: () => { track(key, msg, fn, extra) } }] : []), ...(extra?.onErrorActions ?? [])]
       const detail = e instanceof Error ? e.message : String(e ?? '')
-      updateToast(id, 'error', `${msg.error} ${detail}`.trim(), actions)
+      // Sin respuesta (red, tiempo agotado): la hoja pudo haber guardado igual. Todas las escrituras son idempotentes.
+      const code = (e as { code?: string } | null)?.code
+      const incierto = code === 'TIMEOUT' || code === 'NETWORK' || code === 'HTTP'
+        ? ' Resultado incierto: puede que sí se haya guardado; reintentar no duplica.' : ''
+      updateToast(id, 'error', `${msg.error} ${detail}${incierto}`.trim(), actions)
     })
     return true
   }, [])
@@ -265,10 +277,13 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     if (plantillasReq.current) return plantillasReq.current // ya hay una lectura en curso
     if (plantillasLoaded.current && !force) return Promise.resolve() // ya están en memoria
     setPlantillas(p => ({ ...p, loading: true, error: null }))
+    plJournal.current = []
     const req: Promise<void> = api.getPlantillas()
-      .then(items => {
+      .then(leidas => {
         if (apiRef.current !== api) return // respuesta de otra conexión: se ignora
         plantillasLoaded.current = true
+        const items = plJournal.current.reduce((acc, fn) => fn(acc), leidas)
+        plJournal.current = []
         setPlantillas({ items, loading: false, error: null, loaded: true })
       })
       .catch((e: Error) => { if (apiRef.current === api) setPlantillas(p => ({ ...p, loading: false, error: e.message })) })
@@ -281,12 +296,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     /** Crea o edita. Una plantilla nueva va al final; una copia (afterId), justo después de la original. */
     async save(p: PlantillaInput, mode: 'create' | 'update', afterId?: string) {
       const s = await api.savePlantilla(p, mode, afterId)
-      setPlantillas(st => {
-        if (st.items.some(x => x.id === s.id)) return { ...st, items: st.items.map(x => (x.id === s.id ? { ...s, orden: x.orden } : x)) }
-        const items = [...st.items]
-        const pos = afterId ? items.findIndex(x => x.id === afterId) + 1 || items.length : items.length
-        items.splice(pos, 0, s)
-        return { ...st, items: items.map((x, i) => ({ ...x, orden: i + 1 })) }
+      aplicarPl(items => {
+        if (items.some(x => x.id === s.id)) return items.map(x => (x.id === s.id ? { ...s, orden: x.orden } : x))
+        const out = [...items]
+        const pos = afterId ? out.findIndex(x => x.id === afterId) + 1 || out.length : out.length
+        out.splice(pos, 0, s)
+        return out.map((x, i) => ({ ...x, orden: i + 1 }))
       })
     },
     /** Reordenar: se ve al instante y se guarda en una sola petición; si falla, vuelve al último orden confirmado. */
@@ -295,12 +310,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       if (!inflight.current.has(key)) plantillasConfirmado.current = plantillasRef.current.map(x => x.id)
       setPlantillas(st => ({ ...st, items: aplicarOrden(st.items, ids) }))
       guardarOrden(key, ids, { pending: 'Guardando el orden…', ok: 'Orden guardado.', error: 'No se pudo guardar el orden de las plantillas. Se restauró el anterior.' },
-        x => api.reorderPlantillas(x), x => { plantillasConfirmado.current = x },
+        x => api.reorderPlantillas(x), x => { plantillasConfirmado.current = x; aplicarPl(items => aplicarOrden(items, x)) },
         () => setPlantillas(st => ({ ...st, items: aplicarOrden(st.items, plantillasConfirmado.current) })))
     },
     async remove(id: string) {
       await api.deletePlantilla(id)
-      setPlantillas(st => ({ ...st, items: st.items.filter(x => x.id !== id) }))
+      aplicarPl(items => items.filter(x => x.id !== id))
     },
   }), [api, guardarOrden])
 

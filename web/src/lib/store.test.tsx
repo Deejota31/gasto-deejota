@@ -127,3 +127,20 @@ describe('orden personalizado (v1.4)', () => {
     hook.result.current.toasts.forEach(t => dismiss(t.id))
   })
 })
+
+describe('plantillas sin bloquear (v1.6)', () => {
+  it('una lectura de plantillas que llega tarde no pisa una plantilla ya confirmada', async () => {
+    const { be, hook } = setup()
+    await act(async () => { be.calls[0].resolve(base()) })
+    const st = () => hook.result.current.store
+    act(() => { void st().loadPlantillas() })
+    const lectura = be.calls.at(-1)!
+    expect(lectura.action).toBe('plantillas')
+    const pid = 'pl-00000000-0000-4000-8000-000000000099'
+    let saved: Promise<void> = Promise.resolve()
+    act(() => { saved = st().plantillaActions.save({ id: pid, ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: 55, moneda: 'PEN', medioPago: 'Plin' }, 'create') })
+    await act(async () => { be.calls.at(-1)!.resolve([pid, 'Familia', 'Servicios', 'Luz', 'Luz', 't', 't', 55, 'PEN', 'Plin', 1, false]); await saved })
+    await act(async () => { lectura.resolve([]) })   // respuesta antigua, sin la plantilla nueva
+    expect(st().plantillas.items.map(p => [p.id, p.monto, p.medioPago])).toEqual([[pid, 55, 'Plin']])
+  })
+})

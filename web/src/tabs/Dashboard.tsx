@@ -7,8 +7,7 @@ import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../li
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
-import type { Caja, Filters, Gasto } from '../lib/types'
-import SaludFinanciera from '../components/SaludFinanciera'
+import type { Caja, Filters } from '../lib/types'
 import { categoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList, SubLabel } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
@@ -22,9 +21,8 @@ const cajaIcon = (c: Caja) => {
   return k.includes('auto') ? Car : k.includes('beb') ? Baby : k.includes('nube') ? Cloud : Wallet
 }
 
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onEditGasto }: {
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
-  onEditGasto: (g: Gasto) => void
 }) {
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const data = store.data
@@ -96,8 +94,6 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           </div>
 
           <Cajas c={a.cajas} money={money} onEdit={(caja, asignado) => setEditCaja({ caja, asignado })} periodo={periodoTxt} />
-
-          <SaludFinanciera store={store} a={a} filters={filters} today={today} onEditGasto={onEditGasto} onGastosMensuales={onGastosMensuales} />
 
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>

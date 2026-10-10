@@ -28,6 +28,19 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.6.0
+
+| Punto | Qué cambió |
+|---|---|
+| Pestaña Salud financiera | Nueva pestaña principal (Dashboard · Gastos · **Salud financiera** · Categorías · Configuración), con enlace directo `#salud`. Contiene las mismas cuatro secciones (Calidad de datos, Mi presupuesto, Evolución, Compromisos) sin cambios en sus fórmulas, con encabezado, período visible y el mismo filtro global de Dashboard y Gastos. Sus cálculos solo corren mientras la pestaña está abierta y la sección elegida se recuerda en la sesión. |
+| Dashboard más limpio | Ya no muestra Salud financiera; el resto (KPIs, cajas, gráficos, Análisis detallado, botones) queda igual. |
+| Revisar movimiento | “Abrir” en Revisar datos o en Compromisos lleva a Gastos con el movimiento resaltado (en su página) y su formulario abierto, con “Volver a Salud financiera”. No cambia el período ni los filtros. |
+| Plantillas sin bloquear | **Causa del bloqueo:** desde la v1.5 el formulario esperaba la respuesta de Apps Script (botón “Guardando…”) y, al ser un modal, impedía usar el resto de la app. Ahora crear, editar, clonar, eliminar y reordenar se registran en el gestor de operaciones (`track`): el formulario se cierra al aceptar, puedes navegar y el resultado real llega como notificación arriba a la derecha. Una plantilla en curso no admite otra edición (su fila muestra un indicador); otras plantillas sí. Si falla: “Reintentar” (mismo ID, no duplica) y “Reabrir formulario” con lo escrito. Sin respuesta (red o tiempo agotado) se avisa como resultado incierto. Una lectura de plantillas que llega tarde ya no pisa cambios confirmados. |
+| Apps Script | En cada escritura de plantillas, si los encabezados ya son los esperados, la verificación de esquema lee solo la fila 1 (antes leía toda la hoja dos veces). Los IDs repetidos se siguen detectando al editar. |
+
+### Despliegue de v1.6.0
+Pega el `Code.gs` nuevo y publica una **Nueva versión** (cambio de rendimiento en plantillas). La web se publica al fusionar en `main`.
+
 ## Novedades v1.5.0
 
 | Punto | Qué cambió |
@@ -184,7 +197,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
 | `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 103) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (41), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (45), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas
