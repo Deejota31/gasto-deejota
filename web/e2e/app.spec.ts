@@ -821,7 +821,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
   test('evolución: compara tramos equivalentes y muestra ahorro como simulación', async ({ page }) => {
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Evolución/ }).click()
-    await expect(page.getByTestId('evo-rangos')).toContainText('contra del')
+    await expect(page.getByTestId('evo-rangos')).toContainText('Anterior')
     await page.getByRole('radio', { name: 'Subcategoría' }).click()
     await expect(page.getByText('Simulación', { exact: true })).toBeVisible()
   })
@@ -886,7 +886,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     await go(page, 'Salud financiera')
     expect(page.url()).toContain('#salud')
     await expect(page.getByRole('heading', { name: /Salud financiera/ })).toBeVisible()
-    await expect(page.getByText('Analiza la calidad de tus datos, controla tu presupuesto y descubre oportunidades de ahorro.')).toBeVisible()
+    await expect(page.getByText('Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.')).toBeVisible()
     await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' }).getByRole('tab')).toHaveCount(4)
     const periodo = await page.getByTestId('salud-periodo').innerText()
     // cambiar de pestaña no vuelve a leer la hoja de gastos (las plantillas se leen una vez)

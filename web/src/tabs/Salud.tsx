@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { CalendarDays, HeartPulse } from 'lucide-react'
+import { CalendarDays, HeartPulse, SlidersHorizontal } from 'lucide-react'
 import { aggregate } from '../lib/engine'
 import { ratesFromConfig } from '../lib/money'
 import { formatDate, rangeLabel } from '../lib/dates'
@@ -27,23 +27,40 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
     base, rates: ratesFromConfig(config), today, cajas, presupuestos,
   }) : null, [gastos, config, cajas, presupuestos, filters, base, today])
   const fmt = config?.formato_fecha
+  const activos = [...filters.ambitos, ...filters.categorias, ...filters.subcategorias.map(x => x.split(' › ').at(-1) ?? x), ...filters.medios, ...filters.tipos]
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-lg font-semibold text-ink"><HeartPulse className="size-5 text-coral" /> Salud financiera
-            <InfoTooltip title="Salud financiera" align="left">
-              <p>Responde tres preguntas: cuánto puedes gastar todavía, qué gastos están aumentando y cuánto necesitas reservar para tus compromisos. Además evalúa la calidad de tus datos.</p>
-              <p>Usa los datos ya cargados y el mismo filtro de período del Dashboard y Gastos: no hace consultas adicionales a tu hoja y nunca modifica movimientos.</p>
-            </InfoTooltip>
-          </h1>
-          <p className="text-xs text-muted">Analiza la calidad de tus datos, controla tu presupuesto y descubre oportunidades de ahorro.</p>
+      {/* Cabecera del módulo: título, propósito, período y filtros activos */}
+      <div className="relative overflow-hidden rounded-3xl border border-line p-5 sm:p-6"
+        style={{ background: 'radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, #E8664F 12%, var(--card)) 0%, var(--card) 45%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, #8B7CF6 12%, var(--card)) 0%, transparent 60%)' }}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-coral shadow-sm ring-1 ring-line"><HeartPulse className="size-6" /></span>
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-ink">Salud financiera
+                <InfoTooltip title="Salud financiera" align="left">
+                  <p>Responde tres preguntas: cuánto puedes gastar todavía, qué gastos están aumentando y cuánto necesitas reservar para tus compromisos. Además evalúa la calidad de tus datos.</p>
+                  <p>Usa los datos ya cargados y el mismo filtro de período del Dashboard y Gastos: no hace consultas adicionales a tu hoja y nunca modifica movimientos.</p>
+                </InfoTooltip>
+              </h1>
+              <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-navy shadow-sm ring-1 ring-line" data-testid="salud-periodo">
+              <CalendarDays className="size-3.5" /> <span className="first-letter:uppercase">{rangeLabel(filters)}</span>
+              <span className="hidden font-normal text-muted sm:inline">· {formatDate(filters.desde, fmt)} – {formatDate(filters.hasta, fmt)}</span>
+            </span>
+          </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-xs font-medium text-navy" data-testid="salud-periodo">
-          <CalendarDays className="size-3.5" /> <span className="first-letter:uppercase">{rangeLabel(filters)}</span>
-          <span className="hidden text-muted sm:inline">· {formatDate(filters.desde, fmt)} – {formatDate(filters.hasta, fmt)}</span>
-        </span>
+        {activos.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="flex items-center gap-1 font-medium text-muted"><SlidersHorizontal className="size-3.5" /> Filtros:</span>
+            {activos.slice(0, 6).map(x => <span key={x} className="rounded-full bg-card px-2 py-0.5 font-medium text-ink ring-1 ring-line">{x}</span>)}
+            {activos.length > 6 && <span className="text-muted">+{activos.length - 6}</span>}
+          </div>
+        )}
       </div>
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={gastos} />
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
