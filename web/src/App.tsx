@@ -79,7 +79,7 @@ export default function App({ api }: { api?: Api }) {
 
   return (
     <div className="min-h-dvh">
-      <header ref={headerRef} className="sticky top-0 z-10 border-b border-line bg-card/90 backdrop-blur">
+      <header ref={headerRef} className="sticky top-0 z-10 border-b border-line bg-card/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 xl:grid xl:grid-cols-[1fr_auto_1fr]">
           <div className="flex items-center gap-2">
             <span className="grid size-8 place-items-center rounded-xl bg-navy text-white"><Wallet className="size-4" /></span>
