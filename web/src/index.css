@@ -74,6 +74,13 @@ dialog::backdrop { background: rgb(15 23 42 / 0.45); backdrop-filter: blur(2px);
 .tabular { font-variant-numeric: tabular-nums; }
 .fade-in { animation: fade-in .22s ease-out; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+/* Controles uniformes (fecha y selector) también en Safari/iPhone. */
+.control-box { -webkit-appearance: none; appearance: none; box-sizing: border-box; min-height: 2.75rem; }
+.date-native { position: relative; display: block; min-width: 0; }
+.date-native::-webkit-date-and-time-value { text-align: left; }
+.date-native::-webkit-datetime-edit { padding: 0; }
+.date-native::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: auto; height: auto; opacity: 0; cursor: pointer; }
+.date-native:focus-visible + span { text-decoration: underline; text-underline-offset: 3px; }
 .bar-grow { transition: width 0.45s cubic-bezier(.2, .8, .2, 1); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
 .toast-in { animation: toast-in .22s ease-out; }

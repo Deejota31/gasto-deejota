@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { z } from 'zod'
-import { Copy, Pencil, Plus, Receipt } from 'lucide-react'
+import { Copy, Link2, Pencil, Plus, Receipt } from 'lucide-react'
 import type { GastoInput } from '../lib/api'
 import type { AppStore, OpMessages } from '../lib/store'
 import { TIPOS_GASTO, type Gasto, type TipoGasto } from '../lib/types'
@@ -8,7 +8,7 @@ import { todayIn } from '../lib/dates'
 import { medioLook, sortMedios } from '../lib/visual'
 import { formatearDescripcion } from '../lib/texto'
 import { autocompletar, ClasificacionPicker, opcionesClasif, type Clasif } from './Clasificacion'
-import { Button, Field, inputCls, Modal, Segmented, Switch } from './ui'
+import { Button, DateField, Field, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 
 export type ModalMode = 'create' | 'edit' | 'clone'
 
@@ -30,7 +30,9 @@ export type GastoDraft = Omit<GastoInput, 'monto'> & { montoText: string }
 type Form = GastoDraft
 
 /** Datos precargados desde una plantilla de "Gastos mensuales" (solo clasificación y descripción). */
-export type GastoPreset = Clasif & { descripcion: string; monto?: number | null; moneda?: string; medioPago?: string }
+export type GastoPreset = Clasif & { descripcion: string; monto?: number | null; moneda?: string; medioPago?: string
+  /** Plantilla de origen: el gasto queda vinculado como pago de ese compromiso. */
+  plantillaId?: string; plantillaNombre?: string }
 
 function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft, preset?: GastoPreset): Form {
   if (draft) return draft // reabrir tras un error: se conservan los datos que ingresaste
@@ -47,6 +49,7 @@ function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: Gast
     fecha: todayIn(cfg.zona_horaria || 'America/Lima'), montoText: preset?.monto ? String(preset.monto) : '', moneda: preset?.moneda || cfg.moneda || 'PEN',
     ambito: preset?.ambito ?? 'Personal', categoria: preset?.categoria ?? '', subcategoria: preset?.subcategoria ?? '', descripcion: preset?.descripcion ?? '',
     medioPago: preset?.medioPago ?? '', tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
+    ...(preset?.plantillaId ? { plantillaId: preset.plantillaId } : {}),
   }
 }
 
@@ -121,7 +124,9 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
     setErrors(errs)
     if (Object.keys(errs).length || !parsed.success) return
     // El mismo ID viaja en cada reintento: el backend no duplica aunque llegue dos veces.
-    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl }, mode, { ...form, descripcion })) onClose()
+    // Solo un alta desde plantilla queda vinculada a ella; editar o clonar nunca crea un compromiso nuevo.
+    const plantillaId = mode === 'create' ? form.plantillaId : undefined
+    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl, ...(plantillaId ? { plantillaId } : {}) }, mode, { ...form, descripcion })) onClose()
   }
 
   return (
@@ -150,14 +155,22 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
               </div>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Fecha" error={errors.fecha} htmlFor="gasto-fecha"><input id="gasto-fecha" type="date" className={inputCls} value={form.fecha} onChange={e => set({ fecha: e.target.value })} /></Field>
-            <Field label="Tipo de gasto">
-              <select aria-label="Tipo de gasto" className={inputCls} value={form.tipoGasto} onChange={e => set({ tipoGasto: e.target.value as TipoGasto })}>
+          {/* Fecha y Tipo de gasto con la misma caja; en pantallas muy angostas se apilan. */}
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
+            <Field label="Fecha" error={errors.fecha} htmlFor="gasto-fecha">
+              <DateField id="gasto-fecha" value={form.fecha} onChange={fecha => set({ fecha })} format={store.data?.config.formato_fecha} invalid={!!errors.fecha} />
+            </Field>
+            <Field label="Tipo de gasto" htmlFor="gasto-tipo">
+              <SelectField id="gasto-tipo" value={form.tipoGasto} onChange={v => set({ tipoGasto: v as TipoGasto })}>
                 {TIPOS_GASTO.map(x => <option key={x}>{x}</option>)}
-              </select>
+              </SelectField>
             </Field>
           </div>
+          {mode === 'create' && form.plantillaId && (
+            <p className="flex items-center gap-1.5 rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy" data-testid="vinculo-plantilla">
+              <Link2 className="size-3.5 shrink-0" /> Quedará vinculado a la plantilla{preset?.plantillaNombre ? ` “${preset.plantillaNombre}”` : ''}: si es un compromiso, cuenta como su pago.
+            </p>
+          )}
           <div>
             <p className="mb-1.5 text-xs font-medium text-muted">Medio de pago</p>
             <div role="radiogroup" aria-label="Medio de pago" className="grid grid-cols-3 gap-1.5">

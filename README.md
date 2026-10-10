@@ -28,6 +28,24 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.5.0
+
+| Punto | Qué cambió |
+|---|---|
+| **Corrección: plantillas** | **Causa raíz del error “La hoja PLANTILLAS_MENSUALES tiene encabezados distintos”:** reordenar plantillas escribía la columna Orden (K) sin agregar su encabezado, y la validación exigía que la fila 1 coincidiera exactamente con la lista esperada; las celdas vacías de H–K (y los números de Orden sin encabezado) hacían fallar crear, editar, clonar y eliminar. Ahora una migración segura (`migrarPlantillasHoja_`) reconoce cada columna por su encabezado (y variantes como “Monto predeterminado”), adopta una columna sin encabezado solo si sus datos tienen el tipo correcto (Orden = enteros), agrega solo los encabezados faltantes, crea un respaldo del archivo antes del primer cambio, conserva IDs, fechas y orden, y es idempotente. Un encabezado desconocido o repetido, datos de otro tipo o IDs repetidos detienen la operación con un mensaje claro (código `SCHEMA`, sin reintentos) y sin escribir nada. Reordenar y eliminar también pasan por esta verificación. Se puede ejecutar a mano con `migrarPlantillas()`. |
+| Formulario de plantilla | Espera la confirmación real de Apps Script: si falla, queda abierto con el error y lo que escribiste; reintentar usa el mismo ID (no duplica) y el doble clic no envía dos veces. Nuevo interruptor “Es un compromiso mensual”. |
+| Salud financiera (Dashboard) | Cuatro vistas: **Calidad de datos** (índice 0–100 = 30 % integridad + 30 % clasificación + 20 % consistencia del catálogo + 20 % duplicados confirmados; “Revisar datos” lista problemas, clasificaciones inválidas con sugerencia, históricas reconocidas y coincidencias), **Mi presupuesto** (presupuesto, gastado, compromisos pendientes, disponible y disponible tras compromisos; alertas 70/90/100 %; cajas específicas sin sumarse al general), **Evolución** (mismo tramo del mes anterior o dos meses; por ámbito, categoría o subcategoría; “Nuevo” sin base; ahorro simulado del 15 % solo en gastos discrecionales) y **Compromisos** (previsto, cubierto, pendiente, pagos parciales, asociar o quitar movimientos). Todo se calcula en el navegador con los datos ya cargados. |
+| Posibles duplicados | Se agrupan por fecha, monto, moneda, clasificación, descripción normalizada y medio (sin comparar todos contra todos). Son alertas, no errores: se pueden marcar como legítimas, pendientes o duplicado confirmado. Nunca se elimina nada. Si un movimiento revisado cambia, esa alerta vuelve a evaluarse. |
+| Compromisos sin doble conteo | Un gasto registrado desde una plantilla (individual o en lote) queda vinculado a ella. Pendiente = previsto − pagos vinculados del mes (nunca negativo). Un pago sube “gastado” y baja “pendiente” en lo mismo. Anular deja de cubrir y restaurar vuelve a cubrir; clonar o editar no crean vínculos. Se usa siempre la fecha real del movimiento. |
+| Hojas nuevas | `VINCULOS_PLANTILLAS` (Gasto ID, Plantilla ID, Creado en) y `REVISIONES_CALIDAD` (ID revisión, Tipo alerta, IDs movimientos, Estado revisión, Firma, Creado en, Actualizado en). Se crean solas con el primer uso. `PLANTILLAS_MENSUALES` agrega “Es compromiso”. GASTOS no cambia. |
+| Móvil | Fecha y Tipo de gasto con la misma caja (44 px, mismo borde, radio y tipografía; sin estilos nativos de iOS; la fecha se muestra con el formato de Configuración y conserva su valor AAAA-MM-DD), se apilan en pantallas muy angostas; campos a 16 px en teléfonos (evita el zoom de Safari); el campo enfocado se mantiene visible con el teclado. En Gastos mensuales, Usar / Editar / Eliminar quedan centrados en una fila propia en cada tarjeta móvil. |
+
+### Migración a v1.5.0
+
+1. Reemplaza `Code.gs` en Apps Script y guarda.
+2. **Implementar → Gestionar implementaciones → ✏️ → Nueva versión → Implementar.**
+3. Listo: al primer guardado de una plantilla, la hoja se migra sola (con respaldo previo en tu Drive). Si quieres verlo antes, ejecuta `migrarPlantillas` desde el editor y revisa el registro.
+
 ## Novedades v1.4.0
 
 | Punto | Qué cambió |
@@ -166,7 +184,7 @@ Sin conexión configurada, la app arranca en **modo demostración** con datos si
 | `npm run dev` | Servidor local |
 | `npm run build` | Tipado estricto + build |
 | `npm test` | Pruebas unitarias, de integración y de rendimiento (Vitest, 103) |
-| `npm run test:e2e` | E2E con Playwright contra el modo demo (32), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
+| `npm run test:e2e` | E2E con Playwright contra el modo demo (41), incluido Apps Script lento (`?latencia=`) y caído (`?falla=1`). Si Playwright no puede descargar su navegador, usa `CHROMIUM_PATH=/ruta/a/chromium`. |
 | `npm run perf` | Medición del motor con 1k/5k/10k movimientos |
 
 ## Pruebas

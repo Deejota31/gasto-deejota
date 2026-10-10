@@ -43,11 +43,30 @@ function demoCatalogo(): unknown[][] {
   ]
 }
 
+/**
+ * Casos de Salud de datos y compromisos del mes en curso: pago de Luz (vinculado), pago parcial de Internet,
+ * tres "Propina Madre" idénticas y legítimas (pagos de meses distintos hechos el mismo día) y una clasificación antigua.
+ */
+function demoSalud(today: string): unknown[][] {
+  const mes = today.slice(0, 8)
+  const dia = (d: number) => `${mes}${String(Math.min(d, Number(today.slice(8, 10)))).padStart(2, '0')}`
+  const ts = `${today}T12:00:00.000Z`
+  const g = (f: string, monto: number, cat: string, sub: string, desc: string, medio: string, amb: string, id: string) =>
+    [f, monto, 'PEN', cat, sub, desc, medio, 'Fijo', amb, false, 'Activo', 'demo', '', `d0000000-0000-4000-8000-${id}`, ts, ts]
+  return [
+    g(dia(3), 120, 'Servicios', 'Luz', 'Luz', 'Yape', 'Familia', '900000000001'),
+    g(dia(4), 50, 'Servicios', 'Internet', 'Internet', 'Plin', 'Familia', '900000000002'),
+    ...[3, 4, 5].map(n => g(dia(6), 100, 'Apoyo Familiar', 'Madre', 'Propina Madre', 'Yape', 'Familia', `90000000000${n}`)),
+    g(dia(2), 80, 'Bebé', 'Cuidado Darielita', 'Cuidado de la bebé', 'Efectivo', 'Familia', '900000000006'),
+  ]
+}
+
 export function demoTransport(today: string, n = 400, latencyMs = 250): Transport {
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
-      'Personal', false, 'Activo', 'demo', '', 'd0000000-0000-4000-8000-999999999999', `${today}T12:00:00.000Z`, `${today}T12:00:00.000Z`]] as unknown[][],
+      'Personal', false, 'Activo', 'demo', '', 'd0000000-0000-4000-8000-999999999999', `${today}T12:00:00.000Z`, `${today}T12:00:00.000Z`],
+      ...demoSalud(today)] as unknown[][],
     catalogo: demoCatalogo(),
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
     cajas: [
@@ -70,8 +89,14 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       ['Personal', 'Suscripciones', 'Netflix', 'Netflix', 40, 'PEN', 'Yape'],
       ['Familia', 'Apoyo Familiar', 'Padre', 'Seguro Padre', 100, 'PEN', 'Transferencia'],
       ['Personal', 'Alimentación', 'Antojos', 'Antojos de la Tarde', '', 'PEN', ''], // clasificación retirada: "Requiere revisión"
-    ] as unknown[][]).map((r, i) => [`pl-00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, r[0], r[1], r[2], r[3], '', '', r[4], r[5], r[6], i + 1]),
+    ] as unknown[][]).map((r, i) => [`pl-00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, r[0], r[1], r[2], r[3], '', '', r[4], r[5], r[6], i + 1,
+      // Compromisos de ejemplo: Luz, Agua, Internet, Línea Celular, ChatGPT y Seguro Padre (el resto son solo atajos).
+      [1, 2, 3, 5, 6, 10].includes(i + 1)]),
     ordenGastos: [] as unknown[][],
+    // [gastoId, plantillaId, creado]: Luz pagada completa e Internet con un pago parcial (S/ 50 de 100).
+    vinculos: [['d0000000-0000-4000-8000-900000000001', 'pl-00000000-0000-4000-8000-000000000001', ''],
+      ['d0000000-0000-4000-8000-900000000002', 'pl-00000000-0000-4000-8000-000000000003', '']] as unknown[][],
+    revisiones: [] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
   const upsert = (rows: unknown[][], keyLen: number, row: unknown[]) => {
@@ -80,9 +105,13 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
     if (i >= 0) rows[i] = row; else rows.push(row)
     return row
   }
+  const vincular = (gastoId: string, plantillaId: string) => {
+    const r = db.vinculos.find(x => String(x[0]).toLowerCase() === gastoId.toLowerCase())
+    if (r) r[1] = plantillaId; else if (plantillaId) db.vinculos.push([gastoId, plantillaId, new Date().toISOString()])
+  }
   const fail = (code: string, message: string) => Object.assign(new Error(message), { code })
   const handlers: Record<string, (p: Record<string, unknown>) => unknown> = {
-    data: () => structuredClone({ ...db, version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
+    data: () => structuredClone({ ...db, vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
     saveGasto: p => {
       const now = new Date().toISOString()
       const i = db.gastos.findIndex(r => r[13] === p.id)
@@ -93,6 +122,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
         p.tipoGasto, p.ambito, p.esRecurrente === true, prev ? prev[10] : 'Activo', prev ? prev[11] : 'web', p.comprobanteUrl ?? '',
         p.id, prev ? prev[14] : now, now]
       if (i >= 0) db.gastos[i] = row; else db.gastos.push(row)
+      if (p.mode === 'create' && p.plantillaId) vincular(String(p.id), String(p.plantillaId))
       return row
     },
     setEstado: p => {
@@ -136,7 +166,9 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
       const now = new Date().toISOString()
       const monto = p.monto === '' || p.monto === null || p.monto === undefined ? '' : Math.round(Number(p.monto) * 100) / 100
       if (monto !== '' && !(Number(monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
-      const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, now, now, monto, p.moneda || 'PEN', p.medioPago ?? '', 0]
+      const prevRow = db.plantillas.find(r => r[0] === p.id)
+      const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, now, now, monto, p.moneda || 'PEN', p.medioPago ?? '', 0,
+        p.esCompromiso === undefined ? (prevRow?.[11] ?? false) : p.esCompromiso === true]
       if (![row[1], row[2], row[3], row[4]].every(v => String(v ?? '').trim())) throw fail('VALIDATION', 'Ámbito, categoría, subcategoría y descripción son obligatorios.')
       if (db.plantillas.some(r => r[0] !== p.id && k(r) === k(row))) throw fail('VALIDATION', 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.')
       const i = db.plantillas.findIndex(r => r[0] === p.id)
@@ -168,8 +200,24 @@ export function demoTransport(today: string, n = 400, latencyMs = 250): Transpor
         return f
       })())
       db.gastos.push(...nuevas)
+      lista.forEach(g => { if (g.plantillaId) vincular(String(g.id), String(g.plantillaId)) })
       return { estado: 'confirmado', loteId: p.loteId, solicitados: filas.length, confirmados: filas.length, nuevos: nuevas.length, yaExistian: filas.length - nuevas.length,
         ids: filas.map(f => f[13]), gastos: filas, mensaje: `Se registraron ${filas.length} gastos.` }
+    },
+    vincularGasto: p => {
+      if (!db.gastos.some(r => String(r[13]).toLowerCase() === String(p.gastoId).toLowerCase())) throw fail('NOT_FOUND', 'El gasto ya no existe en la hoja.')
+      vincular(String(p.gastoId), String(p.plantillaId ?? ''))
+      return [p.gastoId, p.plantillaId ?? '']
+    },
+    saveRevision: p => {
+      if (!['legitimo', 'pendiente', 'duplicado'].includes(String(p.estado))) throw fail('VALIDATION', 'Estado de revisión inválido.')
+      const ids = (p.ids as string[]).map(x => x.toLowerCase()).sort().join(',')
+      const now = new Date().toISOString()
+      const prev = db.revisiones.find(r => r[2] === ids)
+      if (prev) { prev[3] = p.estado; prev[4] = p.firma; prev[6] = now; return [...prev] }
+      const row = [p.id, 'duplicado', ids, p.estado, p.firma, now, now]
+      db.revisiones.push(row)
+      return [...row]
     },
     reorderGastos: p => {
       ;(p.ids as string[]).forEach((id, i) => {

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { AlertTriangle, Info, Loader2, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, ChevronDown, Info, Loader2, X } from 'lucide-react'
+import { formatDate } from '../lib/dates'
 import { useModalLayer } from '../lib/toast'
 import Toaster from './Toaster'
 
@@ -99,7 +100,44 @@ export function Field({ label, children, error, hint, htmlFor }: { label: ReactN
   )
 }
 
-export const inputCls = 'w-full rounded-xl border border-line bg-card px-3 py-2 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-navy focus:ring-4 focus:ring-navy/10 disabled:cursor-not-allowed disabled:bg-bg disabled:text-muted'
+export const inputCls = 'w-full rounded-xl border border-line bg-card px-3 py-2 text-base text-ink sm:text-sm outline-none transition placeholder:text-muted/70 focus:border-navy focus:ring-4 focus:ring-navy/10 disabled:cursor-not-allowed disabled:bg-bg disabled:text-muted'
+
+/**
+ * Controles con la misma caja en todos los navegadores (incluido Safari/iPhone): altura táctil de 44 px, mismo borde,
+ * radio, relleno y alineación. Sin estilos nativos de iOS (appearance: none); el icono va dibujado aparte.
+ */
+const controlCls = `${inputCls} control-box h-11 leading-tight`
+
+/**
+ * Fecha: el selector nativo sigue abriéndose (al tocar cualquier parte del campo) y el valor real es AAAA-MM-DD;
+ * lo que se ve usa el formato de Configuración. Sin conversiones de zona horaria: es solo texto.
+ */
+export function DateField({ id, value, onChange, format, min, max, invalid, label }: {
+  id?: string; value: string; onChange: (v: string) => void; format?: string; min?: string; max?: string; invalid?: boolean; label?: string
+}) {
+  return (
+    <div className="relative">
+      <input id={id} type="date" aria-label={label} value={value} min={min} max={max} onChange={e => onChange(e.target.value)} aria-invalid={invalid || undefined}
+        className={`${controlCls} date-native pr-10 text-transparent ${invalid ? 'border-[#D2463C]' : ''}`} />
+      <span aria-hidden className="tabular pointer-events-none absolute inset-y-0 left-3 flex items-center text-base text-ink sm:text-sm">
+        {value ? formatDate(value, format) : <span className="text-muted/70">{(format || 'dd/MM/yyyy').toLowerCase()}</span>}
+      </span>
+      <CalendarDays aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
+    </div>
+  )
+}
+
+export function SelectField({ id, value, onChange, children, label, invalid }: {
+  id?: string; value: string; onChange: (v: string) => void; children: ReactNode; label?: string; invalid?: boolean
+}) {
+  return (
+    <div className="relative">
+      <select id={id} aria-label={label} value={value} onChange={e => onChange(e.target.value)} aria-invalid={invalid || undefined}
+        className={`${controlCls} appearance-none pr-10 ${invalid ? 'border-[#D2463C]' : ''}`}>{children}</select>
+      <ChevronDown aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
+    </div>
+  )
+}
 
 export function Select({ value, onChange, options, placeholder, label, id }: { value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; label: string; id?: string }) {
   return (
@@ -160,8 +198,10 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
             </div>
             <IconButton label="Cerrar" onClick={onClose}><X className="size-4" /></IconButton>
           </div>
-          <div className="overflow-y-auto px-5 py-4">{children}</div>
-          {footer && <div className="flex justify-end gap-2 border-t border-line bg-bg/50 px-5 py-3">{footer}</div>}
+          {/* Al abrirse el teclado del teléfono, el campo enfocado se mantiene visible dentro del área desplazable. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5"
+            onFocusCapture={e => { const t = e.target as HTMLElement; if (t.matches('input,select,textarea')) setTimeout(() => t.scrollIntoView?.({ block: 'nearest' }), 300) }}>{children}</div>
+          {footer && <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-line bg-bg/50 px-4 py-3 sm:px-5">{footer}</div>}
           <Toaster layer="modal" />
         </div>
       )}
