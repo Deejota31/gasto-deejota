@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
-import { ambitoLook, categoriaLook, COLORS, ICONS } from '../lib/visual'
+import { ambitoLook, categoriaLook, COLORS, ICONS, subcategoriaLook } from '../lib/visual'
+import { IconPicker } from '../components/IconPicker'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
@@ -182,14 +183,14 @@ function CatCard({ a, c, catalogo, q, onEdit }: { a: string; c: CatNode; catalog
         <IconButton label={`Editar ${c.name}`} onClick={() => onEdit({ mode: 'edit', nivel: 'categoria', ambito: a, categoria: c.name })}><Pencil className="size-4" /></IconButton>
       </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {c.subs.map(s => (
+        {c.subs.map(s => { const SI = subcategoriaLook(s.subcategoria, c.name, catalogo, a).Icon; return (
           <button key={s.subcategoria} type="button" title={s.activo ? 'Editar o desactivar' : 'Inactiva: clic para editar o reactivar'}
             onClick={() => onEdit({ mode: 'edit', nivel: 'subcategoria', ambito: a, categoria: c.name, subcategoria: s.subcategoria })}
-            className={`rounded-full border px-2.5 py-1 text-xs font-medium transition hover:brightness-95 ${s.activo ? '' : 'line-through opacity-60'}`}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition hover:brightness-95 ${s.activo ? '' : 'line-through opacity-60'}`}
             style={{ background: `${l.color}14`, borderColor: `${l.color}33`, color: l.color }}>
-            <Hl text={s.subcategoria} q={q} />
+            <SI className="size-3" aria-hidden /><Hl text={s.subcategoria} q={q} />
           </button>
-        ))}
+        ) })}
         {!c.subs.length && <span className="text-xs text-muted">Sin subcategorías</span>}
       </div>
     </article>
@@ -203,21 +204,25 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   const cat = amb?.cats.find(c => c.name === target.categoria)
   const sub = cat?.subs.find(s => s.subcategoria === target.subcategoria)
   const original = nivel === 'ambito' ? target.ambito ?? '' : nivel === 'categoria' ? target.categoria ?? '' : target.subcategoria ?? ''
-  const look = nivel === 'ambito' ? ambitoLook(target.ambito ?? '', catalogo) : categoriaLook(target.categoria ?? '', catalogo, target.ambito)
+  const look = nivel === 'ambito' ? ambitoLook(target.ambito ?? '', catalogo) : nivel === 'categoria' || mode === 'create'
+    ? categoriaLook(target.categoria ?? '', catalogo, target.ambito) : subcategoriaLook(target.subcategoria ?? '', target.categoria ?? '', catalogo, target.ambito)
   const head = nivel === 'ambito' ? amb?.head : nivel === 'categoria' ? cat?.head : sub
   const iconKey = Object.entries(ICONS).find(([, I]) => I === look.Icon)?.[0] ?? 'tag'
 
   const [ambito, setAmbito] = useState(target.ambito ?? tree[0]?.name ?? '')
   const [categoria, setCategoria] = useState(target.categoria ?? '')
   const [nombre, setNombre] = useState(mode === 'edit' ? original : '')
-  const [icono, setIcono] = useState(mode === 'edit' ? (head?.icono || iconKey) : 'tag')
+  const iconoInicial = mode === 'edit' ? (head?.icono || iconKey) : 'tag'
+  const [icono, setIcono] = useState(iconoInicial)
   const [color, setColor] = useState(mode === 'edit' ? (head?.color || look.color) : COLORS[0])
   const [activo, setActivo] = useState(mode === 'edit' ? (nivel === 'ambito' ? amb?.activo : nivel === 'categoria' ? cat?.activo : sub?.activo) ?? true : true)
   const [error, setError] = useState('')
   const cats = tree.find(a => a.name === ambito)?.cats.map(c => c.name) ?? []
   const label = { ambito: 'ámbito', categoria: 'categoría', subcategoria: 'subcategoría' }[nivel]
   const masc = nivel === 'ambito'
+  // Ámbitos y categorías: icono y color. Subcategorías: solo icono (el color es el de su categoría, para no hacer un arcoíris).
   const usaVisual = nivel !== 'subcategoria'
+  const colorSub = nivel === 'subcategoria' ? categoriaLook(categoria || target.categoria || '', catalogo, ambito).color : color
   const enUso = mode === 'edit' && nombre.trim() !== original
     ? (store.data?.gastos ?? []).filter(g => g.ambito === target.ambito && (nivel === 'ambito' || g.categoria === target.categoria) && (nivel !== 'subcategoria' || g.subcategoria === target.subcategoria)).length
     : 0
@@ -246,7 +251,7 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         await store.actions.renameCatalogo({ nivel, ambito: target.ambito!, categoria: target.categoria, subcategoria: target.subcategoria, nuevo: n })
         renombrado = true
       }
-      await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(usaVisual ? { icono, color } : {}) })
+      await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(usaVisual ? { icono, color } : icono !== iconoInicial ? { icono } : {}) })
     })
     if (ok) onClose()
   }
@@ -255,7 +260,7 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   return (
     <Modal open onClose={onClose} size="md" title={`${mode === 'create' ? (masc ? 'Nuevo' : 'Nueva') : 'Editar'} ${label}`}
       subtitle={mode === 'create' ? 'Aparecerá de inmediato en el formulario de gastos.' : 'Los gastos existentes conservan su clasificación.'}
-      icon={usaVisual ? <Preview className="size-5" style={{ color }} /> : <Tag className="size-5" />}
+      icon={<Preview className="size-5" style={{ color: colorSub }} />}
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{mode === 'create' ? 'Agregar' : 'Guardar'}</Button></>}>
       <div className="space-y-4">
         {nivel !== 'ambito' && (
@@ -278,17 +283,13 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         <Field label="Nombre" htmlFor="cm-nombre" hint={enUso ? `Se renombrará también en ${enUso} gasto(s) registrados.` : undefined}>
           <input id="cm-nombre" autoFocus className={inputCls} maxLength={nivel === 'ambito' ? 40 : 60} value={nombre} onChange={e => setNombre(e.target.value)} placeholder={`Nombre ${masc ? 'del' : 'de la'} ${label}`} />
         </Field>
+        <Picker label="Icono">
+          <IconPicker value={icono} onChange={setIcono} color={colorSub} nombre={nombre}
+            contexto={nivel === 'ambito' ? [] : nivel === 'categoria' ? [ambito] : [categoria]} />
+          {nivel === 'subcategoria' && <p className="mt-1 text-[11px] text-muted">El color lo hereda de su categoría.</p>}
+        </Picker>
         {usaVisual && (
           <>
-            <Picker label="Icono">
-              <div className="grid grid-cols-8 gap-1.5 sm:grid-cols-10">
-                {Object.entries(ICONS).map(([k, I]) => (
-                  <button key={k} type="button" aria-label={`Icono ${k}`} aria-pressed={icono === k} onClick={() => setIcono(k)}
-                    className={`grid aspect-square place-items-center rounded-lg border transition ${icono === k ? 'shadow-sm' : 'border-line hover:bg-bg'}`}
-                    style={icono === k ? { borderColor: color, background: `${color}1F`, color } : undefined}><I className="size-4" /></button>
-                ))}
-              </div>
-            </Picker>
             <Picker label="Color">
               <div className="flex flex-wrap gap-2">
                 {COLORS.map(c => (

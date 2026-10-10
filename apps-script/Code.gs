@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.8.0';
+var APP_VERSION = '1.9.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -572,6 +572,9 @@ function doPost(e) {
     var body;
     try { body = JSON.parse((e && e.postData && e.postData.contents) || ''); }
     catch (err) { throw appError_('BAD_JSON', 'Cuerpo de la petición inválido.'); }
+    // Atajos de iPhone: credencial propia y solo dos acciones (catálogo y registrar un gasto). El token de la web no
+    // sirve para ellas y el del atajo no sirve para nada más.
+    if (ATAJO_ACTIONS[body.action]) return atajo_(body);
     checkToken_(body.token);
     var fn = ACTIONS[body.action];
     if (!fn) throw appError_('BAD_ACTION', 'Acción no válida: ' + body.action);
@@ -740,7 +743,7 @@ var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true, reorderPlantillas
 
 var ACTIONS = {
   data: function (p) { return getData_(p.fresh === true); },
-  saveGasto: saveGasto_,
+  saveGasto: function (p) { return saveGasto_(p); },
   setEstado: setEstado_,
   saveCatalogo: saveCatalogo_,
   renameCatalogo: renameCatalogo_,
@@ -766,7 +769,7 @@ var ACTIONS = {
   migrarGeneralAFuente: migrarGeneralAFuente_
 };
 
-function saveGasto_(p) {
+function saveGasto_(p, origen) {
   var ss = openSpreadsheet_(false);
   var sh = ss.getSheetByName('GASTOS');
   var g = validateGasto_(p);
@@ -788,7 +791,7 @@ function saveGasto_(p) {
       if (plId) vincular_(ss, [[g.id, plId]]);
       return normalizeGastoRow_(redo, 'America/Lima');
     }
-    var row = gastoToRow_(g, 'Activo', 'web', now, now);
+    var row = gastoToRow_(g, 'Activo', origen || 'web', now, now);
     appendRows_(sh, [row]);
     if (plId) vincular_(ss, [[g.id, plId]]);
     return normalizeGastoRow_(row, 'America/Lima');
@@ -934,6 +937,135 @@ function savePresupuesto_(p) {
   }
   appendRows_(sh, [[p.periodo, cajaId, monto]]);
   return [p.periodo, cajaId, monto];
+}
+
+/* ===================== Atajos de iPhone (v1.9) ===================== */
+/*
+ * Credencial separada (propiedad ATAJO_TOKEN), revocable y de alcance mínimo: solo lee el catálogo activo
+ * (sin movimientos) y registra UN gasto validado. Viaja en el cuerpo del POST (nunca en la URL).
+ * Créala con crearTokenAtajo() y revócala con revocarTokenAtajo() desde el editor de Apps Script.
+ */
+var ATAJO_ACTIONS = { atajoCatalogo: true, atajoGasto: true };
+var ATAJO_MAX_POR_MIN = 20;      // escrituras por minuto
+var ATAJO_MAX_FALLOS = 10;       // tokens inválidos por 10 minutos antes de bloquear
+
+function crearTokenAtajo() {
+  var t = 'atj_' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+  PropertiesService.getScriptProperties().setProperty('ATAJO_TOKEN', t);
+  Logger.log('Token del atajo (cópialo solo en tu iPhone; no lo compartas): ' + t);
+  return t;
+}
+
+function revocarTokenAtajo() {
+  PropertiesService.getScriptProperties().deleteProperty('ATAJO_TOKEN');
+  Logger.log('Token del atajo revocado: el atajo dejará de funcionar hasta crear uno nuevo.');
+}
+
+function igualSeguro_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  var d = 0;
+  for (var i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+function atajo_(body) {
+  var cache = CacheService.getScriptCache();
+  var fallos = Number(cache.get('atajo:fallos') || 0);
+  if (fallos >= ATAJO_MAX_FALLOS) throw appError_('LOCKED', 'Demasiados intentos con un token inválido. Espera 10 minutos.');
+  var expected = PropertiesService.getScriptProperties().getProperty('ATAJO_TOKEN');
+  if (!expected) throw appError_('NOT_ENABLED', 'El atajo no está habilitado: ejecuta crearTokenAtajo() en Apps Script.');
+  if (!igualSeguro_(body.token, expected)) {
+    cache.put('atajo:fallos', String(fallos + 1), 600);
+    throw appError_('UNAUTHORIZED', 'Token del atajo inválido.');
+  }
+  if (body.action === 'atajoCatalogo') return atajoCatalogo_();
+  var minuto = 'atajo:min:' + Math.floor(Date.now() / 60000);
+  var n = Number(cache.get(minuto) || 0);
+  if (n >= ATAJO_MAX_POR_MIN) throw appError_('RATE_LIMIT', 'Demasiados registros seguidos. Intenta en un minuto.');
+  cache.put(minuto, String(n + 1), 120);
+  return withLock_(function () {
+    var r = atajoGasto_(body.payload || {});
+    invalidateCache_();
+    return r;
+  });
+}
+
+// Catálogo activo para los selectores dependientes del atajo. Listas ya ordenadas ("Otros" al final).
+function atajoCatalogo_() {
+  var ss = openSpreadsheet_(false);
+  var rows = readRows_(ss, 'CATALOGO');
+  var activo = function (r) { return r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE'; };
+  var off = {};
+  rows.forEach(function (r) { if (!activo(r)) off[catKey_(r[0], r[1], r[2])] = true; });
+  var vigente = function (r) {
+    return activo(r) && !off[catKey_(r[0], '', '')] && (!str_(r[1]) || !off[catKey_(r[0], r[1], '')]);
+  };
+  var orden = function (list) {
+    return list.sort(function (a, b) {
+      var oa = norm_(a.n) === 'otros' ? 1 : 0, ob = norm_(b.n) === 'otros' ? 1 : 0;
+      return oa - ob || a.o - b.o;
+    }).map(function (x) { return x.n; });
+  };
+  var amb = {}, cats = {}, subs = {}, idx = 0;
+  rows.filter(vigente).forEach(function (r) {
+    var a = str_(r[0]), c = str_(r[1]), s = str_(r[2]);
+    var o = str_(r[6]) === '' ? 1e9 + idx : num_(r[6]); idx++;
+    if (!amb[a]) amb[a] = { n: a, o: o };
+    if (c) { cats[a] = cats[a] || {}; if (!cats[a][c]) cats[a][c] = { n: c, o: o }; }
+    if (c && s) { var k = a + '|' + c; subs[k] = subs[k] || {}; if (!subs[k][s]) subs[k][s] = { n: s, o: o }; }
+  });
+  var values = function (o) { return Object.keys(o).map(function (k) { return o[k]; }); };
+  var categorias = {}, subcategorias = {};
+  Object.keys(cats).forEach(function (a) { categorias[a] = orden(values(cats[a])); });
+  Object.keys(subs).forEach(function (k) { subcategorias[k] = orden(values(subs[k])); });
+  var cfg = readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {});
+  var monedas = [cfg.moneda || 'PEN'].concat((cfg.monedas || '').split(',').map(str_)).filter(function (m, i, xs) { return m && xs.indexOf(m) === i; });
+  var medios = readRows_(ss, 'MEDIOS_PAGO').filter(function (r) { return r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE' && str_(r[0]); })
+    .map(function (r) { return str_(r[0]); });
+  var pos = function (m) { var i = MEDIOS_INICIALES.map(norm_).indexOf(norm_(m)); return norm_(m) === 'otros' ? 1000 : i < 0 ? 999 : i; };
+  medios.sort(function (x, y) { return pos(x) - pos(y); });
+  return {
+    version: APP_VERSION,
+    hoy: Utilities.formatDate(new Date(), 'America/Lima', 'yyyy-MM-dd'),
+    monedas: monedas, moneda: monedas[0], medios: medios,
+    ambitos: orden(values(amb)).filter(function (a) { return (categorias[a] || []).length; }),
+    categorias: categorias, subcategorias: subcategorias
+  };
+}
+
+// ID del gasto derivado de la clave del atajo: reenviar la misma clave (reintento, doble toque) nunca duplica.
+function idDeClave_(clave) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, 'atajo:' + clave, Utilities.Charset.UTF_8);
+  var hex = bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+  return [hex.slice(0, 8), hex.slice(8, 12), '4' + hex.slice(13, 16), 'a' + hex.slice(17, 20), hex.slice(20, 32)].join('-');
+}
+
+function atajoGasto_(p) {
+  var clave = str_(p.clave);
+  if (!/^[A-Za-z0-9_.:-]{8,64}$/.test(clave)) throw appError_('VALIDATION', 'Clave del envío inválida (8 a 64 caracteres).');
+  var cat = atajoCatalogo_();
+  var ambito = str_(p.ambito), categoria = str_(p.categoria), sub = str_(p.subcategoria), medio = str_(p.medioPago);
+  if (cat.ambitos.indexOf(ambito) < 0) throw appError_('VALIDATION', 'Ámbito no válido o inactivo: ' + ambito);
+  if ((cat.categorias[ambito] || []).indexOf(categoria) < 0) throw appError_('VALIDATION', 'Categoría no válida para ' + ambito + ': ' + categoria);
+  if ((cat.subcategorias[ambito + '|' + categoria] || []).indexOf(sub) < 0) throw appError_('VALIDATION', 'Subcategoría no válida para ' + categoria + ': ' + sub);
+  if (cat.medios.indexOf(medio) < 0) throw appError_('VALIDATION', 'Medio de pago no válido o inactivo: ' + medio);
+  var moneda = str_(p.moneda) || cat.moneda;
+  if (cat.monedas.indexOf(moneda) < 0) throw appError_('VALIDATION', 'Moneda no permitida: ' + moneda);
+  var montoTxt = String(p.monto === undefined ? '' : p.monto).replace(',', '.').trim();
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(montoTxt) || Number(montoTxt) <= 0) throw appError_('VALIDATION', 'Monto inválido: usa un número mayor que 0 con hasta 2 decimales.');
+  var fecha = str_(p.fecha).slice(0, 10) || cat.hoy;
+  var id = idDeClave_(clave);
+  var sh = openSpreadsheet_(false).getSheetByName('GASTOS');
+  var existia = !!findRowById_(sh, G.ID + 1, id);
+  var row = saveGasto_({
+    id: id, mode: 'create', fecha: fecha, monto: Number(montoTxt), moneda: moneda, ambito: ambito, categoria: categoria, subcategoria: sub,
+    descripcion: str_(p.descripcion) || sub, medioPago: medio, tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: ''
+  }, 'atajo');
+  var montoFmt = (moneda === 'PEN' ? 'S/ ' : moneda + ' ') + Number(row[G.MONTO]).toFixed(2);
+  return {
+    estado: existia ? 'ya-registrado' : 'registrado', id: id,
+    mensaje: (existia ? 'Ya estaba registrado (no se duplicó): ' : 'Gasto registrado: ') + montoFmt + ' · ' + row[G.SUB] + ' · ' + row[G.MEDIO] + ' · ' + row[G.FECHA]
+  };
 }
 
 /* ===================== Fuentes de dinero (v1.8) ===================== */

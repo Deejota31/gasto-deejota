@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
-  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Layers, LayoutGrid, List, Lock, MoreHorizontal, Pencil, Plus, Power, Search,
+  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Layers, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Power, Search,
   Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info,
 } from 'lucide-react'
 import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
@@ -10,10 +10,11 @@ import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
-import { sortMedios } from '../lib/visual'
+import { COLORS, sortMedios } from '../lib/visual'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal, cajaIcon } from '../components/cajas'
 import { FuentesSeccion } from '../components/fuentes'
+import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from '../components/ui'
 
 type Alcance = Exclude<FiltroCampo, 'Todos'>
@@ -25,7 +26,7 @@ const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
 ]
 const alcanceIcon = (c: FiltroCampo) => ALCANCES.find(a => a.value === c)?.Icon ?? Wallet
 type Orden = 'manual' | 'nombre' | 'monto' | 'mas' | 'menos' | 'uso'
-const COLORES = ['#4F7BE8', '#16A085', '#E8664F', '#8B7CF6', '#EC4899', '#F59E0B', '#0EA5E9', '#64748B', '#84CC16', '#E25563']
+const COLORES = COLORS
 const TONO = {
   ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
@@ -103,7 +104,9 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
     <div className="space-y-4">
       <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length} />
       <FuentesSeccion store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
-      <CajaGeneral c={c} money={money} periodo={rangeLabel(filters)} onAjustar={() => c.general && setAjustar({ caja: c.general, asignado: c.presupuesto })} />
+      <PresupuestoConsolidado c={c} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
+        accion={c.general && c.origen !== 'fuentes' ? <button type="button" onClick={() => setAjustar({ caja: c.general!, asignado: c.presupuesto })}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-2 text-xs font-medium hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar presupuesto</button> : undefined} />
 
       <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -216,68 +219,6 @@ function Mini({ label, value, tone }: { label: string; value: string; tone?: str
       <dt className="text-[11px] text-muted">{label}</dt>
       <dd className="tabular truncate text-base font-bold" style={tone ? { color: tone } : undefined}>{value}</dd>
     </div>
-  )
-}
-
-function CajaGeneral({ c, money, periodo, onAjustar }: { c: CajasResumen; money: (n: number) => string; periodo: string; onAjustar: () => void }) {
-  const P = c.presupuesto
-  const seg = (v: number) => `${P ? Math.max(0, Math.min(100, (v / P) * 100)) : 0}%`
-  const reservaRestante = Math.max(0, c.reservado - c.gastadoSubcajas + c.excesoSubcajas)
-  const tono = c.pct === null ? TONO.neutro : c.pct >= 100 ? TONO.alerta : c.pct >= 70 ? TONO.atencion : TONO.ok
-  const fuentes = c.origen === 'fuentes'
-  const def = P > 0 || fuentes
-  const gastado = c.gastadoSubcajas + c.gastadoLibre
-  return (
-    <section className="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)]" aria-label="Presupuesto consolidado" data-testid="caja-general">
-      <div className="flex flex-wrap items-center gap-3 bg-[linear-gradient(120deg,#294690,#4F6FC8)] px-5 py-4 text-white">
-        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/15"><Lock className="size-5" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold">Presupuesto consolidado</p>
-          <p className="truncate text-xs text-white/75">{fuentes
-            ? `Suma de ${c.fuentes.activas} fuente${c.fuentes.activas === 1 ? '' : 's'} activa${c.fuentes.activas === 1 ? '' : 's'}`
-            : `Desde ${c.general?.nombre ?? 'la caja general'}`} · {periodo}. Las subcajas son parte de este dinero, no se suman.</p>
-        </div>
-        <div className="text-right">
-          <p className="text-[11px] text-white/75">Saldo libre actual</p>
-          <p className="tabular text-2xl font-bold" data-testid="saldo-libre">{def ? money(c.saldoLibre) : 'Sin definir'}</p>
-        </div>
-        {c.general && !fuentes && <button type="button" onClick={onAjustar} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-2 text-xs font-medium hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
-      </div>
-      <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-4" data-testid="consolidado">
-        {([
-          [fuentes ? 'Total fuentes' : 'Presupuesto', def ? money(P) : '—', undefined, fuentes ? 'Suma de lo que aportan las fuentes activas en el período.' : 'Monto total de la caja general en el período (suma los meses si abarca varios).'],
-          ['Total gastado', money(gastado), '#E8664F', 'Todos los gastos activos del período, cada uno una sola vez.'],
-          ['Disponible', def ? money(c.disponible) : '—', c.disponible < 0 ? TONO.alerta.fg : TONO.ok.fg, 'Presupuesto consolidado − total gastado.'],
-          ['Reservado en subcajas', money(c.reservado), '#6D5DD3', 'Suma de lo asignado a las subcajas activas.'],
-          ['Libre inicial', def ? money(c.libreInicial) : '—', undefined, 'Presupuesto − reservado: lo que no apartaste para ninguna subcaja.'],
-          ['Gastado fuera de subcajas', money(c.gastadoLibre), '#E8664F', 'Gastos que no pertenecen a ninguna subcaja activa.'],
-          ['Saldo libre actual', def ? money(c.saldoLibre) : '—', c.saldoLibre < 0 ? TONO.alerta.fg : TONO.ok.fg, 'Libre inicial − gastado fuera de subcajas − excesos de subcajas.'],
-          ['Consumido', c.pct === null ? '—' : `${c.pct}%`, tono.fg, 'Todo lo gastado del período ÷ presupuesto.'],
-        ] as const).map(([l, v, color, ayuda]) => (
-          <div key={l} className="bg-card px-4 py-3" title={ayuda} data-testid={`cons-${l.toLowerCase().replace(/\s+/g, '-')}`}>
-            <p className="text-[11px] text-muted">{l}</p>
-            <p className="tabular text-sm font-bold" style={{ color: color ?? 'var(--ink)' }}>{v}</p>
-          </div>
-        ))}
-      </div>
-      {P > 0 && (
-        <div className="px-5 py-4">
-          <div className="flex h-3.5 overflow-hidden rounded-full bg-bg" role="img"
-            aria-label={`Gastado fuera de subcajas ${money(c.gastadoLibre)}, gastado en subcajas ${money(c.gastadoSubcajas)}, reservas sin usar ${money(reservaRestante)}`}>
-            <span className="bar-grow h-full bg-coral" style={{ width: seg(c.gastadoLibre) }} />
-            <span className="bar-grow h-full bg-morado" style={{ width: seg(c.gastadoSubcajas) }} />
-            <span className="bar-grow h-full bg-morado/25" style={{ width: seg(reservaRestante) }} />
-          </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
-            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-coral" /> Gastado fuera <b className="tabular text-ink">{money(c.gastadoLibre)}</b></span>
-            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado" /> Gastado en subcajas <b className="tabular text-ink">{money(c.gastadoSubcajas)}</b></span>
-            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado/25" /> Reservado sin usar <b className="tabular text-ink">{money(reservaRestante)}</b></span>
-            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-bg ring-1 ring-line" /> Libre</span>
-          </div>
-          {c.sobreasignado && <p className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }}><AlertTriangle className="size-4" /> Las reservas de subcajas ({money(c.reservado)}) superan el presupuesto consolidado.</p>}
-        </div>
-      )}
-    </section>
   )
 }
 

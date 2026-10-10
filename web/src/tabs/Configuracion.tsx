@@ -10,7 +10,7 @@ import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.8.0'
+export const APP_VERSION = '1.9.0'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {

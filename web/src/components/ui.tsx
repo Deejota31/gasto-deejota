@@ -46,11 +46,11 @@ export function Card({ title, icon, action, info, children, className = '', body
   title?: ReactNode; icon?: ReactNode; action?: ReactNode; info?: { title: string; body: ReactNode }; children: ReactNode; className?: string; bodyClass?: string
 }) {
   return (
-    <section className={`rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] ${className}`}>
+    <section className={`min-w-0 rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] ${className}`}>
       {(title || action || info) && (
-        <header className="mb-3 flex items-center justify-between gap-2">
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink">{icon}<span className="truncate">{title}</span></h2>
-          <div className="flex shrink-0 items-center gap-1">{action}{info && <InfoTooltip title={info.title}>{info.body}</InfoTooltip>}</div>
+          <div className="ml-auto flex shrink-0 items-center gap-1">{action}{info && <InfoTooltip title={info.title}>{info.body}</InfoTooltip>}</div>
         </header>
       )}
       <div className={bodyClass}>{children}</div>

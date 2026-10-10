@@ -73,13 +73,13 @@ const CAJAS_EXTRA: unknown[][] = [
 // Fuentes de ejemplo (?fuentes=N): las tres primeras son el caso real (General + Sodexo + Extra 1 = S/ 4,780 en el mes).
 const FUENTES_EXTRA = ['Bonificación', 'Reembolso', 'Trabajo independiente', 'Extra 2', 'Ingreso adicional', 'Otro ingreso', 'Freelance', 'Venta', 'Premio',
   'Devolución', 'Aguinaldo', 'Gratificación', 'CTS', 'Comisión', 'Regalo', 'Alquiler', 'Intereses', 'Dividendos', 'Extra 3', 'Extra 4', 'Extra 5', 'Extra 6']
-const COLORES_FUENTE = ['#16A085', '#0EA5E9', '#E25563', '#F59E0B', '#4F7BE8', '#E8664F', '#8B7CF6', '#64748B', '#C0362C', '#84CC16']
+const COLORES_FUENTE = ['#14917F', '#0E8FA8', '#C2569B', '#6B8E23', '#4F7BE8', '#B4693C', '#8B7CF6', '#64748B', '#6366F1', '#2F9E6B']
 function demoFuentes(n: number, mes: string): unknown[][] {
   const t = '2026-01-01T00:00:00.000Z'
   const base: unknown[][] = [
     ['fuente-general', 'General', 3500, 'PEN', '#1e3a8a', '', true, 1, 'mensual', '', '', t, t],
-    ['f-sodexo', 'Sodexo', 280, 'PEN', '#84CC16', '', true, 2, 'mensual', '', 'Sodexo', t, t],
-    ['f-extra-1', 'Extra 1', 1000, 'PEN', '#F59E0B', '', true, 3, 'unica', mes, '', t, t],
+    ['f-sodexo', 'Sodexo', 280, 'PEN', '#6B8E23', '', true, 2, 'mensual', '', 'Sodexo', t, t],
+    ['f-extra-1', 'Extra 1', 1000, 'PEN', '#B4693C', '', true, 3, 'unica', mes, '', t, t],
   ]
   const extra = FUENTES_EXTRA.map((nombre, i): unknown[] => [`f-demo-${i + 1}`, nombre, 50 * (i + 1), 'PEN', COLORES_FUENTE[i % COLORES_FUENTE.length], '', i % 4 !== 3, i + 4, i % 2 ? 'unica' : 'mensual', i % 2 ? mes : '', '', t, t])
   return [...base, ...extra].slice(0, n)

@@ -28,6 +28,22 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.9.0
+
+| Punto | Qué cambió |
+|---|---|
+| Dashboard | Orden: Resumen → filtros → KPIs → **Presupuesto consolidado** (`N fuentes activas · Mes AAAA`) → acordeones **Fuentes de dinero** y **Subcajas / reservas** (cerrados al entrar, con resumen y “Administrar en Cajas”) → gráficos. Se quitaron las tarjetas grandes de subcajas y la tarjeta **Top 10 subcategorías**. |
+| Top 5 | Una sola tarjeta con selector **Categorías / Subcategorías**. Las subcategorías se agrupan por ámbito › categoría › subcategoría (los “Otros” no se mezclan). La opción se recuerda durante la sesión. |
+| Jerarquía | Empieza **totalmente contraída** (ámbitos y categorías); se abre solo con clic. Expandir/Contraer todo. Una consulta nueva (período o filtros) vuelve a contraer. |
+| Cifras idénticas | Un único bloque `PresupuestoConsolidado` (mismas 8 cifras y nombres) en Dashboard y Cajas; Salud usa los mismos nombres. El motor agrega `gastadoPeriodo` y `reservasSinUsar`, y se cumple siempre: disponible = saldo libre + reservas sin usar (probado con 200 escenarios aleatorios). |
+| Salud financiera | Se quitó la fecha duplicada del encabezado (el período sigue en el filtro). |
+| Iconos y colores | Catálogo central (`lib/iconos.ts`) con 190 iconos en 13 grupos, búsqueda por sinónimos y sugerencias según el nombre y su categoría/ámbito; las subcategorías ahora tienen icono (heredan el color de su categoría). Paleta de clasificación sin rojo ni ámbar (reservados para estados). Las claves y colores ya guardados se conservan. |
+| Atajo de iPhone | Acciones `atajoCatalogo` y `atajoGasto` con **token propio** (`crearTokenAtajo` / `revocarTokenAtajo`), validación contra el catálogo activo, clave de idempotencia, límites y bloqueo por intentos fallidos. Guía: [docs/ATAJO-IPHONE.md](docs/ATAJO-IPHONE.md). |
+| Notificaciones | Se muestran debajo de la barra superior para no tapar el menú centrado. |
+
+### Despliegue de v1.9.0
+Pega el `Code.gs` nuevo y publica una **Nueva versión**. Para el atajo, ejecuta una vez `crearTokenAtajo()` y sigue la guía. La web se publica al fusionar en `main`.
+
 ## Novedades v1.8.0
 
 | Punto | Qué cambió |

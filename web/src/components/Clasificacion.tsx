@@ -3,7 +3,7 @@
 import { Check } from 'lucide-react'
 import type { CatalogoItem } from '../lib/types'
 import { otrosAlFinal } from '../lib/orden'
-import { ambitoLook, categoriaLook } from '../lib/visual'
+import { ambitoLook, categoriaLook, subcategoriaLook } from '../lib/visual'
 import { descripcionDeSubcategoria } from '../lib/texto'
 import { catalogOptions } from './shared'
 
@@ -79,9 +79,10 @@ export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, ke
         <p className="mb-1.5 text-xs font-medium text-muted">3. Subcategoría</p>
         {!value.categoria ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted">Se habilita al elegir una categoría.</p> : (
           <div role="radiogroup" aria-label="Subcategoría" className="flex flex-wrap gap-1.5">
-            {o.subcategorias.map(s => (
-              <Chip key={s} on={value.subcategoria === s} color={categoriaLook(value.categoria, catalogo, value.ambito).color} onClick={() => onChange({ ...value, subcategoria: s })}>{s}</Chip>
-            ))}
+            {o.subcategorias.map(s => {
+              const l = subcategoriaLook(s, value.categoria, catalogo, value.ambito)
+              return <Chip key={s} on={value.subcategoria === s} color={l.color} onClick={() => onChange({ ...value, subcategoria: s })}><l.Icon className="size-3.5" />{s}</Chip>
+            })}
           </div>
         )}
         {err('subcategoria')}

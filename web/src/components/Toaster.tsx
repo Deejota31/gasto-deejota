@@ -14,7 +14,7 @@ export default function Toaster({ layer = 'page' }: { layer?: 'page' | 'modal' }
   const modalOpen = useModalOpen()
   if (layer === 'page' && modalOpen) return null // con un modal abierto se muestran dentro del modal
   return (
-    <div className="pointer-events-none fixed top-3 right-3 left-3 z-[60] flex flex-col items-end gap-2 sm:left-auto sm:w-96" data-toaster={layer}>
+    <div className="pointer-events-none fixed top-[calc(var(--header-h,3.25rem)+0.5rem)] right-3 left-3 z-[60] flex flex-col items-end gap-2 sm:left-auto sm:w-96" data-toaster={layer}>
       {toasts.map(t => {
         const s = STYLE[t.kind]
         return (

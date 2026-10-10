@@ -87,7 +87,7 @@ export function AnalisisDetallado({ a, currency, catalogo, periodo, filtros, onP
       </div>
 
       <div key={vista} role="tabpanel" id={`panel-${vista}`} aria-labelledby={`tab-${vista}`} className="fade-in">
-        {vista === 'jerarquia' && <Jerarquia a={a} currency={currency} catalogo={catalogo} periodo={periodo} />}
+        {vista === 'jerarquia' && <Jerarquia a={a} currency={currency} catalogo={catalogo} periodo={periodo} consulta={`${periodo.desde}|${periodo.hasta}|${filtros.join(',')}`} />}
         {vista === 'sankey' && <FlujoMedios a={a} currency={currency} catalogo={catalogo} periodo={periodo} rango={rango} />}
         {vista === 'frecuencia' && <Frecuencia a={a} currency={currency} catalogo={catalogo} periodo={periodo} onPick={onPickCategoria} />}
       </div>
@@ -114,24 +114,30 @@ function Barra({ value, max, color, className = 'h-1.5' }: { value: number; max:
 
 // ───────────────────────────── Jerarquía ─────────────────────────────
 
-// Ámbitos abiertos/cerrados durante la sesión. Si el usuario no tocó nada, se abre solo el más importante.
+// Nodos abiertos (ámbito, o "ámbito|categoría"). Todo empieza CONTRAÍDO y solo se abre con un clic del usuario.
+// Se recuerda al cambiar de vista o de pestaña; una consulta nueva (otro período o filtros) vuelve a contraer todo.
 const abiertosSesion = new Map<string, boolean>()
+let consultaSesion = ''
+/** Vuelve a contraer todo (al cerrar sesión o en pruebas). */
+export const reiniciarJerarquia = () => { abiertosSesion.clear(); consultaSesion = '' }
 
-export function Jerarquia({ a, currency, catalogo, periodo }: { a: Aggregates; currency: string; catalogo: CatalogoItem[]; periodo: Periodo }) {
+export function Jerarquia({ a, currency, catalogo, periodo, consulta = '' }: { a: Aggregates; currency: string; catalogo: CatalogoItem[]; periodo: Periodo; consulta?: string }) {
   const [, rerender] = useState(0)
   const [hover, setHover] = useState<string | null>(null)
+  if (consulta !== consultaSesion) { consultaSesion = consulta; abiertosSesion.clear() }
   if (!a.jerarquia.length) return vacio
-  const abierto = (name: string, i: number) => abiertosSesion.get(name) ?? i === 0
-  const set = (name: string, v: boolean) => { abiertosSesion.set(name, v); rerender(x => x + 1) }
-  const todos = a.jerarquia.every((x, i) => abierto(x.name, i))
+  const abierto = (key: string, _i?: number) => abiertosSesion.get(key) === true
+  const set = (key: string, v: boolean) => { abiertosSesion.set(key, v); rerender(x => x + 1) }
+  const todos = a.jerarquia.every(x => abierto(x.name) && x.children.every(c => abierto(`${x.name}|${c.name}`)))
+  const setTodos = (v: boolean) => { a.jerarquia.forEach(x => { abiertosSesion.set(x.name, v); x.children.forEach(c => abiertosSesion.set(`${x.name}|${c.name}`, v)) }); rerender(n => n + 1) }
   const maxAmb = a.jerarquia[0].cents
 
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <Subtitulo titulo={`Jerarquía del gasto — ${periodo.nombre}`}>Ámbito → categoría → subcategoría. El porcentaje de cada nivel es sobre su nivel superior.</Subtitulo>
-        {a.jerarquia.length > 1 && (
-          <button type="button" onClick={() => a.jerarquia.forEach(x => set(x.name, !todos))}
+        {a.jerarquia.length > 0 && (
+          <button type="button" onClick={() => setTodos(!todos)}
             className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted transition hover:bg-bg hover:text-ink focus-visible:ring-2 focus-visible:ring-navy/40 outline-none">
             {todos ? <><ChevronsDownUp className="size-3.5" /> Contraer todo</> : <><ChevronsUpDown className="size-3.5" /> Expandir todo</>}
           </button>
@@ -147,7 +153,7 @@ export function Jerarquia({ a, currency, catalogo, periodo }: { a: Aggregates; c
             <li key={amb.name} onMouseEnter={() => setHover(amb.name)} onMouseLeave={() => setHover(null)}
               className={`rounded-2xl border transition ${hover === amb.name ? 'border-transparent shadow-md' : 'border-line'} ${dim ? 'opacity-60' : ''}`}
               style={hover === amb.name ? { boxShadow: `0 0 0 1.5px ${look.color}66, 0 6px 18px rgb(15 23 42 / 0.06)` } : undefined}>
-              <button type="button" aria-expanded={open} onClick={() => set(amb.name, !open)}
+              <button type="button" aria-expanded={open} aria-label={`${amb.name}: ${formatMoney(amb.cents, currency)}. ${open ? 'Contraer' : 'Expandir'}`} onClick={() => set(amb.name, !open)}
                 className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-navy/40">
                 <span className="grid size-9 shrink-0 place-items-center rounded-xl" style={{ background: `${look.color}1F`, color: look.color }}><look.Icon className="size-4" /></span>
                 <span className="min-w-0 flex-1">
@@ -168,10 +174,13 @@ export function Jerarquia({ a, currency, catalogo, periodo }: { a: Aggregates; c
                   {amb.children.map(cat => {
                     const cl = categoriaLook(cat.name, catalogo, amb.name)
                     const maxSub = cat.children[0]?.cents ?? 0
+                    const k = `${amb.name}|${cat.name}`, catOpen = abierto(k)
                     return (
-                      <li key={cat.name} className="group rounded-xl px-2 py-1.5 transition hover:bg-bg">
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
+                      <li key={cat.name} className="group rounded-xl transition hover:bg-bg">
+                        <button type="button" aria-expanded={catOpen} aria-label={`${cat.name}: ${formatMoney(cat.cents, currency)}. ${catOpen ? 'Contraer' : 'Expandir'}`} onClick={() => set(k, !catOpen)}
+                          className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-xl px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-navy/40">
                           <span className="flex min-w-0 items-center gap-2">
+                            <ChevronDown className={`size-3.5 shrink-0 text-muted transition-transform ${catOpen ? 'rotate-180' : '-rotate-90'}`} />
                             <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: `${cl.color}1A`, color: cl.color }}><cl.Icon className="size-3.5" /></span>
                             <span className="truncate font-medium text-ink" title={cat.name}>{cat.name}</span>
                             <span className="shrink-0 text-[11px] text-muted">{cat.count} mov.</span>
@@ -180,9 +189,9 @@ export function Jerarquia({ a, currency, catalogo, periodo }: { a: Aggregates; c
                             <span className="tabular font-semibold text-ink">{formatMoney(cat.cents, currency)}</span>
                             <span className="tabular ml-2 inline-block w-11 text-xs text-muted">{pct(cat.cents, amb.cents)}</span>
                           </span>
-                          <span className="col-span-2 mt-1 pl-8"><Barra value={cat.cents} max={maxCat} color={`${cl.color}CC`} /></span>
-                        </div>
-                        <ul className="mt-1.5 ml-3 space-y-1 border-l-2 pl-4 text-xs" style={{ borderColor: `${cl.color}40` }}>
+                          <span className="col-span-2 mt-1 pl-14"><Barra value={cat.cents} max={maxCat} color={`${cl.color}CC`} /></span>
+                        </button>
+                        {catOpen && <ul className="mt-0.5 mb-1.5 ml-5 space-y-1 border-l-2 pl-4 text-xs" style={{ borderColor: `${cl.color}40` }}>
                           {cat.children.map(s => (
                             <li key={s.name} className="grid grid-cols-[minmax(0,1fr)_2.5rem_auto] items-center gap-2 text-muted sm:grid-cols-[minmax(0,1fr)_8rem_auto]"
                               title={`${s.name}: ${formatMoney(s.cents, currency)} · ${pct(s.cents, cat.cents)} de ${cat.name} · ${s.count} mov.`}>
@@ -191,7 +200,7 @@ export function Jerarquia({ a, currency, catalogo, periodo }: { a: Aggregates; c
                               <span className="tabular whitespace-nowrap text-right">{formatMoney(s.cents, currency)} <span className="inline-block w-10 text-[11px]">{pct(s.cents, cat.cents)}</span></span>
                             </li>
                           ))}
-                        </ul>
+                        </ul>}
                       </li>
                     )
                   })}

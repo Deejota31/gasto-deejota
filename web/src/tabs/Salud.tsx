@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useAgregado } from '../lib/useAgregado'
-import { CalendarDays, HeartPulse, SlidersHorizontal } from 'lucide-react'
-import { formatDate, rangeLabel } from '../lib/dates'
+import { HeartPulse, SlidersHorizontal } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import SaludFinanciera from '../components/SaludFinanciera'
@@ -19,10 +18,9 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
   const data = store.data
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
-  const config = data?.config, gastos = data?.gastos
+  const gastos = data?.gastos
   // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
   const a = useAgregado(data, filters, today)
-  const fmt = config?.formato_fecha
   const activos = [...filters.ambitos, ...filters.categorias, ...filters.subcategorias.map(x => x.split(' › ').at(-1) ?? x), ...filters.medios, ...filters.tipos]
 
   return (
@@ -42,12 +40,6 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
               </h1>
               <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.</p>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-navy shadow-sm ring-1 ring-line" data-testid="salud-periodo">
-              <CalendarDays className="size-3.5" /> <span className="first-letter:uppercase">{rangeLabel(filters)}</span>
-              <span className="hidden font-normal text-muted sm:inline">· {formatDate(filters.desde, fmt)} – {formatDate(filters.hasta, fmt)}</span>
-            </span>
           </div>
         </div>
         {activos.length > 0 && (

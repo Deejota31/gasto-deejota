@@ -5,7 +5,7 @@ import {
 import { ChartNoAxesColumn } from 'lucide-react'
 import { formatMoney } from '../lib/money'
 import { formatDate } from '../lib/dates'
-import type { Aggregates, Item, SubItem } from '../lib/engine'
+import type { Aggregates, Item } from '../lib/engine'
 import { ambitoLook, type Look } from '../lib/visual'
 import type { CatalogoItem } from '../lib/types'
 import { Empty } from './ui'
@@ -197,6 +197,3 @@ export function BarList<T extends Item>({ items, total, currency, lookFor, selec
   )
 }
 
-export function SubLabel({ it }: { it: SubItem }) {
-  return <span className="flex min-w-0 flex-col leading-tight"><span className="truncate">{it.subcategoria}</span><span className="truncate text-[11px] font-normal text-muted">{it.categoria}</span></span>
-}

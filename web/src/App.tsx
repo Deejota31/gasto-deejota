@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, FileSpreadsheet, HeartPulse, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
@@ -58,6 +58,15 @@ export default function App({ api }: { api?: Api }) {
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [irATab])
+  // Las notificaciones se ubican debajo de la barra superior: nunca tapan el menú (que ahora va centrado).
+  const headerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
   const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') showToast('success', m) }
 
@@ -70,7 +79,7 @@ export default function App({ api }: { api?: Api }) {
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-10 border-b border-line bg-card/90 backdrop-blur">
+      <header ref={headerRef} className="sticky top-0 z-10 border-b border-line bg-card/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 xl:grid xl:grid-cols-[1fr_auto_1fr]">
           <div className="flex items-center gap-2">
             <span className="grid size-8 place-items-center rounded-xl bg-navy text-white"><Wallet className="size-4" /></span>

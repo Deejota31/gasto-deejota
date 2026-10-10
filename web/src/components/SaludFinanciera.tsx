@@ -379,10 +379,10 @@ function PanelPresupuesto({ p, comp, money }: { p: MiPresupuesto; comp: Compromi
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Stat label="Presupuesto mensual" value={money(p.presupuesto)} icon={Wallet} testid="pres-presupuesto" />
-          <Stat label="Gastos registrados" value={money(p.gastado)} hint={`${pctTxt(p.pctUsado)} utilizado`} icon={Receipt} tone={tono} testid="pres-gastado" />
+          <Stat label="Presupuesto consolidado" value={money(p.presupuesto)} icon={Wallet} testid="pres-presupuesto" />
+          <Stat label="Gastado del período" value={money(p.gastado)} hint={`${pctTxt(p.pctUsado)} utilizado`} icon={Receipt} tone={tono} testid="pres-gastado" />
           <Stat label="Compromisos pendientes" value={money(p.pendiente)} hint={`${pctTxt(p.pctComprometido)} comprometido`} icon={Repeat} tone={TONO.atencion} testid="pres-pendiente" />
-          <Stat label="Disponible presupuestario" value={money(p.disponible)} hint="Presupuesto − gastado" icon={PiggyBank} tone={p.disponible < 0 ? TONO.alerta : undefined} testid="pres-disponible" />
+          <Stat label="Disponible consolidado" value={money(p.disponible)} hint="Presupuesto consolidado − gastado" icon={PiggyBank} tone={p.disponible < 0 ? TONO.alerta : undefined} testid="pres-disponible" />
         </div>
       </div>
 

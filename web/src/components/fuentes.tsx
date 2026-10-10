@@ -6,6 +6,7 @@ import {
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
+import { COLORS } from '../lib/visual'
 import type { AppStore } from '../lib/store'
 import type { Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch, useDismiss } from './ui'
@@ -16,7 +17,7 @@ import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, Selec
  * y edita, no calcula por su cuenta.
  */
 
-const COLORES = ['#1E3A8A', '#16A085', '#84CC16', '#F59E0B', '#E8664F', '#8B7CF6', '#EC4899', '#0EA5E9', '#64748B', '#E25563']
+const COLORES = ['#1E3A8A', ...COLORS]
 const TONO = {
   ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
