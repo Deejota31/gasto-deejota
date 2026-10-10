@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
+import { useAgregado } from '../lib/useAgregado'
 import { CalendarDays, HeartPulse, SlidersHorizontal } from 'lucide-react'
-import { aggregate } from '../lib/engine'
-import { ratesFromConfig } from '../lib/money'
 import { formatDate, rangeLabel } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
@@ -18,14 +17,11 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
   const data = store.data
-  const base = data?.config.moneda || 'PEN'
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
-  const gastos = data?.gastos, config = data?.config, cajas = data?.cajas, presupuestos = data?.presupuestos
-  // Mismo motor que el Dashboard (presupuesto, cajas y ajustes mensuales); aquí solo se calcula al abrir la pestaña.
-  const a = useMemo(() => gastos && config && cajas && presupuestos ? aggregate(gastos, filters, {
-    base, rates: ratesFromConfig(config), today, cajas, presupuestos,
-  }) : null, [gastos, config, cajas, presupuestos, filters, base, today])
+  const config = data?.config, gastos = data?.gastos
+  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  const a = useAgregado(data, filters, today)
   const fmt = config?.formato_fecha
   const activos = [...filters.ambitos, ...filters.categorias, ...filters.subcategorias.map(x => x.split(' › ').at(-1) ?? x), ...filters.medios, ...filters.tipos]
 

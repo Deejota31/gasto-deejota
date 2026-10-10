@@ -1,18 +1,16 @@
 import { useState, type ReactNode } from 'react'
 import {
   Activity, Bell, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
-  Info, KeyRound, Link2, Loader2, Palette, Plus, RefreshCw, Save, Settings, ShieldCheck, Tags, Unplug, Wallet,
+  Info, KeyRound, Link2, Loader2, Palette, Plus, RefreshCw, Settings, ShieldCheck, Tags, Unplug, Wallet,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
-import type { Caja, FiltroCampo } from '../lib/types'
 import { saveConnection, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select, Switch } from '../components/ui'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.7.0'
-const FILTROS: FiltroCampo[] = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago']
+export const APP_VERSION = '1.8.0'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -138,18 +136,6 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
           <MediosEditor store={store} />
         </Card>
 
-        {/* C. Cajas y presupuestos */}
-        <Card title="Cajas y presupuestos" icon={<Wallet className="size-4 text-lima" />} className="lg:col-span-2">
-          <div className="grid gap-3 md:grid-cols-2">
-            {[...(store.data?.cajas ?? [])].sort((a, b) => a.orden - b.orden).map(c => (
-              <CajaRow key={c.id} caja={c} simbolo={(cfg.moneda || 'PEN') === 'PEN' ? 'S/' : cfg.moneda === 'USD' ? 'US$' : cfg.moneda} busy={store.pending.has(`caja:${c.id}`)}
-                onSave={next => store.track(`caja:${c.id}`, { pending: `Guardando ${next.nombre}…`, ok: `${next.nombre} guardada correctamente.`, error: `No se pudo guardar ${next.nombre}.` }, () => store.actions.saveCaja(next))} />
-            ))}
-            {!store.data?.cajas.length && <p className="text-sm text-muted">No hay cajas configuradas.</p>}
-          </div>
-          <p className="mt-3 text-[11px] text-muted">El presupuesto es mensual. La caja general es el total; las demás son reservas dentro de ella. Para cambiar solo un mes usa el lápiz de la caja en el Dashboard.</p>
-        </Card>
-
         {/* E. Datos */}
         <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />} className="lg:col-span-2">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -212,44 +198,6 @@ function ActionBody({ icon, title, desc, loading }: { icon: ReactNode; title: st
 }
 function Action({ onClick, disabled, ...b }: { icon: ReactNode; title: string; desc: string; loading?: boolean; disabled?: boolean; onClick: () => void }) {
   return <button type="button" className={ACTION_CLS} onClick={onClick} disabled={disabled || b.loading}><ActionBody {...b} /></button>
-}
-
-function CajaRow({ caja, busy, onSave, simbolo }: { caja: Caja; busy: boolean; onSave: (c: Caja) => void; simbolo: string }) {
-  const [c, setC] = useState(caja)
-  const [base, setBase] = useState(caja)
-  // Si la caja cambia en el servidor (guardado confirmado, "Actualizar"), se sincroniza solo si no estás editando.
-  if (caja !== base) { setBase(caja); if (JSON.stringify(c) === JSON.stringify(base)) setC(caja) }
-  const dirty = JSON.stringify(c) !== JSON.stringify(caja)
-  const general = caja.filtroCampo === 'Todos'
-  return (
-    <div className="rounded-xl border border-line p-3" style={{ borderLeft: `4px solid ${c.color}` }}>
-      <div className="flex items-center gap-2">
-        <input type="color" aria-label={`Color de ${caja.nombre}`} value={c.color} onChange={e => setC({ ...c, color: e.target.value })} className="size-8 shrink-0 cursor-pointer rounded-lg border border-line bg-card p-0.5" />
-        <input aria-label="Nombre" className={`${inputCls} font-semibold`} value={c.nombre} onChange={e => setC({ ...c, nombre: e.target.value })} />
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${general ? 'bg-primary-soft text-navy' : 'bg-bg text-muted'}`}>{general ? 'General' : 'Reserva'}</span>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <label className="text-[11px] text-muted">Presupuesto mensual
-          <span className="relative mt-1 block">
-            <span className="pointer-events-none absolute top-2 left-3 text-sm text-muted">{simbolo}</span>
-            <input aria-label="Presupuesto" className={`${inputCls} tabular pl-8`} type="number" min="0" step="0.01" value={c.presupuesto} onChange={e => setC({ ...c, presupuesto: Number(e.target.value) })} />
-          </span>
-        </label>
-        <label className="text-[11px] text-muted">Alcance
-          <span className="mt-1 block"><Select label="Alcance" value={c.filtroCampo} onChange={v => setC({ ...c, filtroCampo: v as FiltroCampo, filtroValor: v === 'Todos' ? '' : c.filtroValor })} options={FILTROS} /></span>
-        </label>
-        <label className="col-span-2 text-[11px] text-muted sm:col-span-1">Valor
-          <input aria-label="Valor del filtro" className={`${inputCls} mt-1`} disabled={c.filtroCampo === 'Todos'} value={c.filtroValor} placeholder={c.filtroCampo === 'Todos' ? 'Todos los gastos' : 'Ej. Auto'} onChange={e => setC({ ...c, filtroValor: e.target.value })} />
-        </label>
-      </div>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        {dirty && <button type="button" className="text-xs text-muted hover:text-ink" onClick={() => setC(caja)}>Descartar</button>}
-        <Button className="px-3 py-1.5 text-xs" variant={dirty ? 'primary' : 'outline'} disabled={!dirty || busy} loading={busy} onClick={() => onSave(c)} aria-label={`Guardar ${caja.nombre}`}>
-          <Save className="size-3.5" /> {busy ? 'Guardando…' : dirty ? 'Guardar cambios' : 'Sin cambios'}
-        </Button>
-      </div>
-    </div>
-  )
 }
 
 function MediosEditor({ store }: { store: AppStore }) {

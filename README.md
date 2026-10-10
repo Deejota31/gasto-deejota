@@ -28,6 +28,24 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.8.0
+
+| Punto | Qué cambió |
+|---|---|
+| Fuentes de dinero | Ilimitadas (General, Sodexo, Extra 1, Bonificación…): nombre, monto, moneda, color, recurrencia (**todos los meses** desde un mes, o **solo un mes**), mes de aplicación, medio de pago asociado opcional y estado. Botón **+ Nueva fuente** con validación (nombre único, monto ≥ 0, moneda permitida, mes válido) e ID fijo por formulario: doble clic o reintento no duplica. Guardar no bloquea la navegación. |
+| Presupuesto consolidado | Con al menos una fuente, **P = Σ aportes del período de las fuentes activas**; las subcajas siguen siendo reservas dentro de P. Sin fuentes, P sigue siendo la caja general (hojas anteriores funcionan igual). Ejemplo: 3,500 + 280 + 1,000 = 4,780; con S/ 500 gastados, disponible 4,280; reservas de 950 no cambian los 4,780. |
+| Por mes | Importes por mes en la hoja **FUENTES_MESES**: “solo este mes” o “desde este mes en adelante”. Editar un mes nunca toca los anteriores; un ingreso extraordinario no se arrastra. Se puede quitar el ajuste de un mes. |
+| Activar / desactivar | Interruptor ON/OFF en cada fuente. Antes de apagar una fuente que aporta o tiene gastos se muestra el impacto (presupuesto y disponible antes/después). La fuente queda guardada y nada se borra ni se reasigna; los gastos pagados con el medio de una fuente inactiva siguen descontando y se muestran en una **conciliación** aparte. |
+| Atribución | Cada gasto se atribuye a una sola fuente: la que tiene su medio de pago (p. ej. Sodexo) o la fuente principal (primera fuente libre activa con importe). Solo informa cuánto se usó de cada fuente; el total gastado no cambia. |
+| Pestaña Cajas | Orden: Fuentes de dinero → Presupuesto consolidado (total fuentes, total gastado, disponible, reservado, libre inicial, gastado fuera, saldo libre, % consumido) → Reservas / subcajas. Con muchas fuentes: búsqueda, filtro por estado, vista tarjetas/lista y “Ver las N fuentes”. Probado con 0, 2, 3, 5, 10 y 20 fuentes. |
+| Migración | No automática. Sin fuentes, la pestaña ofrece **Crear fuente General** con el presupuesto de la caja general y copia sus ajustes mensuales (ningún mes cambia); hace respaldo antes y es idempotente. **Sodexo no se convierte sola**: si su dinero no está incluido en tu presupuesto general, crea la fuente tú. Las hojas FUENTES y FUENTES_MESES se crean solas (con respaldo previo) al guardar la primera fuente. |
+| Configuración | Ya no muestra “Cajas y presupuestos” (solo visual: no se borró ninguna hoja ni dato). Todo se administra en Cajas. |
+| Coherencia | Dashboard, Cajas y Salud financiera arman el contexto del motor en un único lugar (`useAgregado`): mismas cifras. |
+| Menú | Orden: Dashboard, Gastos, Cajas, Categorías, Salud financiera, Configuración. Centrado en la barra. |
+
+### Despliegue de v1.8.0
+Pega el `Code.gs` nuevo y publica una **Nueva versión** de la implementación. Acciones nuevas: `saveFuente`, `saveFuenteMes`, `reorderFuentes`, `migrarGeneralAFuente`. La web se publica al fusionar en `main`.
+
 ## Novedades v1.7.0
 
 | Punto | Qué cambió |

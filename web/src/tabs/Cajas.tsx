@@ -1,17 +1,19 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useAgregado } from '../lib/useAgregado'
 import {
   AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Layers, LayoutGrid, List, Lock, MoreHorizontal, Pencil, Plus, Power, Search,
   Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info,
 } from 'lucide-react'
-import { aggregate, cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
-import { formatMoney, ratesFromConfig } from '../lib/money'
-import { formatDate, rangeLabel, singleMonth } from '../lib/dates'
+import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
+import { formatMoney } from '../lib/money'
+import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { sortMedios } from '../lib/visual'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal, cajaIcon } from '../components/cajas'
+import { FuentesSeccion } from '../components/fuentes'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from '../components/ui'
 
 type Alcance = Exclude<FiltroCampo, 'Todos'>
@@ -40,10 +42,9 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   const data = store.data
   const base = data?.config.moneda || 'PEN'
   const money = useCallback((c: number) => formatMoney(c, base), [base])
-  const gastos = data?.gastos, config = data?.config, cajas = data?.cajas, presupuestos = data?.presupuestos
-  const a = useMemo(() => gastos && config && cajas && presupuestos ? aggregate(gastos, filters, {
-    base, rates: ratesFromConfig(config), today, cajas, presupuestos,
-  }) : null, [gastos, config, cajas, presupuestos, filters, base, today])
+  const cajas = data?.cajas
+  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  const a = useAgregado(data, filters, today)
   const mes = singleMonth(filters.desde, filters.hasta)
   const [q, setQ] = useState('')
   const [alcance, setAlcance] = useState<'todos' | Alcance>('todos')
@@ -100,22 +101,23 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
 
   return (
     <div className="space-y-4">
-      <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length} onNueva={() => setForm({ caja: null })} />
+      <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length} />
+      <FuentesSeccion store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
       <CajaGeneral c={c} money={money} periodo={rangeLabel(filters)} onAjustar={() => c.general && setAjustar({ caja: c.general, asignado: c.presupuesto })} />
 
-      <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Subcajas">
+      <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-ink">Subcajas <span className="rounded-full bg-bg px-2 py-0.5 text-xs font-semibold text-muted">{items.length}</span>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-ink">Reservas / subcajas <span className="rounded-full bg-bg px-2 py-0.5 text-xs font-semibold text-muted">{items.length}</span>
               <InfoTooltip title="Cómo se reparten los gastos" align="left">
                 <p>Cada gasto cae en una sola subcaja: la de alcance más específico. Prioridad: <b>Subcategoría &gt; Categoría &gt; Ámbito &gt; Medio de pago</b>. A igual nivel, gana la primera en tu orden manual.</p>
                 <p>Ejemplo: con “Familia” (ámbito) y “Bebé” (categoría), un gasto de Bebé va a Bebé. Lo que no cae en ninguna va a “gastado fuera de subcajas”.</p>
                 <p>Una caja inactiva no reserva dinero ni toma gastos. Eliminar una caja no borra ningún gasto.</p>
               </InfoTooltip>
             </h2>
-            <p className="text-xs text-muted">Reservas dentro de la caja general por ámbito, categoría, subcategoría o medio de pago.</p>
+            <p className="text-xs text-muted">Apartan parte del presupuesto consolidado por ámbito, categoría, subcategoría o medio de pago. No suman dinero.</p>
           </div>
-          <Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Nueva caja</Button>
+          <Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Nueva subcaja</Button>
         </div>
 
         {/* Barra de búsqueda, filtros y orden: pensada para muchas cajas */}
@@ -178,9 +180,10 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
 
 /* ============================== Cabecera y caja general ============================== */
 
-function Cabecera({ c, money, filters, setFilters, today, n, onNueva }: {
-  c: CajasResumen; money: (n: number) => string; filters: Filters; setFilters: (f: Filters) => void; today: string; n: number; onNueva: () => void
+function Cabecera({ c, money, filters, setFilters, today, n }: {
+  c: CajasResumen; money: (n: number) => string; filters: Filters; setFilters: (f: Filters) => void; today: string; n: number
 }) {
+  const nf = c.fuentes.lista.length
   return (
     <div className="relative overflow-hidden rounded-3xl border border-line p-5 sm:p-6"
       style={{ background: 'radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, #F59E0B 12%, var(--card)) 0%, var(--card) 45%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, #4F7BE8 12%, var(--card)) 0%, transparent 60%)' }}>
@@ -189,17 +192,16 @@ function Cabecera({ c, money, filters, setFilters, today, n, onNueva }: {
           <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-[#B7791F] shadow-sm ring-1 ring-line"><Wallet className="size-6" /></span>
           <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight text-ink">Cajas y presupuestos</h1>
-            <p className="mt-0.5 text-sm text-muted">Administra tu presupuesto general y distribuye reservas por ámbito, categoría o subcategoría.</p>
+            <p className="mt-0.5 text-sm text-muted">Tus fuentes de dinero forman el presupuesto consolidado; las subcajas reservan partes de él.</p>
           </div>
         </div>
-        <Button onClick={onNueva}><Plus className="size-4" /> Nueva caja</Button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className="w-full sm:w-72"><PeriodPicker value={filters} today={today} onChange={p => setFilters({ ...filters, ...p })} /></div>
-        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {n} subcaja{n === 1 ? '' : 's'}</span>
+        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fuente{nf === 1 ? '' : 's'} · {n} subcaja{n === 1 ? '' : 's'}</span>
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="cajas-resumen">
-        <Mini label="Presupuesto total" value={c.presupuesto ? money(c.presupuesto) : 'Sin definir'} />
+        <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fuentes' ? money(c.presupuesto) : 'Sin definir'} />
         <Mini label="Reservado en subcajas" value={money(c.reservado)} tone="#6D5DD3" />
         <Mini label="Libre inicial" value={c.presupuesto ? money(c.libreInicial) : '—'} tone={c.libreInicial < 0 ? TONO.alerta.fg : undefined} />
         <Mini label="Gastado fuera de cajas" value={money(c.gastadoLibre)} tone="#E8664F" />
@@ -222,30 +224,37 @@ function CajaGeneral({ c, money, periodo, onAjustar }: { c: CajasResumen; money:
   const seg = (v: number) => `${P ? Math.max(0, Math.min(100, (v / P) * 100)) : 0}%`
   const reservaRestante = Math.max(0, c.reservado - c.gastadoSubcajas + c.excesoSubcajas)
   const tono = c.pct === null ? TONO.neutro : c.pct >= 100 ? TONO.alerta : c.pct >= 70 ? TONO.atencion : TONO.ok
+  const fuentes = c.origen === 'fuentes'
+  const def = P > 0 || fuentes
+  const gastado = c.gastadoSubcajas + c.gastadoLibre
   return (
-    <section className="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)]" aria-label="Caja general" data-testid="caja-general">
+    <section className="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)]" aria-label="Presupuesto consolidado" data-testid="caja-general">
       <div className="flex flex-wrap items-center gap-3 bg-[linear-gradient(120deg,#294690,#4F6FC8)] px-5 py-4 text-white">
         <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/15"><Lock className="size-5" /></span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold">{c.general?.nombre ?? 'Caja general'}</p>
-          <p className="truncate text-xs text-white/75">Presupuesto principal · {periodo}. Las subcajas son parte de este dinero, no se suman.</p>
+          <p className="truncate text-base font-semibold">Presupuesto consolidado</p>
+          <p className="truncate text-xs text-white/75">{fuentes
+            ? `Suma de ${c.fuentes.activas} fuente${c.fuentes.activas === 1 ? '' : 's'} activa${c.fuentes.activas === 1 ? '' : 's'}`
+            : `Desde ${c.general?.nombre ?? 'la caja general'}`} · {periodo}. Las subcajas son parte de este dinero, no se suman.</p>
         </div>
         <div className="text-right">
           <p className="text-[11px] text-white/75">Saldo libre actual</p>
-          <p className="tabular text-2xl font-bold" data-testid="saldo-libre">{P ? money(c.saldoLibre) : 'Sin definir'}</p>
+          <p className="tabular text-2xl font-bold" data-testid="saldo-libre">{def ? money(c.saldoLibre) : 'Sin definir'}</p>
         </div>
-        {c.general && <button type="button" onClick={onAjustar} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-2 text-xs font-medium hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
+        {c.general && !fuentes && <button type="button" onClick={onAjustar} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-2 text-xs font-medium hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
       </div>
-      <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-4" data-testid="consolidado">
         {([
-          ['Presupuesto', P ? money(P) : '—', undefined, 'Monto total de la caja general en el período (suma los meses si abarca varios).'],
+          [fuentes ? 'Total fuentes' : 'Presupuesto', def ? money(P) : '—', undefined, fuentes ? 'Suma de lo que aportan las fuentes activas en el período.' : 'Monto total de la caja general en el período (suma los meses si abarca varios).'],
+          ['Total gastado', money(gastado), '#E8664F', 'Todos los gastos activos del período, cada uno una sola vez.'],
+          ['Disponible', def ? money(c.disponible) : '—', c.disponible < 0 ? TONO.alerta.fg : TONO.ok.fg, 'Presupuesto consolidado − total gastado.'],
           ['Reservado en subcajas', money(c.reservado), '#6D5DD3', 'Suma de lo asignado a las subcajas activas.'],
-          ['Libre inicial', P ? money(c.libreInicial) : '—', undefined, 'Presupuesto − reservado: lo que no apartaste para ninguna subcaja.'],
+          ['Libre inicial', def ? money(c.libreInicial) : '—', undefined, 'Presupuesto − reservado: lo que no apartaste para ninguna subcaja.'],
           ['Gastado fuera de subcajas', money(c.gastadoLibre), '#E8664F', 'Gastos que no pertenecen a ninguna subcaja activa.'],
-          ['Saldo libre actual', P ? money(c.saldoLibre) : '—', c.saldoLibre < 0 ? TONO.alerta.fg : TONO.ok.fg, 'Libre inicial − gastado fuera de subcajas − excesos de subcajas.'],
+          ['Saldo libre actual', def ? money(c.saldoLibre) : '—', c.saldoLibre < 0 ? TONO.alerta.fg : TONO.ok.fg, 'Libre inicial − gastado fuera de subcajas − excesos de subcajas.'],
           ['Consumido', c.pct === null ? '—' : `${c.pct}%`, tono.fg, 'Todo lo gastado del período ÷ presupuesto.'],
         ] as const).map(([l, v, color, ayuda]) => (
-          <div key={l} className="bg-card px-4 py-3" title={ayuda}>
+          <div key={l} className="bg-card px-4 py-3" title={ayuda} data-testid={`cons-${l.toLowerCase().replace(/\s+/g, '-')}`}>
             <p className="text-[11px] text-muted">{l}</p>
             <p className="tabular text-sm font-bold" style={{ color: color ?? 'var(--ink)' }}>{v}</p>
           </div>
@@ -265,7 +274,7 @@ function CajaGeneral({ c, money, periodo, onAjustar }: { c: CajasResumen; money:
             <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado/25" /> Reservado sin usar <b className="tabular text-ink">{money(reservaRestante)}</b></span>
             <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-bg ring-1 ring-line" /> Libre</span>
           </div>
-          {c.sobreasignado && <p className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }}><AlertTriangle className="size-4" /> Las reservas de subcajas ({money(c.reservado)}) superan el presupuesto general.</p>}
+          {c.sobreasignado && <p className="mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }}><AlertTriangle className="size-4" /> Las reservas de subcajas ({money(c.reservado)}) superan el presupuesto consolidado.</p>}
         </div>
       )}
     </section>
@@ -499,7 +508,7 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
 
   return (
     <Modal open onClose={onClose} size="md" title={editar ? `Editar ${caja!.nombre}` : 'Nueva caja'} icon={<Wallet className="size-5" />}
-      subtitle="Una reserva dentro de tu caja general que junta sola los gastos de su alcance."
+      subtitle="Una reserva dentro de tu presupuesto consolidado que junta sola los gastos de su alcance."
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : 'Crear caja'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>

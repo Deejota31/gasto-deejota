@@ -44,7 +44,7 @@ export function CajaModal({ store, target, cajas, mes, money, onClose }: {
   const otrasReservas = cajas.reservado - (esGeneral ? 0 : target.asignado)
   const aviso = !Number.isFinite(n) ? '' : esGeneral
     ? cents < cajas.reservado ? `Las reservas de subcajas (${money(cajas.reservado)}) superarían este presupuesto.` : ''
-    : otrasReservas + cents > cajas.presupuesto ? `Con este monto las reservas sumarían ${money(otrasReservas + cents)}, más que la caja general (${money(cajas.presupuesto)}).` : ''
+    : otrasReservas + cents > cajas.presupuesto ? `Con este monto las reservas sumarían ${money(otrasReservas + cents)}, más que el presupuesto consolidado (${money(cajas.presupuesto)}).` : ''
 
   // No bloquea: valida, cierra y la escritura sigue en segundo plano con su notificación de resultado.
   function save() {
@@ -56,7 +56,7 @@ export function CajaModal({ store, target, cajas, mes, money, onClose }: {
   }
   return (
     <Modal open onClose={onClose} size="sm" title={`Ajustar ${target.caja.nombre}`} icon={<Wallet className="size-5" />}
-      subtitle={esGeneral ? 'Presupuesto mensual total' : 'Reserva mensual dentro de la caja general'}
+      subtitle={esGeneral ? 'Presupuesto mensual total' : 'Reserva mensual dentro del presupuesto consolidado'}
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>Guardar</Button></>}>
       <div className="space-y-3">
         <Field label={esGeneral ? 'Presupuesto mensual' : 'Monto asignado'} htmlFor="caja-monto">

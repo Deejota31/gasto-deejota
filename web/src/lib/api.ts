@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -125,6 +125,16 @@ const loteSchema = z.object({
 // [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?] — antes de v1.7 llegan solo 7.
 const cajaRow = z.tuple([str, str, z.number(), str, str, str, z.number()]).rest(z.union([str, z.number(), z.boolean()]))
 
+// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn]
+const fuenteRow = z.tuple([str, str, z.number(), str, str, str, z.boolean(), z.number(), str, str, str, str, str])
+const fuenteMesRow = z.tuple([str, str, z.number(), str])
+const toFuente = (r: z.infer<typeof fuenteRow>): Fuente => ({
+  id: r[0], nombre: r[1], monto: r[2], moneda: r[3] || 'PEN', color: r[4] || '#1e3a8a', icono: r[5], activo: r[6], orden: r[7],
+  recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12],
+})
+const toFuenteMes = (r: z.infer<typeof fuenteMesRow>): FuenteMes => ({ fuenteId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
+export type FuenteInput = Omit<Fuente, 'creadoEn' | 'actualizadoEn'>
+
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
@@ -137,6 +147,8 @@ const dataSchema = z.object({
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
   vinculos: z.array(z.tuple([str, str])).optional(),
   revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
+  fuentes: z.array(fuenteRow).optional(),
+  fuentesMeses: z.array(fuenteMesRow).optional(),
 })
 
 const ESTADOS_REVISION: readonly string[] = ['legitimo', 'pendiente', 'duplicado']
@@ -204,6 +216,8 @@ export function createApi(t: Transport) {
           ordenGastos: d.ordenGastos ?? [],
           vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
+          fuentes: (d.fuentes ?? []).map(toFuente),
+          fuentesMeses: (d.fuentesMeses ?? []).map(toFuenteMes),
         }
       }).finally(() => { inflight = null })
       return inflight
@@ -238,6 +252,22 @@ export function createApi(t: Transport) {
     async savePresupuesto(p: Presupuesto): Promise<Presupuesto> {
       const [periodo, cajaId, monto] = parse(z.tuple([str, str, z.number()]), await t('savePresupuesto', p))
       return { periodo, cajaId, monto }
+    },
+    /** Crea o edita una fuente (upsert por ID: reintentar o doble clic no duplica). */
+    async saveFuente(f: FuenteInput): Promise<Fuente> {
+      return toFuente(parse(fuenteRow, await t('saveFuente', f)))
+    },
+    /** Importe de una fuente para un mes (o desde un mes). quitar = vuelve al importe habitual. */
+    async saveFuenteMes(m: FuenteMes, quitar = false): Promise<void> {
+      await t('saveFuenteMes', { ...m, ...(quitar ? { quitar: true } : {}) })
+    },
+    async reorderFuentes(ids: string[]): Promise<void> {
+      await t('reorderFuentes', { ids })
+    },
+    /** Crea la fuente General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
+    async migrarGeneralAFuente() {
+      const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fuente: fuenteRow.optional(), ajustes: z.array(fuenteMesRow).optional() }), await t('migrarGeneralAFuente', {}))
+      return { creada: r.creada, meses: r.meses, fuente: r.fuente ? toFuente(r.fuente) : null, ajustes: (r.ajustes ?? []).map(toFuenteMes) }
     },
     async saveConfig(clave: string, valor: string): Promise<void> {
       await t('saveConfig', { clave, valor })

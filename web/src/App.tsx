@@ -24,9 +24,9 @@ const CajasTab = lazy(() => import('./tabs/Cajas'))
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'gastos', label: 'Gastos', icon: Receipt },
-  { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
   { id: 'cajas', label: 'Cajas', icon: Boxes },
   { id: 'categorias', label: 'Categorías', icon: Tags },
+  { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
   { id: 'config', label: 'Configuración', icon: Settings },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -71,20 +71,23 @@ export default function App({ api }: { api?: Api }) {
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-10 border-b border-line bg-card/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 xl:grid xl:grid-cols-[1fr_auto_1fr]">
           <div className="flex items-center gap-2">
             <span className="grid size-8 place-items-center rounded-xl bg-navy text-white"><Wallet className="size-4" /></span>
             <span className="font-semibold whitespace-nowrap text-ink">Gasto <span className="text-turquesa">Deejota</span></span>
           </div>
-          <nav className="order-last -mx-1 flex w-full gap-1 overflow-x-auto sm:order-none sm:mx-0 sm:w-auto" aria-label="Secciones">
+          {/* Centrado: en pantallas anchas va al medio de la barra; en las demás ocupa su propia fila, centrada si cabe y desplazable si no. */}
+          <nav className="order-last -mx-1 flex w-full overflow-x-auto xl:order-none xl:mx-0 xl:w-auto" aria-label="Secciones">
+            <div className="mx-auto flex w-max gap-1 px-1">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button key={id} onClick={() => irATab(id)} aria-current={tab === id ? 'page' : undefined}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${tab === id ? 'bg-navy text-white dark:text-[#0E1525]' : 'text-muted hover:bg-bg hover:text-ink'}`}>
                 <Icon className="size-4" />{label}
               </button>
             ))}
+            </div>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 xl:justify-self-end">
             <button onClick={() => store.refresh()} disabled={store.loading} aria-label="Actualizar datos" title={store.lastSync ? `Última sincronización ${store.lastSync.toLocaleTimeString('es-PE')}` : 'Actualizar'}
               className="rounded-lg p-2 text-muted hover:bg-bg disabled:opacity-60">
               <RefreshCw className={`size-4 ${store.loading ? 'animate-spin' : ''}`} />
