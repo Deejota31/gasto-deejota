@@ -48,6 +48,7 @@ test('cada KPI tiene su icono de información con explicación', async ({ page }
     const btn = page.getByRole('button', { name: `Información: ${l}`, exact: true })
     await btn.click()
     await expect(page.getByRole('tooltip')).toBeVisible()
+    await page.mouse.move(0, 0) // que el puntero no reabra otro ⓘ al moverse el contenido
     await page.keyboard.press('Escape')
     await expect(page.getByRole('tooltip')).toHaveCount(0)
   }
@@ -534,7 +535,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
   })
 })
 
-test('plantillas con Apps Script caído: error rojo y "Abrir formulario" conserva lo escrito', async ({ page }) => {
+test('plantillas con Apps Script caído: el formulario sigue abierto con el error y lo escrito; reintentar no duplica', async ({ page }) => {
   await page.goto('/?demo=60&falla=1')
   await expect(kpi(page, 'Total gastado')).toContainText('S/')
   await page.getByRole('button', { name: 'Gastos mensuales' }).click()
@@ -543,13 +544,20 @@ test('plantillas con Apps Script caído: error rojo y "Abrir formulario" conserv
   await m.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Suscripciones', exact: true }).click()
   await m.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio', { name: 'Spotify', exact: true }).click()
   await m.getByLabel('Descripción').fill('spotify familiar')
+  await m.getByLabel('Monto predeterminado').fill('25.90')
   await m.getByRole('button', { name: 'Guardar plantilla' }).click()
-  const err = page.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })
-  await expect(err).toBeVisible()
+  // no hay éxito anticipado: el error se ve dentro del formulario, que sigue abierto con lo escrito
+  await expect(m.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Plantilla creada correctamente.' })).toHaveCount(0)
+  await expect(m.getByLabel('Descripción')).toHaveValue('Spotify Familiar')
+  await expect(m.getByLabel('Monto predeterminado')).toHaveValue('25.90')
+  await expect(m.getByRole('radio', { name: 'Spotify', exact: true })).toHaveAttribute('aria-checked', 'true')
+  const c0 = await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla ?? 0)
+  await m.getByRole('button', { name: 'Guardar plantilla' }).click()        // reintento con el mismo ID
+  await expect(m.getByRole('alert').filter({ hasText: 'No se pudo crear la plantilla.' })).toBeVisible()
+  expect(await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls.savePlantilla)).toBe(c0 + 1)
+  await m.getByRole('button', { name: 'Volver' }).click()
   await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(11) // no aparece como creada
-  await err.getByRole('button', { name: 'Abrir formulario' }).click()
-  await expect(dialog(page).getByLabel('Descripción')).toHaveValue('Spotify Familiar')
-  await expect(dialog(page).getByRole('radio', { name: 'Spotify', exact: true })).toHaveAttribute('aria-checked', 'true')
 })
 
 // ───────────────────────────── v1.4 ─────────────────────────────
@@ -652,6 +660,7 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     await expect(dialog(page).getByText('Gastos mensuales', { exact: true }).first()).toBeVisible()
     await page.keyboard.press('Escape')
+    await page.getByLabel('Registros por página').selectOption('50')
     await page.getByRole('button', { name: /Orden personalizado/ }).click()
     const lista = page.getByRole('list', { name: 'Movimientos' })
     const subir = lista.getByRole('button', { name: /^Subir / })
@@ -659,7 +668,7 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     const n0 = await nombres()
     expect(n0.length).toBeGreaterThan(2)
     const c0 = await calls(page)
-    await lista.getByRole('button', { name: `Subir ${n0[2]}` }).click()
+    await subir.nth(2).click()
     await expect.poll(nombres).toEqual([n0[0], n0[2], n0[1], ...n0.slice(3)])
     expect(((await calls(page)).reorderGastos ?? 0) - (c0.reorderGastos ?? 0)).toBe(1)
     // con una búsqueda activa el orden manual se bloquea
@@ -700,4 +709,134 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     await expect(page.getByRole('tab', { name: 'Jerarquía' })).toHaveAttribute('aria-selected', 'true')
     expect(errores).toEqual([])
   })
+})
+
+// ───────────────────────────── v1.5 ─────────────────────────────
+test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
+  const valor = (page: Page, id: string) => page.getByTestId(id).innerText().then(money)
+
+  test('compromisos: pagar desde la plantilla baja lo pendiente sin doble conteo en el disponible', async ({ page }) => {
+    await page.getByRole('tab', { name: /Compromisos/ }).click()
+    const lista = page.getByRole('list', { name: 'Compromisos' })
+    await expect(lista.getByTestId('compromiso').filter({ hasText: 'Luz' })).toContainText('Cubierto')
+    await expect(lista.getByTestId('compromiso').filter({ hasText: 'Internet' })).toContainText('Parcial')
+    const pend0 = await valor(page, 'comp-pendiente')
+    await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
+    const gastado0 = await valor(page, 'pres-gastado'), tras0 = await valor(page, 'pres-tras'), pres = await valor(page, 'pres-presupuesto')
+    expect(tras0).toBeCloseTo(pres - gastado0 - pend0, 2)
+    // pagar los S/ 50 que faltan de Internet desde "Usar" (monto temporal: la plantilla sigue en 100)
+    await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
+    await dialog(page).getByRole('button', { name: 'Usar plantilla Internet' }).click()
+    const g = dialog(page)
+    await expect(g.getByTestId('vinculo-plantilla')).toBeVisible()
+    await expect(g.getByLabel('Monto', { exact: true })).toHaveValue('100')
+    await g.getByLabel('Monto', { exact: true }).fill('50')
+    await g.getByRole('button', { name: 'Registrar gasto' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible()
+    await expect.poll(() => valor(page, 'pres-gastado')).toBeCloseTo(gastado0 + 50, 2)
+    expect(await valor(page, 'pres-pendiente')).toBeCloseTo(pend0 - 50, 2)
+    expect(await valor(page, 'pres-tras')).toBeCloseTo(tras0, 2)          // no se descuenta dos veces
+    await page.getByRole('tab', { name: /Compromisos/ }).click()
+    await expect(lista.getByTestId('compromiso').filter({ hasText: 'Internet' })).toContainText('Cubierto')
+    // la plantilla conserva su monto predeterminado
+    await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
+    await expect(dialog(page).getByLabel('Monto de Internet')).toHaveValue('100.00')
+  })
+
+  test('marcar una plantilla como compromiso y asociar a mano un movimiento existente', async ({ page }) => {
+    await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
+    const m = dialog(page)
+    await m.getByRole('button', { name: 'Más acciones de Spotify' }).click()
+    await m.getByRole('menuitem', { name: 'Editar' }).click()
+    await expect(m.getByRole('switch', { name: 'Es un compromiso mensual' })).toHaveAttribute('aria-checked', 'false')
+    await m.getByRole('switch', { name: 'Es un compromiso mensual' }).click()
+    await m.getByRole('button', { name: 'Guardar cambios' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Plantilla actualizada correctamente.' })).toBeVisible()
+    await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem').filter({ hasText: 'Spotify' })).toContainText('Compromiso')
+    await page.keyboard.press('Escape')
+    await page.getByRole('tab', { name: /Compromisos/ }).click()
+    const spotify = page.getByRole('list', { name: 'Compromisos' }).getByTestId('compromiso').filter({ hasText: 'Spotify' })
+    await expect(spotify).toContainText('Pendiente')
+    await spotify.getByRole('button', { name: 'Asociar un movimiento a Spotify' }).click()
+    await dialog(page).getByRole('list', { name: 'Movimientos disponibles' }).getByRole('button', { name: 'Asociar' }).first().click()
+    await expect(page.getByRole('status').filter({ hasText: 'Movimiento asociado a Spotify' })).toBeVisible()
+    await expect(spotify.getByRole('button', { name: /^Quitar vínculo/ })).toHaveCount(1)
+  })
+
+  test('salud de datos: Propina Madre aparece como coincidencia, se marca legítima y no se elimina nada', async ({ page }) => {
+    const total0 = await total(page)
+    await page.getByRole('tab', { name: /Calidad de datos/ }).click()
+    const indice0 = Number(await page.getByTestId('indice-calidad').innerText().then(t => t.split('/')[0]))
+    await page.getByRole('button', { name: /^Revisar datos/ }).click()
+    const grupo = dialog(page).getByTestId('grupo-similar').filter({ hasText: 'Propina Madre' })
+    await expect(grupo).toContainText('Se encontraron 3 movimientos similares')
+    await expect(grupo.getByTestId('estado-grupo')).toHaveText('Sin revisar')
+    const c0 = await calls(page)
+    await grupo.getByRole('button', { name: 'Son legítimos' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Coincidencia marcada como legítima.' })).toBeVisible()
+    await expect(grupo.getByTestId('estado-grupo')).toHaveText('Legítimos')
+    expect(((await calls(page)).saveRevision ?? 0) - (c0.saveRevision ?? 0)).toBe(1)
+    // la clasificación antigua "Cuidado Darielita" se reconoce como histórica (no inválida)
+    await expect(dialog(page).getByText(/clasificación\(es\) histórica\(s\) reconocida\(s\)/)).toBeVisible()
+    await page.keyboard.press('Escape')
+    expect(await total(page)).toBeCloseTo(total0, 2)                     // los tres registros siguen sumando
+    expect(Number(await page.getByTestId('indice-calidad').innerText().then(t => t.split('/')[0]))).toBe(indice0) // una coincidencia legítima no penaliza
+  })
+
+  test('evolución: compara tramos equivalentes y muestra ahorro como simulación', async ({ page }) => {
+    await page.getByRole('tab', { name: /Evolución/ }).click()
+    await expect(page.getByTestId('evo-rangos')).toContainText('contra del')
+    await page.getByRole('radio', { name: 'Subcategoría' }).click()
+    await expect(page.getByText('Simulación', { exact: true })).toBeVisible()
+  })
+
+  for (const [nombre, vp] of [['iPhone SE', { width: 320, height: 568 }], ['iPhone moderno', { width: 390, height: 844 }], ['Android', { width: 412, height: 915 }], ['tablet', { width: 768, height: 1024 }], ['escritorio', { width: 1280, height: 800 }]] as const) {
+    test(`responsive ${nombre}: Fecha y Tipo uniformes, registrar sin obstrucciones y acciones de plantillas centradas`, async ({ page }) => {
+      await page.setViewportSize(vp)
+      const sinScrollH = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
+      await expect.poll(sinScrollH).toBe(true) // tras el reacomodo de los gráficos al nuevo ancho
+      // Nuevo gasto
+      await page.getByRole('button', { name: 'Nuevo gasto' }).first().click()
+      const d = dialog(page)
+      const fecha = d.locator('#gasto-fecha'), tipo = d.locator('#gasto-tipo')
+      const [bf, bt] = [await fecha.boundingBox(), await tipo.boundingBox()]
+      expect(Math.abs(bf!.height - bt!.height)).toBeLessThan(1)
+      const estilo = (l: typeof fecha) => l.evaluate(e => { const c = getComputedStyle(e); return [c.borderTopWidth, c.borderRadius, c.fontSize, c.paddingLeft].join('|') })
+      expect(await estilo(fecha)).toBe(await estilo(tipo))
+      if (vp.width < 360) expect(bt!.y).toBeGreaterThan(bf!.y + bf!.height - 1)   // apilados en pantallas muy angostas
+      else expect(Math.abs(bf!.y - bt!.y)).toBeLessThan(1)                          // misma fila
+      await fecha.fill('2026-10-03')
+      await expect(fecha).toHaveValue('2026-10-03')
+      await expect(d.getByText('03/10/2026')).toBeVisible()                         // formato de Configuración
+      await tipo.selectOption('Fijo')
+      await d.getByRole('radio', { name: 'Personal', exact: true }).click()
+      await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Alimentación', exact: true }).click()
+      await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio', { name: 'Almuerzo', exact: true }).click()
+      await d.getByLabel('Monto', { exact: true }).fill('12')
+      await d.getByRole('radiogroup', { name: 'Medio de pago' }).getByRole('radio', { name: 'Yape', exact: true }).click()
+      await d.getByLabel('Descripción').focus()
+      const registrar = d.getByRole('button', { name: 'Registrar gasto' })
+      await expect(registrar).toBeInViewport()
+      expect(await d.evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true)
+      await registrar.click()
+      await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible()
+      // Gastos mensuales: grupo de acciones centrado en móvil, a la derecha en escritorio
+      await page.getByRole('button', { name: 'Gastos mensuales' }).first().click()
+      const filas = dialog(page).getByRole('list', { name: 'Plantillas' }).getByRole('listitem')
+      await expect(filas).toHaveCount(11)
+      const medidas = await filas.evaluateAll(lis => lis.map(li => {
+        const g = li.querySelector('[data-testid="acciones-plantilla"]')!
+        const r = li.getBoundingClientRect(), kids = [...g.children].map(c => c.getBoundingClientRect()).filter(k => k.width > 0)
+        const izq = Math.min(...kids.map(k => k.left)), der = Math.max(...kids.map(k => k.right))
+        return { centro: (izq + der) / 2, centroFila: (r.left + r.right) / 2, dentro: izq >= r.left && der <= r.right, der, derFila: r.right,
+          alturas: [...new Set(kids.map(k => Math.round(k.height)))] }
+      }))
+      for (const x of medidas) {
+        expect(x.dentro).toBe(true)
+        if (vp.width < 768) { expect(Math.abs(x.centro - x.centroFila)).toBeLessThan(3); expect(x.alturas).toHaveLength(1) }
+        else expect(x.derFila - x.der).toBeLessThan(20)
+      }
+      await expect.poll(sinScrollH).toBe(true)
+    })
+  }
 })

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createApi, httpTransport, type Api, type Connection, type GastoInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
-import type { AppData, Caja, CatalogoItem, Gasto, Medio, Plantilla, Presupuesto } from './types'
+import type { AppData, Caja, CatalogoItem, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { sortCatalogo } from './orden'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
@@ -10,6 +10,12 @@ import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 // El orden personalizado de Gastos se separa de `data`: reordenar no debe recalcular KPIs ni gráficos.
 const normalize = (d: AppData): AppData => { const { ordenGastos: _o, ...rest } = d; return { ...rest, catalogo: sortCatalogo(d.catalogo) } }
 const ordenMap = (d: AppData | null) => new Map((d?.ordenGastos ?? []).map(([id, o]) => [id.toLowerCase(), o]))
+/** Vínculos gasto → plantilla: upsert por ID de gasto; plantilla vacía = sin vínculo. */
+const upsertVinculos = (prev: [string, string][] | undefined, pares: [string, string][]) => {
+  const m = new Map((prev ?? []).map(([g, p]) => [g.toLowerCase(), p]))
+  for (const [g, p] of pares) { if (p) m.set(g.toLowerCase(), p); else m.delete(g.toLowerCase()) }
+  return [...m.entries()]
+}
 const aplicarRangos = (m: Map<string, number>, ids: string[]) => { const n = new Map(m); ids.forEach((id, i) => n.set(id.toLowerCase(), i + 1)); return n }
 const aplicarOrden = (items: Plantilla[], ids: string[]) => {
   const byId = new Map(items.map(x => [x.id, x]))
@@ -52,7 +58,11 @@ export function buildApi(conn: Connection | null): Api {
   const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 10000))
   const falla = q.get('falla') === '1'
   return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
-    : new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('No se pudo conectar con Google Sheets.'), { code: 'NETWORK' })), 300))) : demo)
+    : (() => {
+      const w = globalThis as unknown as { __gdDemoCalls?: Record<string, number> } // también cuenta los intentos fallidos
+      w.__gdDemoCalls = { ...w.__gdDemoCalls, [action]: (w.__gdDemoCalls?.[action] ?? 0) + 1 }
+      return new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('No se pudo conectar con Google Sheets.'), { code: 'NETWORK' })), 300))
+    })()) : demo)
 }
 
 /** Estado global: una lectura completa al abrir y al pulsar "Actualizar"; las escrituras actualizan el estado local. */
@@ -143,7 +153,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const actions = useMemo(() => ({
     async saveGasto(g: GastoInput, mode: 'create' | 'update') {
       const saved = await api.saveGasto(g, mode)
-      patch(d => ({ ...d, gastos: mode === 'create' && !d.gastos.some(x => x.id === saved.id) ? [...d.gastos, saved] : d.gastos.map(x => x.id === saved.id ? saved : x) }))
+      const plId = mode === 'create' ? g.plantillaId : undefined
+      patch(d => ({
+        ...d,
+        gastos: mode === 'create' && !d.gastos.some(x => x.id === saved.id) ? [...d.gastos, saved] : d.gastos.map(x => x.id === saved.id ? saved : x),
+        ...(plId ? { vinculos: upsertVinculos(d.vinculos, [[saved.id, plId]]) } : {}),
+      }))
       return saved
     },
     async setEstado(g: Gasto, estado: 'Activo' | 'Anulado') {
@@ -182,6 +197,17 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async saveConfig(clave: string, valor: string) {
       await api.saveConfig(clave, valor)
       patch(d => ({ ...d, config: { ...d.config, [clave]: valor } }))
+    },
+    /** Asocia (o desasocia con '') un movimiento existente a un compromiso. No cambia el gasto. */
+    async vincular(gastoId: string, plantillaId: string) {
+      await api.vincularGasto(gastoId, plantillaId)
+      patch(d => ({ ...d, vinculos: upsertVinculos(d.vinculos, [[gastoId, plantillaId]]) }))
+    },
+    /** Decisión sobre una coincidencia (legítima, pendiente o duplicado confirmado). Nunca modifica movimientos. */
+    async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>) {
+      const saved = await api.saveRevision(r)
+      const key = saved.ids.join(',')
+      patch(d => ({ ...d, revisiones: [...(d.revisiones ?? []).filter(x => x.ids.join(',') !== key), saved] }))
     },
     diagnose: () => api.diagnose(),
     backup: () => api.backup(),
@@ -281,9 +307,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   /** Registra un lote de gastos en una sola petición e incorpora los confirmados sin releer el histórico. */
   const registrarLote = useCallback(async (loteId: string, gastos: GastoInput[]) => {
     const r = await api.saveGastosBatch(loteId, gastos)
+    const pares = gastos.filter(g => g.plantillaId).map(g => [g.id, g.plantillaId!] as [string, string])
     patch(d => {
       const ids = new Set(r.gastos.map(g => g.id))
-      return { ...d, gastos: [...d.gastos.filter(g => !ids.has(g.id)), ...r.gastos] }
+      return { ...d, gastos: [...d.gastos.filter(g => !ids.has(g.id)), ...r.gastos], ...(pares.length ? { vinculos: upsertVinculos(d.vinculos, pares) } : {}) }
     })
     return r
   }, [api, patch])

@@ -7,7 +7,8 @@ import { aggregate, subKey, type CajasResumen, type SubcajaResumen } from '../li
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
-import type { Caja, Filters } from '../lib/types'
+import type { Caja, Filters, Gasto } from '../lib/types'
+import SaludFinanciera from '../components/SaludFinanciera'
 import { categoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList, SubLabel } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
@@ -21,8 +22,9 @@ const cajaIcon = (c: Caja) => {
   return k.includes('auto') ? Car : k.includes('beb') ? Baby : k.includes('nube') ? Cloud : Wallet
 }
 
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales }: {
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onEditGasto }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
+  onEditGasto: (g: Gasto) => void
 }) {
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const data = store.data
@@ -31,9 +33,11 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
 
   // Una sola agregación por combinación de filtros; KPIs, cajas y gráficos reutilizan este resultado.
-  const a = useMemo(() => data && aggregate(data.gastos, filters, {
-    base, rates: ratesFromConfig(data.config), today, cajas: data.cajas, presupuestos: data.presupuestos,
-  }), [data, filters, base, today])
+  // Dependencias explícitas: un cambio en vínculos o revisiones (Salud financiera) no recalcula el dashboard.
+  const gastos = data?.gastos, config = data?.config, cajas = data?.cajas, presupuestos = data?.presupuestos
+  const a = useMemo(() => gastos && config && cajas && presupuestos ? aggregate(gastos, filters, {
+    base, rates: ratesFromConfig(config), today, cajas, presupuestos,
+  }) : null, [gastos, config, cajas, presupuestos, filters, base, today])
 
   const money = (c: number) => formatMoney(c, base)
   const mes = singleMonth(filters.desde, filters.hasta)
@@ -41,13 +45,13 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-ink">Resumen</h1>
           <p className="truncate text-xs text-muted first-letter:uppercase">{mes ? monthLabel(mes, true) : rangeLabel(filters)}</p>
         </div>
         {/* Abre el mismo formulario de la pestaña Gastos (un solo modal en toda la app). */}
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={onNuevoGasto} disabled={!data}><Plus className="size-4" /> Nuevo gasto</Button>
           {/* Plantillas rápidas de gastos frecuentes: solo lee su propia hoja, no el histórico. */}
           <Button variant="soft" onClick={onGastosMensuales} disabled={!data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
@@ -92,6 +96,8 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           </div>
 
           <Cajas c={a.cajas} money={money} onEdit={(caja, asignado) => setEditCaja({ caja, asignado })} periodo={periodoTxt} />
+
+          <SaludFinanciera store={store} a={a} filters={filters} today={today} onEditGasto={onEditGasto} onGastosMensuales={onGastosMensuales} />
 
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>

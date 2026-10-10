@@ -3,10 +3,10 @@
 // - Selección de una, algunas o todas; resumen fijo con totales por moneda; registro en UNA petición.
 // - Orden manual global (arrastrar o Subir/Bajar) que también define el orden de inserción del lote.
 // Una plantilla no es un movimiento: no suma en KPIs, cajas ni gráficos.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, GripVertical, ListChecks,
-  Loader2, MoreHorizontal, Pencil, Plus, Save, Search, Send, Trash2, Zap,
+  Loader2, MoreHorizontal, Pencil, Plus, Repeat, Save, Search, Send, Trash2, Zap,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { GastoInput, PlantillaInput } from '../lib/api'
@@ -19,10 +19,10 @@ import { todayIn } from '../lib/dates'
 import { showToast } from '../lib/toast'
 import { autocompletar, ClasificacionPicker, clasificacionVigente, type Clasif } from './Clasificacion'
 import type { GastoPreset } from './GastoModal'
-import { Button, Empty, ErrorBox, Field, inputCls, Modal, Skeleton, useDismiss } from './ui'
+import { Button, DateField, Empty, ErrorBox, Field, inputCls, Modal, SelectField, Skeleton, Switch, useDismiss } from './ui'
 
 export interface PlantillaDraft extends Clasif {
-  id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; existente: boolean; afterId?: string
+  id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; esCompromiso?: boolean; existente: boolean; afterId?: string
 }
 type View = { kind: 'list' } | { kind: 'form'; plantilla: Plantilla | null; draft?: PlantillaDraft; cloneOf?: Plantilla } | { kind: 'delete'; plantilla: Plantilla }
 
@@ -160,7 +160,8 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
       else if (!f.medioPago || !medios.includes(f.medioPago)) errs[p.id] = 'Elige un medio de pago activo'
       gastoIds[p.id] ??= crypto.randomUUID() // fijo por plantilla mientras el lote no se confirme
       gastos.push({ id: gastoIds[p.id], fecha, monto: n, moneda: f.moneda, ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria,
-        descripcion: formatearDescripcion(p.descripcion), medioPago: f.medioPago, tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '' })
+        descripcion: formatearDescripcion(p.descripcion), medioPago: f.medioPago, tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
+        plantillaId: p.id }) // vínculo: si la plantilla es un compromiso, este gasto cuenta como su pago
     }
     // Errores en filas ocultas por la búsqueda o el filtro: se quitan los filtros para que se vean.
     const ocultos = elegidas.filter(p => errs[p.id] && !visibles.includes(p)).length
@@ -229,7 +230,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
         {/* Cabecera: fecha del lote + nueva plantilla */}
         <div className="flex flex-wrap items-end justify-between gap-2">
           <Field label="Fecha de registro" htmlFor="lote-fecha" error={errores._fecha}>
-            <input id="lote-fecha" type="date" className={`${inputCls} w-44`} value={lote.fecha || hoy} onChange={e => setLote(l => ({ ...l, fecha: e.target.value }))} />
+            <div className="w-44"><DateField id="lote-fecha" value={lote.fecha || hoy} onChange={fecha => setLote(l => ({ ...l, fecha }))} format={store.data?.config.formato_fecha} /></div>
           </Field>
           <Button variant="soft" onClick={() => setView({ kind: 'form', plantilla: null })} disabled={!store.data || !loaded}><Plus className="size-4" /> Nueva plantilla</Button>
         </div>
@@ -281,7 +282,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                       onDragOver={e => { if (drag) { e.preventDefault(); if (drag.over !== p.id) setDrag({ ...drag, over: p.id }) } }}
                       onDrop={e => { e.preventDefault(); if (drag && drag.from !== p.id) mover(drag.from, p.id); setDrag(null) }}
                       onDragEnd={() => setDrag(null)}
-                      className={`grid grid-cols-[1.5rem_1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-2 py-2 transition md:grid-cols-[1.5rem_1.5rem_minmax(0,1fr)_8.5rem_5rem_8.5rem_7rem] ${on ? 'bg-primary-soft/50' : 'hover:bg-bg/60'} ${drag?.over === p.id && drag.from !== p.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === p.id ? 'opacity-50' : ''}`}>
+                      className={`grid grid-cols-[1.5rem_1.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-2 px-2 py-2.5 md:gap-y-1.5 md:py-2 transition md:grid-cols-[1.5rem_1.5rem_minmax(0,1fr)_8.5rem_5rem_8.5rem_7rem] ${on ? 'bg-primary-soft/50' : 'hover:bg-bg/60'} ${drag?.over === p.id && drag.from !== p.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === p.id ? 'opacity-50' : ''}`}>
                       <button type="button" aria-label={`Arrastrar ${p.descripcion}`} disabled={!puedeOrdenar} title={puedeOrdenar ? 'Arrastra para cambiar el orden' : 'Quita la búsqueda y el filtro para reordenar'}
                         onPointerDown={() => puedeOrdenar && setDrag({ from: p.id, over: null })} onPointerUp={() => setDrag(d => (d && !d.over ? null : d))}
                         className="grid h-7 cursor-grab place-items-center rounded text-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-30">
@@ -292,34 +293,41 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: `${l.color}1F`, color: l.color }}><l.Icon className="size-3.5" /></span>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{p.descripcion}</p>
+                          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold"><span className="truncate">{p.descripcion}</span>
+                            {p.esCompromiso && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#E7F7F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#0F7A5F] dark:bg-[#0F7A5F]/25 dark:text-[#6EE7C5]" title="Cuenta en Compromisos mensuales"><Repeat className="size-2.5" /> Compromiso</span>}</p>
                           <p className="truncate text-[11px] text-muted">{p.ambito} · {p.categoria}{p.subcategoria !== p.descripcion ? ` · ${p.subcategoria}` : ''}</p>
                           {rev && <p className="flex items-center gap-1 text-[11px] font-medium text-[#92400E]"><AlertTriangle className="size-3" /> Requiere revisión: {rev}</p>}
                           {errores[p.id] && <p className="text-[11px] font-medium text-[#D2463C]" role="alert">{errores[p.id]}</p>}
                         </div>
                       </div>
                       {/* Edición rápida: valores temporales del lote, no cambian la plantilla */}
-                      <div className="col-span-4 grid grid-cols-[minmax(0,1fr)_4.75rem_minmax(0,1fr)] items-center gap-1.5 md:contents">
+                      <div className="col-span-3 grid grid-cols-[minmax(0,1fr)_4.75rem_minmax(0,1fr)] items-center gap-1.5 md:contents">
                         <label className="relative block">
                           <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-xs text-muted">{simbolo(f.moneda)}</span>
                           <input aria-label={`Monto de ${p.descripcion}`} inputMode="decimal" value={f.monto} placeholder="0.00" onChange={e => setValor(p.id, { monto: e.target.value.replace(/[^\d.,]/g, '') })}
-                            className={`tabular h-8 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-sm outline-none focus:border-navy ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
+                            className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
                         </label>
                         <select aria-label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={e => setValor(p.id, { moneda: e.target.value })}
-                          className="h-8 rounded-lg border border-line bg-card px-1.5 text-xs outline-none focus:border-navy">
+                          className="h-10 rounded-lg border border-line bg-card px-1.5 text-base outline-none focus:border-navy md:h-8 md:text-xs">
                           {[...new Set([...monedas, f.moneda])].map(m => <option key={m}>{m}</option>)}
                         </select>
                         <select aria-label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={e => setValor(p.id, { medioPago: e.target.value })}
-                          className="h-8 min-w-0 rounded-lg border border-line bg-card px-1.5 text-xs outline-none focus:border-navy" style={f.medioPago ? { color: medioLook(f.medioPago).color } : undefined}>
+                          className="h-10 min-w-0 rounded-lg border border-line bg-card px-1.5 text-base outline-none focus:border-navy md:h-8 md:text-xs" style={f.medioPago ? { color: medioLook(f.medioPago).color } : undefined}>
                           <option value="">Medio…</option>
                           {[...new Set([...medios, ...(f.medioPago ? [f.medioPago] : [])])].map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
                       </div>
-                      <div className="col-start-4 row-start-1 flex items-center justify-end gap-1 md:col-start-auto md:row-start-auto">
+                      {/* Acciones: en móvil, grupo centrado en su propia fila; en escritorio, compactas a la derecha. */}
+                      <div className="col-span-3 flex items-center justify-center gap-2 md:col-span-1 md:justify-end md:gap-1" data-testid="acciones-plantilla">
                         {busy ? <Loader2 className="size-4 animate-spin text-muted" /> : <>
-                          <Button className="h-8 px-2.5 text-xs" disabled={!!rev} aria-label={`Usar plantilla ${p.descripcion}`} title="Abrir Nuevo gasto con estos datos"
+                          <Button className="h-10 px-4 text-sm md:h-8 md:px-2.5 md:text-xs" disabled={!!rev} aria-label={`Usar plantilla ${p.descripcion}`} title="Abrir Nuevo gasto con estos datos"
                             onClick={() => onUse({ ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria, descripcion: p.descripcion,
-                              monto: Number(f.monto.replace(',', '.')) || null, moneda: f.moneda, medioPago: medioOk(f.medioPago) ? f.medioPago : '' })}>Usar</Button>
+                              monto: Number(f.monto.replace(',', '.')) || null, moneda: f.moneda, medioPago: medioOk(f.medioPago) ? f.medioPago : '',
+                              plantillaId: p.id, plantillaNombre: p.descripcion })}>Usar</Button>
+                          <Button variant="outline" className="h-10 px-3 text-sm md:hidden" aria-label={`Editar plantilla ${p.descripcion}`}
+                            onClick={() => setView({ kind: 'form', plantilla: p })}><Pencil className="size-4" /><span className="max-[359px]:sr-only">Editar</span></Button>
+                          <button type="button" aria-label={`Eliminar plantilla ${p.descripcion}`} onClick={() => setView({ kind: 'delete', plantilla: p })}
+                            className="grid size-10 place-items-center rounded-xl border border-line text-[#D2463C] transition hover:bg-[#FDECEC] focus-visible:ring-2 focus-visible:ring-[#D2463C]/40 outline-none md:hidden"><Trash2 className="size-4" /></button>
                           <RowMenu label={p.descripcion} canMove={puedeOrdenar} first={idx === 0} last={idx === items.length - 1}
                             onEdit={() => setView({ kind: 'form', plantilla: p })} onClone={() => setView({ kind: 'form', plantilla: null, cloneOf: p })}
                             onDelete={() => setView({ kind: 'delete', plantilla: p })} onUp={() => mover(p.id, null, -1)} onDown={() => mover(p.id, null, 1)} />
@@ -348,9 +356,9 @@ function RowMenu({ label, canMove, first, last, onEdit, onClone, onDelete, onUp,
   return (
     <div ref={ref} className="relative">
       <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`Más acciones de ${label}`} onClick={() => setOpen(o => !o)}
-        className="grid size-8 place-items-center rounded-lg border border-line text-muted hover:bg-bg"><MoreHorizontal className="size-4" /></button>
+        className="grid size-10 place-items-center rounded-xl border border-line text-muted hover:bg-bg md:size-8 md:rounded-lg"><MoreHorizontal className="size-4" /></button>
       {open && (
-        <div role="menu" className="absolute top-9 right-0 z-30 w-44 rounded-xl border border-line bg-card p-1 shadow-xl">
+        <div role="menu" className="absolute top-11 right-0 z-30 w-44 md:top-9 rounded-xl border border-line bg-card p-1 shadow-xl">
           <button role="menuitem" type="button" className={item} onClick={run(onEdit)}><Pencil className="size-3.5 text-muted" /> Editar</button>
           <button role="menuitem" type="button" className={item} onClick={run(onClone)}><Copy className="size-3.5 text-muted" /> Clonar</button>
           <button role="menuitem" type="button" className={item} disabled={!canMove || first} onClick={run(onUp)}><ArrowUp className="size-3.5 text-muted" /> Subir</button>
@@ -380,6 +388,13 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   const [monto, setMonto] = useState(montoTxt(base?.monto ?? null))
   const [moneda, setMoneda] = useState(base?.moneda || cfg.moneda || 'PEN')
   const [medioPago, setMedioPago] = useState(base?.medioPago ?? '')
+  const [esCompromiso, setEsCompromiso] = useState(base?.esCompromiso ?? false)
+  // ID generado una sola vez al abrir: si la escritura falla y reintentas, el backend no duplica la plantilla.
+  const [id] = useState(() => draft?.id ?? plantilla?.id ?? nuevoId())
+  const [guardando, setGuardando] = useState(false)
+  const [errorGuardar, setErrorGuardar] = useState<string | null>(null)
+  const montado = useRef(true)
+  useEffect(() => { montado.current = true; return () => { montado.current = false } }, [])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function change(next: Clasif) {
@@ -401,19 +416,27 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
     if (!errs.subcategoria && !clasificacionVigente(catalogo, v)) errs.subcategoria = 'Esa clasificación ya no está disponible: elige una vigente'
     const m = monto.trim()
     if (m && (!AMOUNT.test(m) || Number(m.replace(',', '.')) < 0)) errs.monto = 'Monto no válido (sin negativos, hasta 2 decimales)'
-    const id = draft?.id ?? plantilla?.id ?? nuevoId() // generado una vez: un reintento no duplica la plantilla
     const data: PlantillaInput = { id, ambito: v.ambito, categoria: v.categoria, subcategoria: v.subcategoria, descripcion: desc,
-      monto: m ? Math.round(Number(m.replace(',', '.')) * 100) / 100 : null, moneda, medioPago }
+      monto: m ? Math.round(Number(m.replace(',', '.')) * 100) / 100 : null, moneda, medioPago, esCompromiso }
     const key = (x: PlantillaInput) => [x.ambito, x.categoria, x.subcategoria, x.descripcion, x.moneda || 'PEN', x.medioPago].map(normName).join('|') + `|${x.monto === null ? '' : toCents(x.monto)}`
     if (!Object.keys(errs).length && items.some(p => p.id !== id && key(p) === key(data))) errs.descripcion = 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.'
     setErrors(errs)
-    if (Object.keys(errs).length) return
-    const ok = store.track(`plantilla:${id}`, existente
-      ? { pending: 'Actualizando plantilla…', ok: 'Plantilla actualizada correctamente.', error: 'Error al actualizar la plantilla.' }
-      : { pending: 'Creando plantilla…', ok: cloneOf ? 'Plantilla clonada correctamente.' : 'Plantilla creada correctamente.', error: 'No se pudo crear la plantilla.' },
-    () => store.plantillaActions.save(data, existente ? 'update' : 'create', existente ? undefined : afterId),
-    { onErrorActions: [{ label: 'Abrir formulario', run: () => onReopen({ ...data, existente, afterId }) }] })
-    if (ok) onDone()
+    if (Object.keys(errs).length || guardando) return // doble clic: una sola solicitud
+    const msg = existente
+      ? { ok: 'Plantilla actualizada correctamente.', error: 'Error al actualizar la plantilla.' }
+      : { ok: cloneOf ? 'Plantilla clonada correctamente.' : 'Plantilla creada correctamente.', error: 'No se pudo crear la plantilla.' }
+    // El formulario espera la confirmación real de Apps Script: solo se cierra si la hoja guardó la plantilla.
+    setGuardando(true)
+    setErrorGuardar(null)
+    store.plantillaActions.save(data, existente ? 'update' : 'create', existente ? undefined : afterId).then(() => {
+      if (store.data?.config.notificaciones !== 'false') showToast('success', msg.ok)
+      if (montado.current) onDone()
+    }, (e: unknown) => {
+      const detalle = e instanceof Error ? e.message : String(e ?? '')
+      if (montado.current) { setErrorGuardar(`${msg.error} ${detalle}`.trim()); setGuardando(false) }
+      // Si cerraste el formulario mientras se guardaba, el error llega como notificación para reabrirlo con lo escrito.
+      else showToast('error', `${msg.error} ${detalle}`.trim(), [{ label: 'Abrir formulario', run: () => onReopen({ ...data, existente, afterId }) }])
+    })
   }
 
   return (
@@ -427,14 +450,14 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
         <Field label="Monto predeterminado" error={errors.monto} htmlFor="plantilla-monto" hint="Opcional. Podrás cambiarlo cada mes al registrar.">
           <span className="relative block">
-            <span className="pointer-events-none absolute top-2 left-3 text-sm text-muted">{simbolo(moneda)}</span>
-            <input id="plantilla-monto" className={`${inputCls} tabular pl-10`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted">{simbolo(moneda)}</span>
+            <input id="plantilla-monto" className={`${inputCls} tabular h-11 pl-10`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
           </span>
         </Field>
         <Field label="Moneda" htmlFor="plantilla-moneda">
-          <select id="plantilla-moneda" className={inputCls} value={moneda} onChange={e => setMoneda(e.target.value)}>
+          <SelectField id="plantilla-moneda" value={moneda} onChange={setMoneda}>
             {[...new Set([...monedas, moneda])].map(x => <option key={x}>{x}</option>)}
-          </select>
+          </SelectField>
         </Field>
       </div>
       <div>
@@ -453,9 +476,14 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
           })}
         </div>
       </div>
+      {errorGuardar && <ErrorBox message={<>{errorGuardar} <span className="block text-xs">Tus datos siguen aquí: corrige o vuelve a intentar (no se duplicará).</span></>} />}
+      <div className="rounded-xl border border-line p-3">
+        <Switch checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
+        <p className="mt-1 text-[11px] text-muted">Actívalo para pagos que haces cada mes (luz, internet, apoyo familiar…). Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.</p>
+      </div>
       <div className="flex justify-between gap-2 border-t border-line pt-3">
         <Button type="button" variant="outline" onClick={onDone}><ArrowLeft className="size-4" /> Volver</Button>
-        <Button type="submit"><Save className="size-4" /> {existente ? 'Guardar cambios' : cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
+        <Button type="submit" loading={guardando} disabled={guardando}>{!guardando && <Save className="size-4" />} {guardando ? 'Guardando…' : existente ? 'Guardar cambios' : cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
       </div>
     </form>
   )

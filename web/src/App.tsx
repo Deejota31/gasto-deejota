@@ -87,7 +87,7 @@ export default function App({ api }: { api?: Api }) {
       )}
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} /></Suspense>}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onEditGasto={g => openGasto('edit', g)} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} />}
         {tab === 'categorias' && <Categorias store={store} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}

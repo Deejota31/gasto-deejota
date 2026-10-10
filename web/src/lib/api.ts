@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type Gasto, type Medio, type Plantilla, type Presupuesto } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -94,6 +94,7 @@ export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
     tipoGasto: (TIPOS_GASTO as readonly string[]).includes(r[7]) ? (r[7] as Gasto['tipoGasto']) : 'Variable',
     ambito: r[8], esRecurrente: r[9], estado: r[10] === 'Anulado' ? 'Anulado' : 'Activo', origen: r[11],
     comprobanteUrl: r[12], id: r[13], creadoEn: r[14], actualizadoEn: r[15],
+    ...(r[10] !== 'Activo' && r[10] !== 'Anulado' ? { estadoHoja: r[10] } : {}),
   }
 }
 
@@ -106,13 +107,15 @@ const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color 
 
 // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado]
 // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto?, moneda?, medio?, orden?] (v1.3 envía solo 7)
-const plantillaRow = z.tuple([str, str, str, str, str, str, str]).rest(z.union([str, z.number()]))
 const optNum = (v: unknown) => (v === '' || v === undefined || v === null || !Number.isFinite(Number(v)) ? null : Number(v))
-const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto, moneda, medioPago, orden]: z.infer<typeof plantillaRow>): Plantilla =>
-  ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto: optNum(monto), moneda: String(moneda || 'PEN'), medioPago: String(medioPago ?? ''), orden: optNum(orden) })
+// v1.5 agrega "Es compromiso" (booleano) al final.
+const plantillaRowV15 = z.tuple([str, str, str, str, str, str, str]).rest(z.union([str, z.number(), z.boolean()]))
+const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto, moneda, medioPago, orden, comp]: z.infer<typeof plantillaRowV15>): Plantilla =>
+  ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto: optNum(monto), moneda: String(moneda || 'PEN'), medioPago: String(medioPago ?? ''), orden: optNum(orden),
+    esCompromiso: comp === true || String(comp).toUpperCase() === 'TRUE' })
 
 /** Lo que se envía para crear o editar una plantilla. `afterId`: al clonar, la copia queda justo después de la original. */
-export type PlantillaInput = Pick<Plantilla, 'id' | 'ambito' | 'categoria' | 'subcategoria' | 'descripcion' | 'monto' | 'moneda' | 'medioPago'>
+export type PlantillaInput = Pick<Plantilla, 'id' | 'ambito' | 'categoria' | 'subcategoria' | 'descripcion' | 'monto' | 'moneda' | 'medioPago'> & { esCompromiso?: boolean }
 
 const loteSchema = z.object({
   estado: str, loteId: str, solicitados: z.number(), confirmados: z.number(), nuevos: z.number(), yaExistian: z.number().default(0),
@@ -129,6 +132,15 @@ const dataSchema = z.object({
   presupuestos: z.array(z.tuple([str, str, z.number()])),
   config: z.record(str, str),
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
+  vinculos: z.array(z.tuple([str, str])).optional(),
+  revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
+})
+
+const ESTADOS_REVISION: readonly string[] = ['legitimo', 'pendiente', 'duplicado']
+const revisionRow = z.tuple([str, str, str, str, str, str, str])
+const toRevision = ([id, , ids, estado, firma, creadoEn, actualizadoEn]: z.infer<typeof revisionRow>): Revision => ({
+  id, tipo: 'duplicado', ids: ids.split(',').map(x => x.trim().toLowerCase()).filter(Boolean).sort(),
+  estado: (ESTADOS_REVISION.includes(estado) ? estado : 'pendiente') as EstadoRevision, firma, creadoEn, actualizadoEn,
 })
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -144,7 +156,10 @@ const toCaja = (r: [string, string, number, string, string, string, number]): Ca
   filtroValor: r[4], color: r[5] || '#1e3a8a', orden: r[6],
 })
 
-export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'>
+export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'> & {
+  /** Al crear desde una plantilla: queda vinculado como pago de ese compromiso. Se ignora al editar o clonar. */
+  plantillaId?: string
+}
 
 /** API de alto nivel usada por la app. El transporte puede ser HTTP real o el modo demo. */
 /** Mismo criterio que requireId_ en Code.gs: un ID que no cumple no se puede editar ni eliminar desde la app. */
@@ -182,6 +197,8 @@ export function createApi(t: Transport) {
           cajas: d.cajas.map(toCaja),
           presupuestos: d.presupuestos.map(([periodo, cajaId, monto]): Presupuesto => ({ periodo, cajaId, monto })),
           ordenGastos: d.ordenGastos ?? [],
+          vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
+          revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
         }
       }).finally(() => { inflight = null })
       return inflight
@@ -215,10 +232,10 @@ export function createApi(t: Transport) {
     },
     /** Solo la hoja de plantillas: no lee gastos ni recalcula nada del dashboard. */
     async getPlantillas(): Promise<Plantilla[]> {
-      return parse(z.array(plantillaRow), await t('plantillas', {})).map(toPlantilla)
+      return parse(z.array(plantillaRowV15), await t('plantillas', {})).map(toPlantilla)
     },
     async savePlantilla(p: PlantillaInput, mode: 'create' | 'update', afterId?: string): Promise<Plantilla> {
-      return toPlantilla(parse(plantillaRow, await t('savePlantilla', { ...p, monto: p.monto ?? '', mode, ...(afterId ? { afterId } : {}) })))
+      return toPlantilla(parse(plantillaRowV15, await t('savePlantilla', { ...p, monto: p.monto ?? '', mode, ...(afterId ? { afterId } : {}) })))
     },
     /** Guarda el orden manual de todas las plantillas en una sola petición. */
     async reorderPlantillas(ids: string[]): Promise<void> {
@@ -232,6 +249,13 @@ export function createApi(t: Transport) {
     /** Orden personalizado de la tabla de Gastos (solo la hoja ORDEN_GASTOS). */
     async reorderGastos(ids: string[]): Promise<void> {
       await t('reorderGastos', { ids })
+    },
+    /** Asocia (o con plantillaId vacío, desasocia) un movimiento a una plantilla. Solo escribe la hoja de vínculos. */
+    async vincularGasto(gastoId: string, plantillaId: string): Promise<[string, string]> {
+      return parse(z.tuple([str, str]), await t('vincularGasto', { gastoId, plantillaId }))
+    },
+    async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>): Promise<Revision> {
+      return toRevision(parse(revisionRow, await t('saveRevision', { ...r, tipo: 'duplicado' })))
     },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })

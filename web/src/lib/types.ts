@@ -23,7 +23,13 @@ export interface Gasto {
   uid?: string
   /** ID escrito a mano que la hoja no puede usar para editar: repetido o con caracteres no válidos. */
   problemaId?: 'duplicado' | 'invalido'
+  /** Estado tal como está en la hoja cuando no es "Activo" ni "Anulado" (escrito a mano): se informa en Salud de datos. */
+  estadoHoja?: string
 }
+
+/** Decisión sobre una alerta de calidad. `firma` resume los datos revisados: si cambian, la alerta vuelve. */
+export type EstadoRevision = 'legitimo' | 'pendiente' | 'duplicado'
+export interface Revision { id: string; tipo: 'duplicado'; ids: string[]; estado: EstadoRevision; firma: string; creadoEn: string; actualizadoEn: string }
 
 /** Plantilla de gasto frecuente: configuración reutilizable. No es un movimiento ni suma en nada. */
 export interface Plantilla {
@@ -32,6 +38,8 @@ export interface Plantilla {
   monto: number | null; moneda: string; medioPago: string
   /** Orden manual (arrastrar y soltar); null en plantillas antiguas sin orden. */
   orden: number | null
+  /** Compromiso mensual (Luz, Internet…): lo decides tú. Solo estas cuentan en "Compromisos". */
+  esCompromiso: boolean
 }
 
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
@@ -57,6 +65,9 @@ export interface AppData {
   config: Record<string, string>
   /** Orden personalizado de la tabla de Gastos: [id, orden]. Se guarda aparte para no recalcular el dashboard. */
   ordenGastos?: [string, number][]
+  /** Vínculo gasto → plantilla (qué movimiento pagó qué compromiso): [gastoId, plantillaId]. */
+  vinculos?: [string, string][]
+  revisiones?: Revision[]
   sheetUrl: string
   version: string
 }
