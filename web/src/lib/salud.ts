@@ -304,6 +304,17 @@ export function calcularCompromisos(p: {
   }
 }
 
+/**
+ * Estado de un compromiso con las mismas reglas de calcularCompromisos (no recalcula nada):
+ * sin monto → "pagado-estimado" si hubo pagos (lo pagado es el estimado) o "por-confirmar" si no.
+ */
+export type EstadoCompromiso = 'pendiente' | 'parcial' | 'por-confirmar' | 'cubierto' | 'pagado-estimado'
+export function estadoCompromiso(i: CompromisoItem): EstadoCompromiso {
+  if (i.previsto === null) return i.cubierto > 0 ? 'pagado-estimado' : 'por-confirmar'
+  if (i.cubiertoCompleto) return 'cubierto'
+  return i.aplicado > 0 ? 'parcial' : 'pendiente'
+}
+
 /* ============================== Mi presupuesto ============================== */
 
 export type NivelPresupuesto = 'sin-presupuesto' | 'ok' | 'atencion' | 'cerca' | 'excedido'

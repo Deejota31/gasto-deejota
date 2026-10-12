@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarClock, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Copy, ExternalLink,
-  Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet,
+  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, MoreHorizontal, PiggyBank, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet,
 } from 'lucide-react'
-import type { Aggregates } from '../lib/engine'
+import { cajaDe, prioridadCajas, type Aggregates } from '../lib/engine'
 import { formatDate, monthLabel, rangeLabel, singleMonth, shiftMonth } from '../lib/dates'
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import {
-  calcularCompromisos, calcularPresupuesto, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
+  calcularCompromisos, calcularPresupuesto, estadoCompromiso, type EstadoCompromiso, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
   PESOS, PROBLEMA_TXT, REDUCCION_SIMULADA, type CalidadDatos, type CompromisoItem, type Compromisos, type Evolucion, type FilaEvolucion,
   type GrupoSimilar, type MiPresupuesto, type NivelComparacion, type NivelPresupuesto, type Oportunidad, type Rango,
 } from '../lib/salud'
 import type { AppStore } from '../lib/store'
 import type { EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
-import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
+import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField, useDismiss } from './ui'
 
 type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos'
 let vistaSesion: Vista = 'presupuesto'
@@ -609,12 +609,27 @@ function ListaEvolucion({ titulo, icon: Icon, tono, filas, money, vacio }: { tit
 
 /* ================================ Compromisos ================================ */
 
+/* ============================== Compromisos (panel compacto) ============================== */
+
+type EstadoComp = EstadoCompromiso
+const ESTADO_COMP: Record<EstadoComp, { txt: string; tono: Tono; Icon: typeof CheckCircle2 }> = {
+  pendiente: { txt: 'Pendiente', tono: TONO.cerca, Icon: CircleDashed },
+  parcial: { txt: 'Parcial', tono: TONO.atencion, Icon: CircleDashed },
+  'por-confirmar': { txt: 'Por confirmar', tono: TONO.neutro, Icon: HelpCircle },
+  cubierto: { txt: 'Cubierto', tono: TONO.ok, Icon: CheckCircle2 },
+  'pagado-estimado': { txt: 'Pagado · sin monto', tono: TONO.info, Icon: CheckCircle2 },
+}
+
 function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, onRevisarGasto, onGastosMensuales }: {
   store: AppStore; comp: Compromisos; money: (c: number) => string; fmt?: string; filters: Filters; vinculos: Map<string, string>; loaded: boolean
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
   const [asociar, setAsociar] = useState<Plantilla | null>(null)
-  if (!loaded && !comp.n) return <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-20 animate-pulse rounded-2xl bg-bg" />)}</div>
+  const [abierto, setAbierto] = useState<string | null>(null)
+  const [verCubiertos, setVerCubiertos] = useState(false)
+  const cajas = store.data?.cajas
+  const priorizadas = useMemo(() => prioridadCajas(cajas ?? []), [cajas])
+  if (!loaded && !comp.n) return <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-12 animate-pulse rounded-xl bg-bg" />)}</div>
   if (!comp.n) {
     return (
       <Vacio icon={Repeat} titulo="Aún no tienes compromisos marcados" tono={TONO.atencion}
@@ -625,91 +640,169 @@ function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, 
   }
   const quitar = (g: Gasto) => store.track(`vinculo:${g.id}`, { pending: 'Quitando vínculo…', ok: 'Vínculo quitado. El gasto no cambió.', error: 'No se pudo quitar el vínculo.' },
     () => store.actions.vincular(g.id, ''))
+  const conEstado = comp.items.map(i => ({ i, e: estadoCompromiso(i) }))
+  const nombre = (x: { i: CompromisoItem }) => x.i.plantilla.descripcion
+  const pendientes = conEstado.filter(x => x.e === 'pendiente' || x.e === 'parcial').sort((a, b) => b.i.pendiente - a.i.pendiente || nombre(a).localeCompare(nombre(b)))
+  const porConfirmar = conEstado.filter(x => x.e === 'por-confirmar').sort((a, b) => nombre(a).localeCompare(nombre(b)))
+  const cubiertos = conEstado.filter(x => x.e === 'cubierto' || x.e === 'pagado-estimado').sort((a, b) => nombre(a).localeCompare(nombre(b)))
+  // Estimado = compromisos sin monto definido: se toma lo pagado en el período (no hay monto confirmado que comparar).
+  const sinMonto = comp.items.filter(i => i.previsto === null)
+  const estimado = sinMonto.reduce((s, i) => s + i.cubierto, 0)
   const pct = comp.previsto ? Math.round((comp.cubierto / comp.previsto) * 100) : 0
+  const fila = (x: { i: CompromisoItem; e: EstadoComp }) => (
+    <FilaCompromiso key={x.i.plantilla.id} i={x.i} estado={x.e} money={money} fmt={fmt} abierto={abierto === x.i.plantilla.id}
+      caja={cajaDe(priorizadas, x.i.plantilla)?.nombre ?? null}
+      onToggle={() => setAbierto(a => (a === x.i.plantilla.id ? null : x.i.plantilla.id))}
+      onAsociar={() => setAsociar(x.i.plantilla)} onEditar={onGastosMensuales} onRevisarGasto={onRevisarGasto} onQuitar={quitar} />
+  )
+  const grupo = (titulo: string, n: number, tono: Tono, testid: string) => (
+    <p className="flex items-center gap-2 px-1 pt-3 pb-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase" data-testid={testid}>
+      <i className="size-2 rounded-full" style={{ background: tono.fg }} aria-hidden />{titulo} <span className="font-normal normal-case">· {n}</span>
+    </p>
+  )
+
   return (
     <>
       <Cabecera icon={Repeat} titulo="Compromisos mensuales" tono={comp.pendiente > 0 ? TONO.atencion : TONO.ok}
         texto="Pagos que haces cada mes. Se cubren con los gastos registrados desde su plantilla o asociados a ella." />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,2fr)]">
-        <div className="rounded-2xl p-4" style={{ background: `linear-gradient(150deg, ${TONO.atencion.bg}, var(--card))`, boxShadow: `inset 0 0 0 1px ${TONO.atencion.ring}` }}>
-          <p className="text-xs font-medium text-muted">Pendiente por cubrir</p>
-          <p className="tabular mt-1 text-3xl font-bold tracking-tight" style={{ color: comp.pendiente ? TONO.atencion.fg : TONO.ok.fg }} data-testid="comp-pendiente">{money(comp.pendiente)}</p>
-          <div className="mt-3"><Barra partes={[{ v: comp.cubierto, color: TONO.ok.fg }]} total={comp.previsto} alto="h-2.5" /></div>
-          <p className="tabular mt-1.5 text-[11px] text-muted">{pct} % cubierto de lo previsto</p>
+
+      {/* Resumen compacto: confirmado (plantillas con monto) vs estimado (sin monto: lo pagado en el período). */}
+      <div className="grid grid-cols-3 divide-x divide-line overflow-hidden rounded-2xl border border-line bg-card" data-testid="comp-resumen">
+        <div className="min-w-0 px-3 py-2.5 sm:px-4">
+          <p className="text-[11px] text-muted">Previsto</p>
+          <p className="tabular truncate text-base font-bold text-ink sm:text-lg" data-testid="comp-previsto">{money(comp.previsto)}</p>
+          <p className="truncate text-[10px] text-muted" title="Plantillas sin monto: se estima con lo pagado este período">{estimado ? `+ ${money(estimado)} estimado` : 'Confirmado'}</p>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <Stat label="Total previsto" value={money(comp.previsto)} icon={CalendarDays} testid="comp-previsto" />
-          <Stat label="Cubierto" value={money(comp.cubierto)} tone={TONO.ok} icon={CheckCircle2} testid="comp-cubierto" />
-          <Stat label="Compromisos" value={String(comp.n)} hint={comp.sinMonto ? `${comp.sinMonto} sin monto` : undefined} icon={Repeat} />
-          <Stat label="Cubiertos" value={String(comp.nCubiertos)} tone={TONO.ok} />
-          <Stat label="Pendientes" value={String(comp.nPendientes)} tone={comp.nPendientes ? TONO.atencion : TONO.ok} />
+        <div className="min-w-0 px-3 py-2.5 sm:px-4">
+          <p className="text-[11px] text-muted">Pagado</p>
+          <p className="tabular truncate text-base font-bold sm:text-lg" style={{ color: TONO.ok.fg }} data-testid="comp-cubierto">{money(comp.cubierto)}</p>
+          <p className="truncate text-[10px] text-muted">{estimado ? `+ ${money(estimado)} sin monto` : `${pct} % de lo previsto`}</p>
+        </div>
+        <div className="min-w-0 px-3 py-2.5 sm:px-4" style={{ background: comp.pendiente ? TONO.atencion.bg : undefined }}>
+          <p className="text-[11px] text-muted">Pendiente</p>
+          <p className="tabular truncate text-base font-bold sm:text-lg" style={{ color: comp.pendiente ? TONO.atencion.fg : TONO.ok.fg }} data-testid="comp-pendiente">{money(comp.pendiente)}</p>
+          <p className="truncate text-[10px] text-muted">{porConfirmar.length ? `${porConfirmar.length} por confirmar` : comp.pendiente ? `${comp.nPendientes} de ${comp.n - comp.sinMonto}` : 'Todo cubierto'}</p>
         </div>
       </div>
-      {comp.meses.length > 1 && <p className="mt-2 text-[11px] text-muted">El período abarca {comp.meses.length} meses: cada compromiso se espera una vez por mes y un pago solo cubre el mes de su fecha.</p>}
-      <ul className="mt-4 grid gap-3 md:grid-cols-2" aria-label="Compromisos">
-        {comp.items.map(i => <FilaCompromiso key={i.plantilla.id} i={i} money={money} fmt={fmt} onAsociar={() => setAsociar(i.plantilla)} onRevisarGasto={onRevisarGasto} onQuitar={quitar} />)}
-      </ul>
+      <div className="mt-2 flex items-center gap-2"><span className="flex-1"><Barra partes={[{ v: comp.cubierto, color: TONO.ok.fg }]} total={comp.previsto} alto="h-1.5" /></span>
+        <span className="tabular text-[11px] text-muted">{comp.nCubiertos}/{comp.n - comp.sinMonto} cubiertos</span></div>
+      {comp.meses.length > 1 && <p className="mt-1 text-[11px] text-muted">El período abarca {comp.meses.length} meses: cada compromiso se espera una vez por mes y un pago solo cubre el mes de su fecha.</p>}
+
+      <div className="mt-3 overflow-hidden rounded-2xl border border-line">
+        <div className="hidden grid-cols-[minmax(0,1fr)_6.5rem_6.5rem_6.5rem_8.5rem_2.25rem] gap-2 border-b border-line bg-bg/60 px-3 py-2 text-[11px] font-medium text-muted md:grid" aria-hidden>
+          <span>Compromiso</span><span className="text-right">Previsto</span><span className="text-right">Pagado</span><span className="text-right">Pendiente</span><span>Estado</span><span />
+        </div>
+        <ul aria-label="Compromisos" className="px-2 pb-2">
+          {pendientes.length > 0 && <>{grupo('Pendientes', pendientes.length, TONO.cerca, 'grupo-pendientes')}{pendientes.map(fila)}</>}
+          {porConfirmar.length > 0 && <>{grupo('Por confirmar (sin monto)', porConfirmar.length, TONO.neutro, 'grupo-por-confirmar')}{porConfirmar.map(fila)}</>}
+          {cubiertos.length > 0 && (
+            <li className="list-none">
+              <button type="button" aria-expanded={verCubiertos} onClick={() => setVerCubiertos(v => !v)} data-testid="grupo-cubiertos"
+                className="mt-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold text-muted transition hover:bg-bg">
+                <ChevronRight className={`size-4 transition-transform ${verCubiertos ? 'rotate-90' : ''}`} />
+                <i className="size-2 rounded-full" style={{ background: TONO.ok.fg }} aria-hidden />
+                Cubiertos · {cubiertos.length} <span className="tabular ml-auto font-normal">{money(cubiertos.reduce((s, x) => s + x.i.cubierto, 0))}</span>
+              </button>
+              {verCubiertos && <ul aria-label="Compromisos cubiertos">{cubiertos.map(fila)}</ul>}
+            </li>
+          )}
+        </ul>
+      </div>
       {asociar && <AsociarModal store={store} plantilla={asociar} filters={filters} vinculos={vinculos} money={money} fmt={fmt} onClose={() => setAsociar(null)} />}
     </>
   )
 }
 
-function FilaCompromiso({ i, money, fmt, onAsociar, onRevisarGasto, onQuitar }: {
-  i: CompromisoItem; money: (c: number) => string; fmt?: string; onAsociar: () => void; onRevisarGasto: (g: Gasto) => void; onQuitar: (g: Gasto) => void
-}) {
-  const estado = i.previsto === null ? { txt: 'Sin monto', tono: TONO.neutro, Icon: CircleDashed }
-    : i.cubiertoCompleto ? { txt: 'Cubierto', tono: TONO.ok, Icon: CheckCircle2 }
-      : i.cubierto > 0 ? { txt: 'Parcial', tono: TONO.atencion, Icon: CircleDashed } : { txt: 'Pendiente', tono: TONO.cerca, Icon: CircleDashed }
-  const pct = i.previsto ? Math.min(100, Math.round((i.aplicado / i.previsto) * 100)) : 0
+function MenuAcciones({ label, items }: { label: string; items: { txt: string; Icon: typeof Link2; run: () => void; peligro?: boolean }[] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useDismiss(open, () => setOpen(false))
   return (
-    <li className="flex flex-col rounded-2xl border border-line bg-card p-4 transition hover:shadow-[0_6px_18px_rgb(15_23_42/0.06)]" data-testid="compromiso"
-      style={{ borderLeft: `4px solid ${estado.tono.fg}` }}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl" style={{ background: estado.tono.bg, color: estado.tono.fg }}><Repeat className="size-4" /></span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-ink">{i.plantilla.descripcion}</p>
-            <p className="truncate text-[11px] text-muted">{i.plantilla.ambito} · {i.plantilla.categoria} · {i.plantilla.subcategoria}</p>
-          </div>
-        </div>
-        <Chip tono={estado.tono}><estado.Icon className="size-3" />{estado.txt}</Chip>
-      </div>
-
-      {i.previsto === null ? (
-        <p className="mt-3 rounded-xl bg-bg px-3 py-2 text-xs text-muted">Define un monto en la plantilla para medir cuánto falta cubrir. Pagado este período: <b className="tabular text-ink">{money(i.cubierto)}</b></p>
-      ) : (
-        <div className="mt-3">
-          <div className="tabular flex items-end justify-between gap-2">
-            <div>
-              <p className="text-[10px] text-muted">Cubierto</p>
-              <p className="text-lg font-bold text-ink">{money(i.cubierto)} <span className="text-xs font-medium text-muted">/ {money(i.previsto)}</span></p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] text-muted">{i.pendiente > 0 ? 'Pendiente' : 'Completo'}</p>
-              <p className="text-sm font-bold" style={{ color: i.pendiente > 0 ? TONO.cerca.fg : TONO.ok.fg }}>{i.pendiente > 0 ? `Pendiente ${money(i.pendiente)}` : '✓'}</p>
-            </div>
-          </div>
-          <div className="mt-2 flex items-center gap-2"><span className="flex-1"><Barra partes={[{ v: i.aplicado, color: estado.tono.fg }]} total={i.previsto} alto="h-2" /></span><span className="tabular text-[11px] font-semibold text-muted">{pct} %</span></div>
-        </div>
-      )}
-
-      {i.pagos.length > 0 && (
-        <ul className="mt-3 space-y-1 rounded-xl bg-bg/70 p-2 text-xs">
-          {i.pagos.map(g => (
-            <li key={g.uid ?? g.id} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-muted"><CheckCircle2 className="mr-1 inline size-3 text-[#0F8A6B]" />{formatDate(g.fecha, fmt)} · {g.descripcion || g.subcategoria} · {g.medioPago}</span>
-              <span className="flex shrink-0 items-center gap-0.5">
-                <b className="tabular mr-1">{formatMoney(Math.round(g.monto * 100), g.moneda)}</b>
-                <button type="button" className="grid size-8 place-items-center rounded-lg text-muted hover:bg-card hover:text-navy" aria-label={`Abrir ${g.descripcion || 'gasto'} del ${g.fecha}`} onClick={() => onRevisarGasto(g)}><ExternalLink className="size-3.5" /></button>
-                <button type="button" className="grid size-8 place-items-center rounded-lg text-muted hover:bg-card hover:text-[#C0362C]" aria-label={`Quitar vínculo de ${g.descripcion || 'gasto'} del ${g.fecha}`} onClick={() => onQuitar(g)}><Link2Off className="size-3.5" /></button>
-              </span>
-            </li>
+    <div ref={ref} className="relative">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-bg hover:text-ink"><MoreHorizontal className="size-4" /></button>
+      {open && (
+        <div role="menu" className="absolute top-9 right-0 z-30 w-52 rounded-xl border border-line bg-card p-1 shadow-xl">
+          {items.map(it => (
+            <button key={it.txt} role="menuitem" type="button" onClick={e => { e.stopPropagation(); setOpen(false); it.run() }}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg ${it.peligro ? 'text-[#C0362C]' : ''}`}>
+              <it.Icon className="size-3.5 shrink-0" />{it.txt}
+            </button>
           ))}
-        </ul>
+        </div>
       )}
-      <div className="mt-auto flex justify-end pt-3">
-        <Button variant={i.cubiertoCompleto ? 'ghost' : 'soft'} className="h-9 px-3 text-xs" onClick={onAsociar} aria-label={`Asociar un movimiento a ${i.plantilla.descripcion}`}><Link2 className="size-3.5" /> Asociar movimiento</Button>
+    </div>
+  )
+}
+
+function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsociar, onEditar, onRevisarGasto, onQuitar }: {
+  i: CompromisoItem; estado: EstadoComp; caja: string | null; money: (c: number) => string; fmt?: string; abierto: boolean
+  onToggle: () => void; onAsociar: () => void; onEditar: () => void; onRevisarGasto: (g: Gasto) => void; onQuitar: (g: Gasto) => void
+}) {
+  const e = ESTADO_COMP[estado]
+  const p = i.plantilla
+  const sinMonto = i.previsto === null
+  const montoTxt = (v: number | null, est?: boolean) => v === null ? <span className="text-muted">—</span> : <>{money(v)}{est && <span className="ml-0.5 text-[10px] font-normal text-muted">est.</span>}</>
+  const nota = sinMonto
+    ? (i.cubierto ? 'Sin monto en la plantilla: lo pagado se toma como estimado. Define un monto para medir cuánto falta.' : 'Sin monto en la plantilla y sin pagos este período: define un monto o asocia el pago.')
+    : i.cubierto > (i.previsto ?? 0) ? `Pagaste ${money(i.cubierto - (i.previsto ?? 0))} más de lo previsto: el exceso no cubre otros meses.`
+      : i.meses > 1 ? `Se espera ${money((i.previsto ?? 0) / i.meses)} por mes durante ${i.meses} meses.` : 'Se espera una vez por mes.'
+  const id = `comp-det-${p.id}`
+  return (
+    <li className={`rounded-xl transition ${abierto ? 'bg-bg/60 ring-1 ring-line' : 'hover:bg-bg/50'}`} data-testid="compromiso" data-estado={estado}>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_2rem] items-center gap-x-2 gap-y-1 px-2 py-2 md:grid-cols-[minmax(0,1fr)_6.5rem_6.5rem_6.5rem_8.5rem_2.25rem]">
+        <button type="button" aria-expanded={abierto} aria-controls={id} onClick={onToggle} className="flex min-w-0 items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-navy/40">
+          <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${abierto ? 'rotate-90' : ''}`} />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-ink">{p.descripcion}</span>
+            <span className="block truncate text-[11px] text-muted md:hidden">{p.categoria} · {p.subcategoria}</span>
+          </span>
+        </button>
+        {/* Importes: columnas en escritorio; en el celular, una línea compacta debajo del nombre */}
+        <span className="tabular hidden text-right text-sm text-ink md:block">{montoTxt(i.previsto ?? (i.cubierto ? i.cubierto : null), sinMonto && i.cubierto > 0)}</span>
+        <span className="tabular hidden text-right text-sm md:block" style={{ color: i.cubierto ? TONO.ok.fg : 'var(--muted)' }}>{money(i.cubierto)}</span>
+        <span className="tabular hidden text-right text-sm font-semibold md:block" style={{ color: i.pendiente ? TONO.cerca.fg : 'var(--muted)' }}>{sinMonto ? '—' : money(i.pendiente)}</span>
+        <span className="justify-self-end md:justify-self-start"><Chip tono={e.tono} testid="estado-compromiso"><e.Icon className="size-3" />{e.txt}</Chip></span>
+        <span className="justify-self-end">
+          <MenuAcciones label={`Acciones de ${p.descripcion}`} items={[
+            { txt: 'Asociar movimiento', Icon: Link2, run: onAsociar },
+            { txt: abierto ? 'Ocultar detalle' : 'Ver detalle', Icon: Info, run: onToggle },
+            { txt: 'Editar plantilla', Icon: CalendarDays, run: onEditar },
+          ]} />
+        </span>
+        <span className="tabular col-span-3 flex gap-3 pl-5.5 text-[11px] text-muted md:hidden">
+          <span>Prev. <b className="text-ink">{sinMonto ? (i.cubierto ? `${money(i.cubierto)} est.` : '—') : money(i.previsto!)}</b></span>
+          <span>Pag. <b style={{ color: i.cubierto ? TONO.ok.fg : undefined }}>{money(i.cubierto)}</b></span>
+          {!sinMonto && <span>Pend. <b style={{ color: i.pendiente ? TONO.cerca.fg : undefined }}>{money(i.pendiente)}</b></span>}
+        </span>
       </div>
+      {abierto && (
+        <div id={id} className="space-y-2 px-3 pb-3 pl-7.5 text-xs" data-testid="compromiso-detalle">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+            <div><dt className="text-[10px] text-muted">Categoría</dt><dd className="truncate text-ink">{p.ambito} › {p.categoria} › {p.subcategoria}</dd></div>
+            <div><dt className="text-[10px] text-muted">Caja asignada</dt><dd className="truncate text-ink">{caja ?? 'Fuera de subcajas (saldo libre)'}</dd></div>
+            <div><dt className="text-[10px] text-muted">Medio de pago</dt><dd className="truncate text-ink">{p.medioPago || 'Sin medio predeterminado'}</dd></div>
+            <div><dt className="text-[10px] text-muted">Notas</dt><dd className="text-ink">{nota}</dd></div>
+          </dl>
+          <div>
+            <p className="mb-1 text-[10px] text-muted">Gastos vinculados · {i.pagos.length}</p>
+            {i.pagos.length ? (
+              <ul className="divide-y divide-line/60 rounded-lg bg-card ring-1 ring-line">
+                {i.pagos.map(g => (
+                  <li key={g.uid ?? g.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                    <CheckCircle2 className="size-3.5 shrink-0" style={{ color: TONO.ok.fg }} />
+                    <span className="min-w-0 flex-1 truncate text-muted">{formatDate(g.fecha, fmt)} · {g.descripcion || g.subcategoria} · {g.medioPago}</span>
+                    <b className="tabular shrink-0">{formatMoney(Math.round(g.monto * 100), g.moneda)}</b>
+                    <MenuAcciones label={`Acciones del pago ${g.descripcion || 'gasto'} del ${g.fecha}`} items={[
+                      { txt: 'Abrir movimiento', Icon: ExternalLink, run: () => onRevisarGasto(g) },
+                      { txt: 'Quitar vínculo', Icon: Link2Off, run: () => onQuitar(g), peligro: true },
+                    ]} />
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="rounded-lg bg-card px-2.5 py-2 text-muted ring-1 ring-line">Sin pagos vinculados en el período. Usa “Asociar movimiento” en el menú ⋯ o regístralo desde Gastos mensuales.</p>}
+          </div>
+        </div>
+      )}
     </li>
   )
 }

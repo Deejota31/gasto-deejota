@@ -6,6 +6,10 @@ import vm from 'node:vm'
 import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CATALOGO_INICIAL } from './lib/catalogo'
+import { createApi } from './lib/api'
+import { aggregate } from './lib/engine'
+import { ratesFromConfig } from './lib/money'
+import { calcularCompromisos, compararPeriodos, estadoCompromiso, evaluarCalidad } from './lib/salud'
 
 type Cell = unknown
 class FakeSheet {
@@ -25,6 +29,7 @@ class FakeSheet {
   getFilter() { return this.filter }
   appendRow(row: Cell[]) { this.rows.push([...row]); this.writes++ }
   deleteRow(n: number) { this.rows.splice(n - 1, 1); this.writes++ }
+  deleteRows(n: number, k: number) { this.rows.splice(n - 1, k); this.writes++ }
   getRange(a: number | string, c?: number, nr = 1, nc = 1): FakeRange {
     if (typeof a === 'string') return new FakeRange(this, 1, 1, 0, 0)
     return new FakeRange(this, a, c!, nr, nc)
@@ -840,6 +845,55 @@ describe('backend Apps Script', () => {
     expect(b.post('saveCarpetaRespaldo', { carpeta: '' }).data).toMatchObject({ nombre: 'Backup', personalizada: false })
     b.post('backup')
     expect(backup.files).toHaveLength(3)
+  })
+
+  it('datos de prueba jul–sep: ≥20 gastos por mes, todas las casuísticas de salud, y borrarDatosPrueba deja todo como estaba', async () => {
+    b.post('saveGasto', gasto())                                                               // un gasto "real" que no se debe tocar
+    const fotos = () => JSON.stringify([...b.ss.sheets.entries()].map(([n, sh]) => [n, sh.rows.filter(r => r.some(v => v !== '' && v !== undefined))]))
+    const antes = fotos()
+    const gen = b.g as unknown as { generarDatosPrueba: () => Record<string, number>; borrarDatosPrueba: () => Record<string, number> }
+    const r = gen.generarDatosPrueba()
+    expect(r.gastos).toBeGreaterThanOrEqual(75)
+    expect(() => gen.generarDatosPrueba()).toThrow(/Ya hay datos de prueba/)              // no duplica
+    const api = createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw new Error(x.error.message); return x.data })
+    const d = await api.getData(true)
+    const porMes = (m: string) => d.gastos.filter(x => x.origen === 'prueba' && x.fecha.startsWith(m)).length
+    for (const m of ['2026-07', '2026-08', '2026-09']) expect(porMes(m)).toBeGreaterThanOrEqual(20)
+    const plantillas = await api.getPlantillas()
+    const vinculos = new Map(d.vinculos!)
+    const rates = { ...ratesFromConfig(d.config), USD: 3.7 }
+    const sep = { preset: 'custom' as const, desde: '2026-09-01', hasta: '2026-09-30', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
+    const ago = { ...sep, desde: '2026-08-01', hasta: '2026-08-31' }
+    // Compromisos: cubiertos, parciales, pendientes, sin monto (estimado / por confirmar), en USD y con exceso
+    const est = (f: typeof sep) => Object.fromEntries(calcularCompromisos({ gastos: d.gastos, plantillas, vinculos, desde: f.desde, hasta: f.hasta, base: 'PEN', rates })
+      .items.filter(i => i.plantilla.descripcion.includes('(prueba)')).map(i => [i.plantilla.descripcion, estadoCompromiso(i)]))
+    expect(est(sep)).toMatchObject({ 'Luz (prueba)': 'parcial', 'Internet (prueba)': 'cubierto', 'Gimnasio (prueba)': 'pendiente', 'Seguro auto (prueba)': 'pagado-estimado',
+      'Cuidado infantil (prueba)': 'pendiente', 'Claude (prueba)': 'cubierto', 'Netflix (prueba)': 'cubierto' })
+    expect(est(ago)).toMatchObject({ 'Gimnasio (prueba)': 'parcial', 'Seguro auto (prueba)': 'por-confirmar', 'Luz (prueba)': 'cubierto' })
+    // Calidad de datos: integridad, clasificación inválida e histórica, catálogo repetido y duplicados
+    const calidad = (f: typeof sep) => evaluarCalidad({ gastos: d.gastos, f, catalogo: d.catalogo, medios: d.medios, monedas: ['PEN', 'USD'], revisiones: [] })
+    const cs = calidad(sep), ca = calidad(ago), cj = calidad({ ...sep, desde: '2026-07-01', hasta: '2026-07-31' })
+    const problemas = new Set([...cs.conProblemas, ...ca.conProblemas, ...cj.conProblemas].flatMap(x => x.problemas))
+    for (const pr of ['id', 'id-repetido', 'fecha', 'monto', 'moneda', 'ambito', 'medio', 'estado']) expect(problemas.has(pr as never), pr).toBe(true)
+    expect(cs.invalidas.some(x => x.c.sugerencia?.ambito === 'Familia')).toBe(true)
+    expect(cj.historicas.length).toBeGreaterThan(0)
+    expect(cs.catalogo.some(x => x.tipo === 'repetida')).toBe(true)
+    expect(ca.similares.length).toBeGreaterThanOrEqual(1)
+    expect(cs.indice!).toBeLessThan(100)
+    // Presupuesto por fuente de prueba (sep excedido) y evolución con cambios entre meses
+    const ctx = { base: 'PEN', rates, today: '2026-10-12', cajas: d.cajas, presupuestos: d.presupuestos, fuentes: d.fuentes, fuentesMeses: d.fuentesMeses }
+    const aSep = aggregate(d.gastos, sep, ctx)
+    expect(aSep.cajas.fuentes.lista.find(x => x.fuente.id === 'f-prueba-presupuesto')!.aporta).toBe(150000)
+    expect(aSep.cajas.disponible).toBeLessThan(0)
+    const evo = compararPeriodos({ gastos: d.gastos, f: sep, actual: { desde: sep.desde, hasta: sep.hasta }, anterior: { desde: ago.desde, hasta: ago.hasta }, nivel: 'categoria', base: 'PEN', rates })
+    expect(evo.hayHistorial).toBe(true)
+    expect(evo.aumentaron.some(f => f.nombre === 'Alimentación')).toBe(true)
+    expect(evo.disminuyeron.length + evo.aumentaron.length).toBeGreaterThan(2)
+    // borrar: vuelve exactamente al estado anterior (el gasto real queda intacto)
+    const out = gen.borrarDatosPrueba()
+    expect(out.gastos).toBe(r.gastos)
+    expect(fotos()).toBe(antes)
+    expect(b.props.get('PRUEBA_DATOS')).toBeUndefined()
   })
 
   it('reorderGastos: guarda el orden en su propia hoja sin tocar GASTOS', () => {

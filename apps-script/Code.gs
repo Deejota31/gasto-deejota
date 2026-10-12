@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.9.1';
+var APP_VERSION = '1.9.2';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -939,6 +939,179 @@ function savePresupuesto_(p) {
   }
   appendRows_(sh, [[p.periodo, cajaId, monto]]);
   return [p.periodo, cajaId, monto];
+}
+
+/* ===================== Datos de prueba (julio–septiembre 2026) ===================== */
+/*
+ * generarDatosPrueba(): agrega ~25 gastos por mes en jul/ago/sep 2026 con todas las casuísticas de Salud financiera
+ * (compromisos cubiertos, parciales, pendientes, sin monto, en USD y con exceso; errores de calidad; duplicados;
+ * clasificación inválida e histórica; nuevos ámbitos, categorías, subcategorías y medios; una fuente de presupuesto).
+ * Todo queda marcado: gastos con Origen = "prueba", y lo demás registrado en la propiedad PRUEBA_DATOS.
+ * borrarDatosPrueba() elimina exactamente eso y nada más. Ambas hacen un respaldo antes. Ejecútalas desde el editor.
+ */
+var PRUEBA_ORIGEN = 'prueba';
+var PRUEBA_FUENTE = 'f-prueba-presupuesto';
+
+function generarDatosPrueba() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('PRUEBA_DATOS')) throw new Error('Ya hay datos de prueba. Ejecuta borrarDatosPrueba() antes de volver a generarlos.');
+  var ss = openSpreadsheet_(false);
+  var respaldo = backup_();
+  var reg = { plantillas: [], catalogo: [], medios: [], respaldo: respaldo.url };
+  return withLock_(function () {
+    var now = new Date().toISOString();
+    // ---------- Catálogo: un ámbito nuevo, categorías y subcategorías nuevas, una histórica (inactiva) y una fila repetida ----------
+    var catSh = ss.getSheetByName('CATALOGO');
+    var existentes = {};
+    readRows_(ss, 'CATALOGO').forEach(function (r) { existentes[catKey_(r[0], r[1], r[2])] = true; });
+    var nuevasCat = [
+      ['Mascotas', '', '', true, 'paw-print', '#6B8E23'],
+      ['Mascotas', 'Alimento mascota', '', true, 'bone', '#6B8E23'], ['Mascotas', 'Alimento mascota', 'Croquetas', true, '', ''], ['Mascotas', 'Alimento mascota', 'Snacks', true, '', ''],
+      ['Mascotas', 'Veterinaria', '', true, 'stethoscope', '#0E8FA8'], ['Mascotas', 'Veterinaria', 'Consultas', true, '', ''], ['Mascotas', 'Veterinaria', 'Vacunas', true, '', ''],
+      ['Mascotas', 'Veterinaria', 'Baño antiguo', false, '', ''],                 // inactiva: sus gastos salen como "histórica reconocida"
+      ['Personal', 'Gimnasio', '', true, 'dumbbell', '#2F9E6B'], ['Personal', 'Gimnasio', 'Mensualidad', true, '', ''], ['Personal', 'Gimnasio', 'Suplementos', true, '', '']
+    ].filter(function (r) { return !existentes[catKey_(r[0], r[1], r[2])]; });
+    if (!existentes[catKey_('Mascotas', 'Veterinaria', 'Vacunas')]) nuevasCat.push(['Mascotas', 'Veterinaria', 'Vacunas', true, '', '']); // repetida a propósito: alerta de Catálogo
+    var filasCat = nuevasCat.map(function (r) { return r.concat(['']); });
+    appendRows_(catSh, filasCat);
+    reg.catalogo = filasCat.map(function (r) { return catKey_(r[0], r[1], r[2]); });
+    // ---------- Medios de pago: uno nuevo activo y uno inactivo ----------
+    var medSh = ss.getSheetByName('MEDIOS_PAGO');
+    var medEx = {};
+    readRows_(ss, 'MEDIOS_PAGO').forEach(function (r) { medEx[norm_(r[0])] = true; });
+    var nuevosMed = [['Tarjeta de crédito', true], ['BIM', false]].filter(function (m) { return !medEx[norm_(m[0])]; });
+    appendRows_(medSh, nuevosMed);
+    reg.medios = nuevosMed.map(function (m) { return m[0]; });
+    // ---------- Compromisos de prueba (plantillas marcadas como compromiso) ----------
+    var plSh = plantillasSheet_();
+    var pl = {};
+    var defs = [
+      ['luz', 'Familia', 'Servicios', 'Luz', 'Luz (prueba)', 60, 'PEN', 'Yape'],
+      ['internet', 'Familia', 'Servicios', 'Internet', 'Internet (prueba)', 95, 'PEN', 'Yape'],
+      ['gym', 'Personal', 'Gimnasio', 'Mensualidad', 'Gimnasio (prueba)', 120, 'PEN', 'Tarjeta de crédito'],
+      ['seguro', 'Personal', 'Auto', 'Seguro Vehicular', 'Seguro auto (prueba)', '', 'PEN', 'Transferencia'],
+      ['cuidado', 'Familia', 'Bebé', 'Cuidado Infantil', 'Cuidado infantil (prueba)', 480, 'PEN', 'Yape'],
+      ['claude', 'Personal', 'Suscripciones', 'Claude', 'Claude (prueba)', 20, 'USD', 'Tarjeta de crédito'],
+      ['netflix', 'Personal', 'Suscripciones', 'Netflix', 'Netflix (prueba)', 45, 'PEN', 'Tarjeta de crédito']
+    ];
+    var ordenBase = Math.max(lastDataRow_(plSh) - 1, 0) + 1;
+    appendRows_(plSh, defs.map(function (d, i) {
+      var id = Utilities.getUuid();
+      pl[d[0]] = id; reg.plantillas.push(id);
+      return [id, d[1], d[2], d[3], d[4], now, now, d[5], d[6], d[7], ordenBase + i, true];
+    }));
+    // ---------- Gastos ----------
+    var gastos = [], vinc = [];
+    var g = function (fecha, monto, moneda, amb, cat, sub, desc, medio, opts) {
+      opts = opts || {};
+      var id = opts.id || Utilities.getUuid();
+      gastos.push([fecha, monto, moneda, cat, sub, desc, medio, opts.tipo || 'Variable', amb, !!opts.plantilla, opts.estado || 'Activo', PRUEBA_ORIGEN, '', id, now, now]);
+      if (opts.plantilla) vinc.push([id, pl[opts.plantilla], now]);
+    };
+    var meses = ['2026-07', '2026-08', '2026-09'];
+    meses.forEach(function (m, k) {
+      var d = function (n) { return m + '-' + (n < 10 ? '0' + n : n); };
+      // Compromisos: cada mes con un comportamiento distinto
+      g(d(3), [58, 61, 55][k], 'PEN', 'Familia', 'Servicios', 'Luz', 'Luz', 'Yape', { tipo: 'Fijo', plantilla: 'luz' });            // jul cubierto, ago exceso, sep parcial
+      g(d(4), 95, 'PEN', 'Familia', 'Servicios', 'Internet', 'Internet', 'Yape', { tipo: 'Fijo', plantilla: 'internet' });           // siempre cubierto
+      if (k === 0) g(d(5), 120, 'PEN', 'Personal', 'Gimnasio', 'Mensualidad', 'Gimnasio', 'Tarjeta de crédito', { tipo: 'Fijo', plantilla: 'gym' });
+      if (k === 1) g(d(5), 60, 'PEN', 'Personal', 'Gimnasio', 'Mensualidad', 'Gimnasio (mitad)', 'Tarjeta de crédito', { tipo: 'Fijo', plantilla: 'gym' }); // parcial; sep pendiente
+      if (k !== 1) g(d(8), 150, 'PEN', 'Personal', 'Auto', 'Seguro Vehicular', 'Seguro auto', 'Transferencia', { tipo: 'Fijo', plantilla: 'seguro' }); // sin monto: estimado
+      if (k !== 2) g(d(6), 480, 'PEN', 'Familia', 'Bebé', 'Cuidado Infantil', 'Cuidado infantil', 'Yape', { tipo: 'Fijo', plantilla: 'cuidado' }); // sep pendiente
+      g(d(10), 20, 'USD', 'Personal', 'Suscripciones', 'Claude', 'Claude Pro', 'Tarjeta de crédito', { tipo: 'Fijo', plantilla: 'claude' }); // en dólares
+      g(d(12), 45, 'PEN', 'Personal', 'Suscripciones', 'Netflix', 'Netflix', 'Tarjeta de crédito', { tipo: 'Fijo', plantilla: 'netflix' });
+      if (k === 1) g(d(12), 45, 'PEN', 'Personal', 'Suscripciones', 'Netflix', 'Netflix', 'Tarjeta de crédito', { tipo: 'Fijo', plantilla: 'netflix' }); // cobro doble: duplicado + exceso
+      // Gastos del día a día (delivery sube, taxi baja, mascotas nuevo, Sodexo, pareja)
+      [2, 6, 9, 13, 16, 20, 23, 27].forEach(function (dia, i) { g(d(dia), 12 + ((i * 7 + k * 3) % 9), 'PEN', 'Personal', 'Alimentación', 'Almuerzo', 'Menú', i % 3 ? 'Sodexo' : 'Yape'); });
+      for (var x = 0; x < [2, 3, 5][k]; x++) g(d(7 + x * 5), [30, 35, 42][k] + x, 'PEN', 'Personal', 'Alimentación', 'Delivery', 'Delivery', 'Plin');
+      for (var y = 0; y < [4, 2, 1][k]; y++) g(d(11 + y * 4), 9 + y, 'PEN', 'Personal', 'Transporte', 'Taxi', 'Taxi', 'Efectivo');
+      g(d(14), [180, 210, 260][k], 'PEN', 'Familia', 'Hogar', 'Supermercado', 'Supermercado', 'Tarjeta de crédito');
+      g(d(15), 90, 'PEN', 'Mascotas', 'Alimento mascota', 'Croquetas', 'Croquetas Rocco', 'Yape');
+      if (k === 1) g(d(18), 70, 'PEN', 'Mascotas', 'Veterinaria', 'Vacunas', 'Vacuna anual', 'Tarjeta de crédito');
+      g(d(19), [40, 55, 38][k], 'PEN', 'Personal', 'Auto', 'Gasolina', 'Grifo', 'Plin');
+      g(d(21), [35, 0, 70][k] || 25, 'PEN', 'Pareja', 'Salidas', 'Cine', 'Cine', 'Yape');
+      g(d(24), 100, 'PEN', 'Familia', 'Apoyo Familiar', 'Madre', 'Propina Madre', 'Yape');
+      g(d(25), [18, 22, 30][k], 'PEN', 'Personal', 'Salud', 'Medicamentos', 'Farmacia', 'Efectivo');
+    });
+    // ---------- Casos para Calidad de datos ----------
+    g('2026-07-17', 35, 'PEN', 'Mascotas', 'Veterinaria', 'Baño antiguo', 'Baño Rocco', 'Yape');               // histórica reconocida
+    g('2026-07-22', 25, 'PEN', 'Personal', 'Alimentación', 'Cena', 'Cena con BIM', 'BIM');                      // medio inactivo (válido)
+    g('2026-07-26', 15, 'PEN', 'Personal', 'Alimentación', 'Snack / Antojos', 'Pago cripto', 'Bitcoin');        // medio desconocido
+    g('2026-07-29', 60, 'PEN', 'Pareja', 'Salidas', 'Cine', 'Entrada anulada', 'Yape', { estado: 'Anulado' }); // anulado: no cuenta
+    g('2026-08-09', 0, 'PEN', 'Personal', 'Alimentación', 'Bebidas', 'Monto en cero', 'Yape');                  // monto inválido
+    g('2026-08-16', 20, 'PEN', 'Personal', 'Alimentación', 'Cena', 'Pendiente de confirmar', 'Yape', { estado: 'Pendiente' }); // estado raro
+    g('2026-08-22', 38, 'PEN', 'Pareja', 'Alimentación', 'Cena', 'Norkys', 'Plin');                             // duplicado exacto ↓
+    g('2026-08-22', 38, 'PEN', 'Pareja', 'Alimentación', 'Cena', 'Norkys', 'Plin');
+    g('2026-09-03', 45, 'PEN', 'Personal', 'Bebé', 'Pañales', 'Pañales (mal clasificado)', 'Yape');            // clasificación inválida
+    g('2026-09-11', 12, 'EUR', 'Personal', 'Suscripciones', 'Otros', 'App en euros', 'Tarjeta de crédito');     // moneda no configurada
+    g('2026-09-17', 150, 'PEN', 'Vacaciones', 'Viajes', 'Hotel', 'Hotel Paracas', 'Tarjeta de crédito');      // ámbito inexistente
+    g('2026-09-31', 22, 'PEN', 'Personal', 'Alimentación', 'Almuerzo', 'Fecha imposible', 'Yape');             // fecha inválida
+    g('2026-09-20', 10, 'PEN', 'Personal', 'Alimentación', 'Bebidas', 'ID mal escrito', 'Yape', { id: 'prueba-id-invalido' });
+    var repetido = Utilities.getUuid();
+    g('2026-09-21', 11, 'PEN', 'Personal', 'Alimentación', 'Bebidas', 'ID repetido A', 'Yape', { id: repetido });
+    g('2026-09-22', 13, 'PEN', 'Personal', 'Alimentación', 'Bebidas', 'ID repetido B', 'Yape', { id: repetido });
+    appendRows_(ss.getSheetByName('GASTOS'), gastos);
+    vincular_(ss, vinc.map(function (v) { return [v[0], v[1]]; }));
+    // ---------- Presupuesto de jul–sep: fuente de un solo mes con importes propios (no afecta octubre) ----------
+    var h = fuentesSheets_();
+    appendRows_(h.fuentes, [[PRUEBA_FUENTE, 'Presupuesto prueba (jul–sep)', 2500, 'PEN', '#6366F1', '', true, 99, 'unica', '2026-07', '', now, now]]);
+    appendRows_(h.meses, [[PRUEBA_FUENTE, '2026-08', 2500, 'solo', now], [PRUEBA_FUENTE, '2026-09', 1500, 'solo', now]]);
+    props.setProperty('PRUEBA_DATOS', JSON.stringify(reg));
+    invalidateCache_();
+    var resumen = { gastos: gastos.length, vinculos: vinc.length, compromisos: reg.plantillas.length, catalogo: filasCat.length, medios: reg.medios.length, respaldo: respaldo.url };
+    Logger.log('Datos de prueba creados: ' + JSON.stringify(resumen));
+    return resumen;
+  });
+}
+
+// Borra filas que cumplen la condición, de abajo hacia arriba y por bloques contiguos (pocas llamadas).
+function borrarFilasSi_(sh, ancho, cumple) {
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  if (!n) return 0;
+  var rows = sh.getRange(2, 1, n, ancho).getValues();
+  var borradas = 0;
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (!cumple(rows[i])) continue;
+    var fin = i;
+    while (i - 1 >= 0 && cumple(rows[i - 1])) i--;
+    sh.deleteRows(i + 2, fin - i + 1);
+    borradas += fin - i + 1;
+  }
+  return borradas;
+}
+
+function borrarDatosPrueba() {
+  var props = PropertiesService.getScriptProperties();
+  var reg = JSON.parse(props.getProperty('PRUEBA_DATOS') || 'null');
+  var ss = openSpreadsheet_(false);
+  var respaldo = backup_();
+  return withLock_(function () {
+    var gSh = ss.getSheetByName('GASTOS');
+    var ids = {};
+    var n = Math.max(lastDataRow_(gSh) - 1, 0);
+    (n ? gSh.getRange(2, 1, n, SHEETS.GASTOS.length).getValues() : []).forEach(function (r) { if (str_(r[G.ORIGEN]) === PRUEBA_ORIGEN) ids[str_(r[G.ID]).toLowerCase()] = true; });
+    var out = { gastos: borrarFilasSi_(gSh, SHEETS.GASTOS.length, function (r) { return str_(r[G.ORIGEN]) === PRUEBA_ORIGEN; }) };
+    var vSh = ss.getSheetByName('VINCULOS_PLANTILLAS');
+    var pls = {};
+    ((reg && reg.plantillas) || []).forEach(function (id) { pls[id] = true; });
+    out.vinculos = vSh ? borrarFilasSi_(vSh, 3, function (r) { return ids[str_(r[0]).toLowerCase()] || pls[str_(r[1])]; }) : 0;
+    var plSh = ss.getSheetByName('PLANTILLAS_MENSUALES');
+    out.compromisos = plSh ? borrarFilasSi_(plSh, 1, function (r) { return pls[str_(r[0])]; }) : 0;
+    var claves = {};
+    ((reg && reg.catalogo) || []).forEach(function (k) { claves[k] = true; });
+    out.catalogo = borrarFilasSi_(ss.getSheetByName('CATALOGO'), 3, function (r) { return claves[catKey_(r[0], r[1], r[2])]; });
+    var medios = {};
+    ((reg && reg.medios) || []).forEach(function (m) { medios[norm_(m)] = true; });
+    out.medios = borrarFilasSi_(ss.getSheetByName('MEDIOS_PAGO'), 1, function (r) { return medios[norm_(r[0])]; });
+    var fSh = ss.getSheetByName('FUENTES'), fmSh = ss.getSheetByName('FUENTES_MESES');
+    out.fuentes = fSh ? borrarFilasSi_(fSh, 1, function (r) { return str_(r[0]) === PRUEBA_FUENTE; }) : 0;
+    if (fmSh) borrarFilasSi_(fmSh, 1, function (r) { return str_(r[0]) === PRUEBA_FUENTE; });
+    props.deleteProperty('PRUEBA_DATOS');
+    invalidateCache_();
+    out.respaldo = respaldo.url;
+    Logger.log('Datos de prueba eliminados: ' + JSON.stringify(out));
+    return out;
+  });
 }
 
 /* ===================== Atajos de iPhone (v1.9) ===================== */

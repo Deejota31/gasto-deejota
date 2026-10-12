@@ -757,8 +757,9 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     const lista = page.getByRole('list', { name: 'Compromisos' })
-    await expect(lista.getByTestId('compromiso').filter({ hasText: 'Luz' })).toContainText('Cubierto')
     await expect(lista.getByTestId('compromiso').filter({ hasText: 'Internet' })).toContainText('Parcial')
+    await page.getByTestId('grupo-cubiertos').click()                                       // los cubiertos van contraídos
+    await expect(lista.getByTestId('compromiso').filter({ hasText: 'Luz' })).toContainText('Cubierto')
     const pend0 = await valor(page, 'comp-pendiente')
     await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
     const gastado0 = await valor(page, 'pres-gastado'), tras0 = await valor(page, 'pres-tras'), pres = await valor(page, 'pres-presupuesto')
@@ -778,6 +779,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     expect(await valor(page, 'pres-pendiente')).toBeCloseTo(pend0 - 50, 2)
     expect(await valor(page, 'pres-tras')).toBeCloseTo(tras0, 2)          // no se descuenta dos veces
     await page.getByRole('tab', { name: /Compromisos/ }).click()
+    await page.getByTestId('grupo-cubiertos').click()
     await expect(lista.getByTestId('compromiso').filter({ hasText: 'Internet' })).toContainText('Cubierto')
     // la plantilla conserva su monto predeterminado
     await go(page, 'Dashboard')
@@ -800,10 +802,16 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     const spotify = page.getByRole('list', { name: 'Compromisos' }).getByTestId('compromiso').filter({ hasText: 'Spotify' })
     await expect(spotify).toContainText('Pendiente')
-    await spotify.getByRole('button', { name: 'Asociar un movimiento a Spotify' }).click()
+    await spotify.getByRole('button', { name: 'Acciones de Spotify' }).click()
+    await page.getByRole('menuitem', { name: 'Asociar movimiento' }).click()
     await dialog(page).getByRole('list', { name: 'Movimientos disponibles' }).getByRole('button', { name: 'Asociar' }).first().click()
     await expect(page.getByRole('status').filter({ hasText: 'Movimiento asociado a Spotify' })).toBeVisible()
-    await expect(spotify.getByRole('button', { name: /^Quitar vínculo/ })).toHaveCount(1)
+    // puede haber pasado a "Cubiertos" (grupo contraído)
+    const cub = page.getByTestId('grupo-cubiertos')
+    if (await cub.count() && (await cub.getAttribute('aria-expanded')) === 'false' && !(await spotify.count())) await cub.click()
+    await spotify.getByRole('button', { name: /^Spotify/ }).click()
+    await expect(spotify.getByTestId('compromiso-detalle')).toContainText('Gastos vinculados · 1')
+    await expect(spotify.getByRole('button', { name: /^Acciones del pago/ })).toHaveCount(1)
   })
 
   test('salud de datos: Propina Madre aparece como coincidencia, se marca legítima y no se elimina nada', async ({ page }) => {
@@ -1099,7 +1107,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivada' })).toBeVisible()
     // Dashboard y Salud financiera usan el mismo cálculo
     await go(page, 'Dashboard')
-    expect(money(await kpi(page, 'Presupuesto').innerText())).toBe(3780)
+    expect(money(await page.getByTestId('cons-presupuesto-consolidado').locator('p').nth(1).innerText())).toBe(3780)
     expect(money(await kpi(page, 'Disponible').innerText())).toBeCloseTo(3780 - gastado, 2)
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
@@ -1110,7 +1118,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await fuente(page, 'Extra 1').getByRole('switch', { name: 'Activar Extra 1' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await go(page, 'Dashboard')
-    expect(money(await kpi(page, 'Presupuesto').innerText())).toBe(4780)
+    expect(money(await page.getByTestId('cons-presupuesto-consolidado').locator('p').nth(1).innerText())).toBe(4780)
   })
 
   test('por mes: Extra 1 no se arrastra; ajustar General solo en noviembre no cambia octubre', async ({ page }) => {
@@ -1243,14 +1251,14 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
   const celdas = async (page: Page) => Object.fromEntries(await page.getByTestId('consolidado').locator('[data-testid^="cons-"]').evaluateAll(els =>
     els.map(e => [e.getAttribute('data-testid'), e.querySelectorAll('p')[1]?.textContent ?? ''])))
 
-  test('orden: KPIs → Presupuesto consolidado → acordeones → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
+  test('orden: filtros → Presupuesto consolidado → acordeones → KPIs → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3')
     const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y
     const kpiY = await y(page.getByText('Total gastado', { exact: true }).first())
     const consY = await y(page.getByTestId('caja-general'))
     const accY = await y(page.getByTestId('resumen-cajas'))
     const chartY = await y(page.getByText(/^Gasto acumulado/).first())
-    expect(kpiY).toBeLessThan(consY); expect(consY).toBeLessThan(accY); expect(accY).toBeLessThan(chartY)
+    expect(consY).toBeLessThan(accY); expect(accY).toBeLessThan(kpiY); expect(kpiY).toBeLessThan(chartY)
     await expect(page.getByTestId('consolidado-subtitulo')).toContainText(/3 fuentes activas · \w+ \d{4}/)
     const fuentes = page.getByRole('button', { name: /^Fuentes de dinero/ }), subcajas = page.getByRole('button', { name: /^Subcajas \/ reservas/ })
     await expect(fuentes).toHaveAttribute('aria-expanded', 'false')
@@ -1343,4 +1351,35 @@ test('respaldos: la carpeta se ve en Configuración y se puede cambiar pegando u
   await expect(box).toContainText('Mi carpeta de respaldos')
   await box.getByRole('button', { name: 'Usar la de junto a la hoja' }).click()
   await expect(box).toContainText('junto a tu hoja')
+})
+
+test('compromisos: panel compacto — resumen, orden por estado, cubiertos contraídos, detalle y menú; sin desborde en el celular', async ({ page }) => {
+  await go(page, 'Salud financiera')
+  await page.getByRole('tab', { name: /Compromisos/ }).click()
+  await expect(page.getByTestId('comp-resumen')).toContainText('Previsto')
+  await expect(page.getByTestId('comp-resumen')).toContainText('Pagado')
+  await expect(page.getByTestId('comp-resumen')).toContainText('Pendiente')
+  const filas = page.getByRole('list', { name: 'Compromisos' }).getByTestId('compromiso')
+  const estados = await filas.evaluateAll(els => els.map(e => e.getAttribute('data-estado')))
+  const rango = (e: string | null) => (e === 'pendiente' || e === 'parcial' ? 0 : e === 'por-confirmar' ? 1 : 2)
+  expect(estados.map(rango)).toEqual([...estados.map(rango)].sort((a, b) => a - b))           // pendientes → por confirmar → cubiertos
+  expect(estados).not.toContain('cubierto')                                                    // cubiertos contraídos por defecto
+  const g = page.getByTestId('grupo-cubiertos')
+  await expect(g).toHaveAttribute('aria-expanded', 'false')
+  await g.click()
+  await expect(page.getByRole('list', { name: 'Compromisos cubiertos' }).getByTestId('compromiso').first()).toBeVisible()
+  // detalle: categoría, caja, medio, notas y pagos vinculados
+  const luz = filas.filter({ hasText: 'Luz' })
+  await luz.getByRole('button', { name: /^Luz/ }).click()
+  const det = luz.getByTestId('compromiso-detalle')
+  for (const t of ['Categoría', 'Caja asignada', 'Medio de pago', 'Notas', 'Gastos vinculados']) await expect(det).toContainText(t)
+  await expect(luz.getByTestId('estado-compromiso')).toHaveText(/Cubierto/)                   // estado con texto
+  // acciones secundarias en menú
+  await luz.getByRole('button', { name: 'Acciones de Luz' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Asociar movimiento' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  for (const vp of [{ width: 360, height: 780 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(vp)
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  }
 })
