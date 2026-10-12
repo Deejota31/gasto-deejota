@@ -28,6 +28,15 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.9.2
+
+| Punto | Qué cambió |
+|---|---|
+| Compromisos | Panel compacto en vez de tarjetas: resumen Previsto / Pagado / Pendiente (confirmado vs estimado por plantillas sin monto), filas con importes y estado en texto, detalle desplegable (categoría, caja asignada, medio, notas, pagos vinculados), orden pendientes → por confirmar → cubiertos (contraídos) y acciones en menú ⋯. Misma lógica de cálculo. |
+| Dashboard | Presupuesto consolidado y acordeones justo debajo de los filtros; luego los KPIs. |
+| Datos de prueba | `generarDatosPrueba()` crea ~25 gastos por mes en jul–sep 2026 con todas las casuísticas de Salud financiera; `borrarDatosPrueba()` elimina solo eso (Origen = prueba y lo registrado en PRUEBA_DATOS). Ambas respaldan antes. |
+| Respaldos | En la carpeta Backup junto a la hoja (editable en Configuración). Requiere el permiso de Drive en `appsscript.json`. |
+
 ## Novedades v1.9.0
 
 | Punto | Qué cambió |

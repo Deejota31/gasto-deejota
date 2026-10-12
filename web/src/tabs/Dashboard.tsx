@@ -66,6 +66,13 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             <ErrorBox tone="warning" message={`${a.excluidosSinTipoCambio} movimiento(s) en otra moneda no se suman porque falta su tipo de cambio en Configuración.`} />
           )}
 
+          {/* Primero el presupuesto consolidado y sus acordeones, luego los KPIs */}
+          <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
+            accion={a.cajas.origen !== 'fuentes' && a.cajas.general
+              ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
+              : undefined} />
+          <ResumenCajas c={a.cajas} money={money} onIrCajas={onIrCajas} />
+
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : 'Sin definir'}
               hint={a.cajas.origen === 'fuentes' ? `${a.cajas.fuentes.activas} fuente${a.cajas.fuentes.activas === 1 ? '' : 's'} · reservado ${money(a.cajas.reservado)}` : a.cajas.presupuesto ? `Reservado ${money(a.cajas.reservado)}` : 'Defínela en Cajas'}
@@ -94,11 +101,6 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               info={<p>Cantidad de gastos activos que cumplen los filtros.</p>} />
           </div>
 
-          <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
-            accion={a.cajas.origen !== 'fuentes' && a.cajas.general
-              ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
-              : undefined} />
-          <ResumenCajas c={a.cajas} money={money} onIrCajas={onIrCajas} />
 
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>
