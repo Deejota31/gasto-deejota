@@ -133,6 +133,7 @@ const toFuente = (r: z.infer<typeof fuenteRow>): Fuente => ({
   recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12],
 })
 const toFuenteMes = (r: z.infer<typeof fuenteMesRow>): FuenteMes => ({ fuenteId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
+export interface CarpetaRespaldo { id: string; nombre: string; url: string; personalizada: boolean }
 export type FuenteInput = Omit<Fuente, 'creadoEn' | 'actualizadoEn'>
 
 const dataSchema = z.object({
@@ -303,7 +304,11 @@ export function createApi(t: Transport) {
       await t('deletePlantilla', { id })
     },
     diagnose: () => t('diagnose', {}) as Promise<Record<string, unknown>>,
-    backup: () => t('backup', {}) as Promise<{ nombre: string; url: string }>,
+    /** Carpeta de Drive donde se guardan los respaldos. */
+    carpetaRespaldo: () => t('carpetaRespaldo', {}) as Promise<CarpetaRespaldo>,
+    /** Cambia la carpeta (enlace o ID de Drive); vacío = carpeta "Backup" junto a la hoja. */
+    saveCarpetaRespaldo: (carpeta: string) => t('saveCarpetaRespaldo', { carpeta }) as Promise<CarpetaRespaldo>,
+    backup: () => t('backup', {}) as Promise<{ nombre: string; url: string; carpeta?: string; carpetaUrl?: string; aviso?: string }>,
   }
 }
 
