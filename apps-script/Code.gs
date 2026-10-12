@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.9.0';
+var APP_VERSION = '1.9.1';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -737,9 +737,9 @@ function invalidateCache_() {
 
 /* ===================== Escritura ===================== */
 
-var READ_ONLY = { data: true, diagnose: true, backup: true, plantillas: true };
+var READ_ONLY = { data: true, diagnose: true, backup: true, plantillas: true, carpetaRespaldo: true };
 // Escrituras que no cambian los datos del dashboard: no invalidan su caché.
-var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true, reorderPlantillas: true };
+var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true, reorderPlantillas: true, saveCarpetaRespaldo: true };
 
 var ACTIONS = {
   data: function (p) { return getData_(p.fresh === true); },
@@ -766,7 +766,9 @@ var ACTIONS = {
   saveFuente: saveFuente_,
   saveFuenteMes: saveFuenteMes_,
   reorderFuentes: reorderFuentes_,
-  migrarGeneralAFuente: migrarGeneralAFuente_
+  migrarGeneralAFuente: migrarGeneralAFuente_,
+  carpetaRespaldo: carpetaRespaldoInfo_,
+  saveCarpetaRespaldo: saveCarpetaRespaldo_
 };
 
 function saveGasto_(p, origen) {
@@ -1232,11 +1234,71 @@ function diagnose_() {
   return { version: APP_VERSION, sheetUrl: ss.getUrl(), filas: counts, cacheActiva: !!CacheService.getScriptCache().get(CACHE_KEY + ':' + cacheGen_() + ':n'), lecturaMs: Date.now() - t0 };
 }
 
+/**
+ * Respaldo completo del archivo dentro de la carpeta "Backup" que está junto a tu hoja (p. ej. MicroApps/Backup).
+ * Si la carpeta no existe, la crea. Para usar otra carpeta, guarda su ID en la propiedad del script BACKUP_FOLDER_ID.
+ * Si Drive no está autorizado todavía, cae al comportamiento anterior (copia en Mi unidad) y lo informa.
+ */
 function backup_() {
   var ss = openSpreadsheet_(false);
   var name = SPREADSHEET_NAME + ' - Respaldo ' + Utilities.formatDate(new Date(), 'America/Lima', 'yyyy-MM-dd HH:mm');
-  var copy = ss.copy(name);
-  return { nombre: name, url: copy.getUrl() };
+  try {
+    var carpeta = carpetaRespaldos_(ss);
+    var copia = DriveApp.getFileById(ss.getId()).makeCopy(name, carpeta);
+    return { nombre: name, url: copia.getUrl(), carpeta: carpeta.getName(), carpetaUrl: carpeta.getUrl() };
+  } catch (e) {
+    console.warn('Respaldo sin carpeta (¿falta autorizar Drive?): ' + e.message);
+    var copy = ss.copy(name);
+    return { nombre: name, url: copy.getUrl(), carpeta: 'Mi unidad', aviso: 'No se pudo usar la carpeta Backup: ejecuta autorizarRespaldos() en Apps Script.' };
+  }
+}
+
+function carpetaRespaldos_(ss) {
+  var id = PropertiesService.getScriptProperties().getProperty('BACKUP_FOLDER_ID');
+  if (id) return DriveApp.getFolderById(id);
+  var padres = DriveApp.getFileById(ss.getId()).getParents();
+  var padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  var existentes = padre.getFoldersByName('Backup');
+  var carpeta = existentes.hasNext() ? existentes.next() : padre.createFolder('Backup');
+  PropertiesService.getScriptProperties().setProperty('BACKUP_FOLDER_ID', carpeta.getId());
+  return carpeta;
+}
+
+function carpetaInfo_(c, personalizada) { return { id: c.getId(), nombre: c.getName(), url: c.getUrl(), personalizada: personalizada }; }
+
+// Carpeta donde se guardan los respaldos (solo lectura).
+function carpetaRespaldoInfo_() {
+  var personalizada = !!PropertiesService.getScriptProperties().getProperty('BACKUP_FOLDER_PERSONALIZADA');
+  try { return carpetaInfo_(carpetaRespaldos_(openSpreadsheet_(false)), personalizada); }
+  catch (e) { throw appError_('PERMISSION', 'Falta autorizar Drive: ejecuta autorizarRespaldos() en Apps Script.'); }
+}
+
+/**
+ * Cambia la carpeta de respaldos. Acepta el enlace de una carpeta de Drive (…/folders/ID) o su ID.
+ * Vacío = volver a la carpeta "Backup" junto a la hoja. Comprueba que la carpeta exista y sea accesible antes de guardarla.
+ */
+function saveCarpetaRespaldo_(p) {
+  var props = PropertiesService.getScriptProperties();
+  var v = str_(p.carpeta);
+  if (!v) {
+    props.deleteProperty('BACKUP_FOLDER_ID'); props.deleteProperty('BACKUP_FOLDER_PERSONALIZADA');
+    return carpetaInfo_(carpetaRespaldos_(openSpreadsheet_(false)), false);
+  }
+  var m = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(v) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(v);
+  var id = m ? m[1] : v;
+  if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) throw appError_('VALIDATION', 'Pega el enlace de una carpeta de Google Drive (…/folders/…) o su ID.');
+  var carpeta;
+  try { carpeta = DriveApp.getFolderById(id); carpeta.getName(); }
+  catch (e) { throw appError_('NOT_FOUND', 'No encuentro esa carpeta o no tienes acceso. Ábrela en Drive y copia el enlace de la barra de direcciones.'); }
+  props.setProperty('BACKUP_FOLDER_ID', id);
+  props.setProperty('BACKUP_FOLDER_PERSONALIZADA', '1');
+  return carpetaInfo_(carpeta, true);
+}
+
+/** Ejecútala una vez desde el editor: pide el permiso de Drive y muestra en qué carpeta quedarán los respaldos. */
+function autorizarRespaldos() {
+  var c = carpetaRespaldos_(openSpreadsheet_(false));
+  Logger.log('Los respaldos se guardarán en: ' + c.getName() + ' → ' + c.getUrl());
 }
 
 // Renombra un ámbito, categoría o subcategoría en el catálogo y en los gastos que la usan,

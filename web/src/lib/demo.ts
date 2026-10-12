@@ -136,6 +136,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     const r = db.vinculos.find(x => String(x[0]).toLowerCase() === gastoId.toLowerCase())
     if (r) r[1] = plantillaId; else if (plantillaId) db.vinculos.push([gastoId, plantillaId, new Date().toISOString()])
   }
+  const CARPETA_DEMO = { id: 'demo-backup-folder', nombre: 'Backup', url: 'https://drive.google.com/drive/', personalizada: false }
+  let carpeta = { ...CARPETA_DEMO }
   const fail = (code: string, message: string) => Object.assign(new Error(message), { code })
   const handlers: Record<string, (p: Record<string, unknown>) => unknown> = {
     data: () => structuredClone({ ...db, vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
@@ -321,7 +323,16 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       return { ok: true }
     },
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
-    backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/' }),
+    backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/', carpeta: carpeta.nombre, carpetaUrl: carpeta.url }),
+    carpetaRespaldo: () => ({ ...carpeta }),
+    saveCarpetaRespaldo: p => {
+      const v = String(p.carpeta ?? '').trim()
+      if (!v) { carpeta = { ...CARPETA_DEMO }; return { ...carpeta } }
+      const id = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(v)?.[1] ?? v
+      if (!/^[A-Za-z0-9_-]{10,}$/.test(id)) throw fail('VALIDATION', 'Pega el enlace de una carpeta de Google Drive (…/folders/…) o su ID.')
+      carpeta = { id, nombre: 'Mi carpeta de respaldos', url: `https://drive.google.com/drive/folders/${id}`, personalizada: true }
+      return { ...carpeta }
+    },
   }
   return async (action, payload) => {
     // Contador de llamadas (solo modo demo) para comprobar en pruebas que no se hacen lecturas de más.

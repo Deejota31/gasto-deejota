@@ -1,16 +1,16 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
-  Activity, Bell, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
+  Activity, Bell, FolderOpen, Pencil, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
   Info, KeyRound, Link2, Loader2, Palette, Plus, RefreshCw, Settings, ShieldCheck, Tags, Unplug, Wallet,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
-import { saveConnection, type Connection } from '../lib/api'
+import { saveConnection, type CarpetaRespaldo, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select, Switch } from '../components/ui'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { sortMedios, medioLook } from '../lib/visual'
 
-export const APP_VERSION = '1.9.0'
+export const APP_VERSION = '1.9.1'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -141,8 +141,13 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <Action icon={<Activity />} title="Diagnóstico" desc="Filas por hoja y estado" loading={busy === 'diag'}
               onClick={() => run('diag', async () => setDiag(JSON.stringify(await store.actions.diagnose(), null, 2)))} />
-            <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu Drive" loading={busy === 'backup'}
-              onClick={() => run('backup', async () => { const r = await store.actions.backup(); window.open(r.url, '_blank', 'noopener') }, 'Respaldo creado en tu Google Drive')} />
+            <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu carpeta Backup" loading={busy === 'backup'}
+              onClick={() => run('backup', async () => {
+                const r = await store.actions.backup()
+                if (r.aviso) showToast('info', `Respaldo creado en ${r.carpeta ?? 'tu Drive'}. ${r.aviso}`)
+                else notify(`Respaldo creado en la carpeta ${r.carpeta ?? 'Backup'}: ${r.nombre}`)
+                window.open(r.carpetaUrl || r.url, '_blank', 'noopener')
+              })} />
             <Action icon={<Download />} title="Exportar todo (CSV)" desc="Todo el historial" disabled={!store.data} onClick={() => {
               const blob = new Blob([toCsv(store.data!.gastos)], { type: 'text/csv;charset=utf-8' })
               const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'gastos-completo.csv'; a.click(); URL.revokeObjectURL(a.href)
@@ -152,6 +157,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
               ? <a href={store.data.sheetUrl} target="_blank" rel="noopener noreferrer" className={ACTION_CLS}><ActionBody icon={<ExternalLink />} title="Abrir hoja" desc="Google Sheets" /></a>
               : <Action icon={<ExternalLink />} title="Abrir hoja" desc="Disponible al conectar" disabled onClick={() => {}} />}
           </div>
+          <CarpetaRespaldos store={store} />
           {diag && <pre className="mt-3 max-h-60 overflow-auto rounded-xl bg-bg p-3 text-xs">{diag}</pre>}
         </Card>
 
@@ -198,6 +204,55 @@ function ActionBody({ icon, title, desc, loading }: { icon: ReactNode; title: st
 }
 function Action({ onClick, disabled, ...b }: { icon: ReactNode; title: string; desc: string; loading?: boolean; disabled?: boolean; onClick: () => void }) {
   return <button type="button" className={ACTION_CLS} onClick={onClick} disabled={disabled || b.loading}><ActionBody {...b} /></button>
+}
+
+/** Carpeta de Drive donde se guardan los respaldos: se lee al abrir Configuración y se puede cambiar pegando un enlace. */
+function CarpetaRespaldos({ store }: { store: AppStore }) {
+  const [info, setInfo] = useState<CarpetaRespaldo | null>(null)
+  const [error, setError] = useState('')
+  const [editando, setEditando] = useState(false)
+  const [valor, setValor] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const api = store.actions
+  useEffect(() => {
+    let vivo = true
+    api.carpetaRespaldo().then(r => { if (vivo) { setInfo(r); setError('') } }, (e: Error) => { if (vivo) setError(e.message) })
+    return () => { vivo = false }
+  }, [api])
+  async function guardar(v: string) {
+    setGuardando(true); setError('')
+    try {
+      const r = await api.saveCarpetaRespaldo(v)
+      setInfo(r); setEditando(false); setValor('')
+      showToast('success', v ? `Los respaldos se guardarán en “${r.nombre}”.` : `Los respaldos vuelven a la carpeta “${r.nombre}” junto a tu hoja.`)
+    } catch (e) { setError((e as Error).message) } finally { setGuardando(false) }
+  }
+  return (
+    <div className="mt-3 rounded-xl border border-line p-3" data-testid="carpeta-respaldos">
+      <div className="flex flex-wrap items-center gap-2">
+        <FolderOpen className="size-4 shrink-0 text-muted" />
+        <span className="text-sm text-muted">Carpeta de respaldos:</span>
+        {info ? <a href={info.url} target="_blank" rel="noopener noreferrer" className="truncate text-sm font-semibold text-navy hover:underline">{info.nombre}</a>
+          : <span className="text-sm text-muted">{error ? '—' : 'Cargando…'}</span>}
+        {info && !info.personalizada && <span className="rounded-full bg-bg px-2 py-0.5 text-[10px] text-muted">junto a tu hoja</span>}
+        <span className="ml-auto flex gap-2">
+          {!editando && <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => { setEditando(true); setError('') }}><Pencil className="size-3.5" /> Cambiar</Button>}
+          {info?.personalizada && !editando && <Button variant="ghost" className="h-8 px-3 text-xs" disabled={guardando} onClick={() => guardar('')}>Usar la de junto a la hoja</Button>}
+        </span>
+      </div>
+      {editando && (
+        <form className="mt-2 flex flex-col gap-2 sm:flex-row" onSubmit={e => { e.preventDefault(); if (valor.trim()) void guardar(valor.trim()) }}>
+          <input aria-label="Enlace de la carpeta de respaldos" className={inputCls} autoFocus placeholder="Pega el enlace de la carpeta: https://drive.google.com/drive/folders/…" value={valor} onChange={e => setValor(e.target.value)} />
+          <div className="flex gap-2">
+            <Button type="submit" disabled={!valor.trim() || guardando} loading={guardando}>Guardar</Button>
+            <Button type="button" variant="outline" onClick={() => { setEditando(false); setValor(''); setError('') }}>Cancelar</Button>
+          </div>
+        </form>
+      )}
+      <p className="mt-1.5 text-[11px] text-muted">En Drive abre la carpeta que quieras y copia el enlace de la barra de direcciones. Cada respaldo es una copia completa de tu hoja.</p>
+      {error && <p className="mt-1 text-xs text-[#C0362C]">{error}</p>}
+    </div>
+  )
 }
 
 function MediosEditor({ store }: { store: AppStore }) {

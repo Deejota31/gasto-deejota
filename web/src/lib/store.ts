@@ -263,6 +263,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       patch(d => ({ ...d, revisiones: [...(d.revisiones ?? []).filter(x => x.ids.join(',') !== key), saved] }))
     },
     diagnose: () => api.diagnose(),
+    carpetaRespaldo: () => api.carpetaRespaldo(),
+    saveCarpetaRespaldo: (c: string) => api.saveCarpetaRespaldo(c),
     backup: () => api.backup(),
   }), [api, patch])
 

@@ -1327,3 +1327,20 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     }
   })
 })
+
+test('respaldos: la carpeta se ve en Configuración y se puede cambiar pegando un enlace de Drive', async ({ page }) => {
+  await go(page, 'Configuración')
+  const box = page.getByTestId('carpeta-respaldos')
+  await expect(box).toContainText('Backup')
+  await expect(box).toContainText('junto a tu hoja')
+  await box.getByRole('button', { name: 'Cambiar' }).click()
+  await box.getByLabel('Enlace de la carpeta de respaldos').fill('esto no es un enlace')
+  await box.getByRole('button', { name: 'Guardar' }).click()
+  await expect(box).toContainText('Pega el enlace de una carpeta')
+  await box.getByLabel('Enlace de la carpeta de respaldos').fill('https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp')
+  await box.getByRole('button', { name: 'Guardar' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Los respaldos se guardarán en' })).toBeVisible()
+  await expect(box).toContainText('Mi carpeta de respaldos')
+  await box.getByRole('button', { name: 'Usar la de junto a la hoja' }).click()
+  await expect(box).toContainText('junto a tu hoja')
+})

@@ -65,8 +65,25 @@ class FakeSpreadsheet {
   copy(name: string) { this.copies.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } }
 }
 
+class FakeFolder {
+  files: string[] = []
+  children: FakeFolder[] = []
+  constructor(public id: string, public name: string) {}
+  getId() { return this.id }
+  getName() { return this.name }
+  getUrl() { return `https://drive.google.com/drive/folders/${this.id}` }
+  getFoldersByName(n: string) { const xs = this.children.filter(c => c.name === n); return { hasNext: () => xs.length > 0, next: () => xs.shift()! } }
+  createFolder(n: string) { const f = new FakeFolder(`folder-${n}-${this.children.length + 1}xxxxxx`, n); this.children.push(f); allFolders.set(f.id, f); return f }
+}
+const allFolders = new Map<string, FakeFolder>()
+
 function load() {
   const ss = new FakeSpreadsheet()
+  allFolders.clear()
+  const microApps = new FakeFolder('folder-microapps-0001', 'MicroApps')
+  const root = new FakeFolder('folder-root-000001', 'Mi unidad')
+  const otra = new FakeFolder('folder-otra-0000001', 'Respaldos personales')
+  for (const f of [microApps, root, otra]) allFolders.set(f.id, f)
   const props = new Map<string, string>()
   const cache = new Map<string, string>()
   let created = 0
@@ -89,6 +106,14 @@ function load() {
       DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
       computeDigest: (alg: string, s: string) => [...createHash(alg).update(s, 'utf8').digest()].map(b => (b > 127 ? b - 256 : b)),
     },
+    DriveApp: {
+      getFileById: () => ({
+        makeCopy: (name: string, folder: FakeFolder) => { ss.copies.push(name); folder.files.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } },
+        getParents: () => { let done = false; return { hasNext: () => !done, next: () => { done = true; return microApps } } },
+      }),
+      getRootFolder: () => root,
+      getFolderById: (id: string) => { const f = allFolders.get(id); if (!f) throw new Error('No item with the given ID could be found'); return f },
+    },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s: string) => ({ setMimeType: () => ({ body: s }) }) },
     Logger: { log: () => {} },
     console: { error: () => {}, warn: () => {}, log: () => {} },
@@ -100,7 +125,7 @@ function load() {
   const token = () => props.get('API_TOKEN')!
   const post = (action: string, payload: unknown = {}, tk = token()) =>
     JSON.parse(g.doPost({ postData: { contents: JSON.stringify({ token: tk, action, payload }) } }).body)
-  return { ss, props, cache, g, post, created: () => created, setLock: (v: boolean) => { lockFree = v } }
+  return { ss, props, cache, g, post, created: () => created, setLock: (v: boolean) => { lockFree = v }, folders: { microApps, root, otra } }
 }
 
 const gasto = (over: Record<string, unknown> = {}) => ({
@@ -789,6 +814,32 @@ describe('backend Apps Script', () => {
       ;(b.g as unknown as { revocarTokenAtajo: () => void }).revocarTokenAtajo()
       expect(atajo('atajoCatalogo', {}, 'atj_x').error.code).toBe('NOT_ENABLED')
     })
+  })
+
+  it('respaldos: van a la carpeta "Backup" junto a la hoja (la crea una vez); la carpeta se puede cambiar y volver', () => {
+    const r1 = b.post('backup')
+    expect(r1.ok).toBe(true)
+    expect(r1.data.carpeta).toBe('Backup')
+    const backup = b.folders.microApps.children.find(c => c.name === 'Backup')!
+    expect(backup.files).toHaveLength(1)
+    b.post('backup')
+    expect(b.folders.microApps.children.filter(c => c.name === 'Backup')).toHaveLength(1)   // no crea otra carpeta
+    expect(backup.files).toHaveLength(2)
+    expect(b.folders.root.files).toHaveLength(0)                                            // nada en Mi unidad
+    expect(b.post('carpetaRespaldo').data).toMatchObject({ nombre: 'Backup', personalizada: false })
+    // cambiar por enlace de Drive
+    const otra = b.post('saveCarpetaRespaldo', { carpeta: 'https://drive.google.com/drive/folders/folder-otra-0000001?usp=sharing' })
+    expect(otra.data).toMatchObject({ nombre: 'Respaldos personales', personalizada: true })
+    b.post('backup')
+    expect(b.folders.otra.files).toHaveLength(1)
+    // inválida o inexistente: no cambia nada
+    expect(b.post('saveCarpetaRespaldo', { carpeta: 'hola mundo' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveCarpetaRespaldo', { carpeta: 'https://drive.google.com/drive/folders/noexiste123456' }).error.code).toBe('NOT_FOUND')
+    expect(b.post('carpetaRespaldo').data.nombre).toBe('Respaldos personales')
+    // vacío = volver a la de junto a la hoja
+    expect(b.post('saveCarpetaRespaldo', { carpeta: '' }).data).toMatchObject({ nombre: 'Backup', personalizada: false })
+    b.post('backup')
+    expect(backup.files).toHaveLength(3)
   })
 
   it('reorderGastos: guarda el orden en su propia hoja sin tocar GASTOS', () => {
