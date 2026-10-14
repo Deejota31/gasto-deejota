@@ -288,6 +288,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       return { ...r, total: n }
     },
     diagnose: () => api.diagnose(),
+    /** Ejecuta una función del backend por nombre; si pudo cambiar la hoja, relee los datos. */
+    async ejecutarFuncion(nombre: string, cambiaHoja: boolean) {
+      const r = await api.ejecutar(nombre)
+      if (cambiaHoja) await refresh(true)
+      return r
+    },
     carpetaRespaldo: () => api.carpetaRespaldo(),
     saveCarpetaRespaldo: (c: string) => api.saveCarpetaRespaldo(c),
     backup: () => api.backup(),

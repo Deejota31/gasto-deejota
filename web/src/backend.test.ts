@@ -1213,4 +1213,26 @@ describe('backend Apps Script', () => {
       expect(b.post('completarVacios', {}).data.medios).toBe(0)
     })
   })
+
+  describe('v1.12 funciones de mantenimiento desde la web', () => {
+    it('crearTokenAtajo / revocarTokenAtajo devuelven su respuesta y exigen el token de la web', () => {
+      const r = b.post('crearTokenAtajo').data
+      expect(r.token).toMatch(/^atj_[0-9a-f]{48}$/)
+      expect(b.post('revocarTokenAtajo').data).toEqual({ revocado: true })
+      expect(b.post('crearTokenAtajo', {}, 'malo').error.code).toBe('UNAUTHORIZED')
+    })
+
+    it('setup devuelve la URL de la hoja y el token; repararIds y generar/borrar datos de prueba responden sin BUSY', () => {
+      const s = b.post('setup').data
+      expect(s.apiToken).toBeTruthy()
+      expect(s.hojas).toBeGreaterThan(5)
+      expect(b.post('repararIds').error).toBeUndefined()
+      const g = b.post('generarDatosPrueba')
+      expect(g.error, JSON.stringify(g.error)).toBeUndefined()
+      expect(b.post('generarDatosPrueba').error).toBeTruthy()            // ya hay datos de prueba
+      const d = b.post('borrarDatosPrueba')
+      expect(d.error, JSON.stringify(d.error)).toBeUndefined()
+      expect(d.data.gastos).toBeGreaterThanOrEqual(0)
+    })
+  })
 })

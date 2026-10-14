@@ -408,6 +408,7 @@ function setup() {
   invalidateCache_();
   Logger.log('Spreadsheet: ' + ss.getUrl());
   Logger.log('API_TOKEN: ' + props.getProperty('API_TOKEN'));
+  return { spreadsheet: ss.getUrl(), apiToken: props.getProperty('API_TOKEN'), hojas: Object.keys(SHEETS).length };
 }
 
 /**
@@ -429,6 +430,13 @@ function misArchivos() {
   try { url = ScriptApp.getService().getUrl() || ''; } catch (e) { /* sin implementación */ }
   Logger.log('URL de la API (/exec): ' + (url || 'sin implementación web todavía'));
   Logger.log('Respaldos: busca "' + SPREADSHEET_NAME + ' - Respaldo" en Google Drive.');
+  return {
+    proyecto: 'https://script.google.com/d/' + ScriptApp.getScriptId() + '/edit',
+    spreadsheetId: id || '',
+    hoja: id ? SpreadsheetApp.openById(id).getUrl() : '',
+    urlApi: url || '',
+    respaldos: 'Busca "' + SPREADSHEET_NAME + ' - Respaldo" en Google Drive'
+  };
 }
 
 function openSpreadsheet_(create) {
@@ -590,6 +598,7 @@ function doPost(e) {
     var fn = ACTIONS[body.action];
     if (!fn) throw appError_('BAD_ACTION', 'Acción no válida: ' + body.action);
     if (READ_ONLY[body.action]) return fn(body.payload || {});
+    if (SELF_LOCK[body.action]) { var r = fn(body.payload || {}); invalidateCache_(); return r; }
     return withLock_(function () {
       var result = fn(body.payload || {});
       if (!KEEP_CACHE[body.action]) invalidateCache_();
@@ -750,7 +759,7 @@ function invalidateCache_() {
 
 /* ===================== Escritura ===================== */
 
-var READ_ONLY = { data: true, diagnose: true, backup: true, plantillas: true, carpetaRespaldo: true };
+var READ_ONLY = { misArchivos: true, autorizarRespaldos: true, data: true, diagnose: true, backup: true, plantillas: true, carpetaRespaldo: true };
 // Escrituras que no cambian los datos del dashboard: no invalidan su caché.
 var KEEP_CACHE = { savePlantilla: true, deletePlantilla: true, reorderPlantillas: true, saveCarpetaRespaldo: true };
 
@@ -782,8 +791,22 @@ var ACTIONS = {
   migrarGeneralAFuente: migrarGeneralAFuente_,
   completarVacios: completarVacios_,
   carpetaRespaldo: carpetaRespaldoInfo_,
-  saveCarpetaRespaldo: saveCarpetaRespaldo_
+  saveCarpetaRespaldo: saveCarpetaRespaldo_,
+  // Funciones de mantenimiento: las mismas que se ejecutan desde el editor, ahora también desde Configuración → Funciones del backend.
+  setup: function () { return setup(); },
+  misArchivos: function () { return misArchivos(); },
+  crearTokenAtajo: function () { return { token: crearTokenAtajo() }; },
+  revocarTokenAtajo: function () { return revocarTokenAtajo(); },
+  autorizarRespaldos: function () { return autorizarRespaldos(); },
+  generarDatosPrueba: function () { return generarDatosPrueba(); },
+  borrarDatosPrueba: function () { return borrarDatosPrueba(); },
+  migrarPlantillas: function () { return migrarPlantillas(); },
+  actualizarCatalogo: function () { return actualizarCatalogo(); },
+  repararIds: function () { return repararIds(); },
+  repararHojas: function () { return repararHojas(); }
 };
+// Estas ya toman su propio candado (withLock_ no es reentrante): doPost no las envuelve.
+var SELF_LOCK = { generarDatosPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
 
 function saveGasto_(p, origen) {
   var ss = openSpreadsheet_(false);
@@ -1190,6 +1213,7 @@ function crearTokenAtajo() {
 function revocarTokenAtajo() {
   PropertiesService.getScriptProperties().deleteProperty('ATAJO_TOKEN');
   Logger.log('Token del atajo revocado: el atajo dejará de funcionar hasta crear uno nuevo.');
+  return { revocado: true };
 }
 
 function igualSeguro_(a, b) {
@@ -1627,6 +1651,7 @@ function saveCarpetaRespaldo_(p) {
 function autorizarRespaldos() {
   var c = carpetaRespaldos_(openSpreadsheet_(false));
   Logger.log('Los respaldos se guardarán en: ' + c.getName() + ' → ' + c.getUrl());
+  return { carpeta: c.getName(), url: c.getUrl() };
 }
 
 // Renombra un ámbito, categoría o subcategoría en el catálogo y en los gastos que la usan,
