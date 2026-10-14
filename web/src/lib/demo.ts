@@ -212,6 +212,12 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       db.cajas = db.cajas.filter(x => x[0] !== p.id)
       return { id: p.id, eliminada: !!r }
     },
+    deleteFuente: p => {
+      const antes = db.fuentes.length, ajustes = db.fuentesMeses.length
+      db.fuentes = db.fuentes.filter(r => r[0] !== p.id)
+      db.fuentesMeses = db.fuentesMeses.filter(r => r[0] !== p.id)
+      return { id: p.id, eliminada: db.fuentes.length < antes, ajustes: ajustes - db.fuentesMeses.length }
+    },
     reorderCajas: p => {
       const ids = p.ids as string[]
       db.cajas.forEach(r => { r[6] = r[3] === 'Todos' ? 1 : ids.indexOf(String(r[0])) + 2 || ids.length + 2 })

@@ -278,6 +278,9 @@ export function createApi(t: Transport) {
     async saveFuenteMes(m: FuenteMes, quitar = false): Promise<void> {
       await t('saveFuenteMes', { ...m, ...(quitar ? { quitar: true } : {}) })
     },
+    async deleteFuente(id: string): Promise<void> {
+      await t('deleteFuente', { id })
+    },
     async reorderFuentes(ids: string[]): Promise<void> {
       await t('reorderFuentes', { ids })
     },
