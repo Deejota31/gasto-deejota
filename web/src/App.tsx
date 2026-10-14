@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, FileSpreadsheet, HeartPulse, LayoutDashboard, Link2, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
 import Toaster from './components/Toaster'
+import AppShell from './components/AppShell'
+import { tabDeHash, type TabId } from './lib/navegacion'
 import ConexionModal from './components/ConexionModal'
 import GastoModal, { GASTO_MSG, type GastoDraft, type GastoPreset, type ModalMode } from './components/GastoModal'
 import PlantillasModal, { type PlantillaDraft } from './components/PlantillasModal'
@@ -22,21 +23,6 @@ import Configuracion, { APP_VERSION } from './tabs/Configuracion'
 const Dashboard = lazy(() => import('./tabs/Dashboard'))
 const Salud = lazy(() => import('./tabs/Salud'))
 const CajasTab = lazy(() => import('./tabs/Cajas'))
-
-const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'gastos', label: 'Gastos', icon: Receipt },
-  { id: 'cajas', label: 'Cajas', icon: Boxes },
-  { id: 'catalogo', label: 'Catálogo', icon: Tags },
-  { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
-  { id: 'config', label: 'Configuración', icon: Settings },
-] as const
-type TabId = (typeof TABS)[number]['id']
-
-const tabDeHash = (h: string): TabId | null => {
-  const id = h.replace(/^#/, '') === 'categorias' ? 'catalogo' : h.replace(/^#/, '') // el enlace anterior sigue funcionando
-  return TABS.some(t => t.id === id) ? (id as TabId) : null
-}
 
 export default function App({ api }: { api?: Api }) {
   const [conn, setConn] = useState<Connection | null>(() => loadConnection())
@@ -57,8 +43,6 @@ export default function App({ api }: { api?: Api }) {
 
   useEffect(() => {
     history.replaceState(null, '', `#${tab}`)
-    // En el móvil el menú se desplaza de lado: la pestaña activa queda siempre a la vista.
-    document.querySelector('nav[aria-label="Secciones"] [aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   }, [tab])
   // Enlaces directos (#salud, #gastos…) y cambios manuales de la dirección: cambia de pestaña sin recargar.
   useEffect(() => {
@@ -67,7 +51,7 @@ export default function App({ api }: { api?: Api }) {
     return () => window.removeEventListener('hashchange', onHash)
   }, [irATab])
   // Las notificaciones se ubican debajo de la barra superior: nunca tapan el menú (que ahora va centrado).
-  const headerRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const el = headerRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -121,42 +105,8 @@ export default function App({ api }: { api?: Api }) {
     })
   }
 
-  return (
-    <div className="min-h-dvh">
-      <header ref={headerRef} className="sticky top-0 z-10 border-b border-line bg-card/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 xl:grid xl:grid-cols-[1fr_auto_1fr]">
-          <div className="flex items-center gap-2">
-            <span className="grid size-8 place-items-center rounded-xl bg-navy text-white"><Wallet className="size-4" /></span>
-            <span className="font-semibold whitespace-nowrap text-ink">Gasto <span className="text-turquesa">Deejota</span></span>
-          </div>
-          {/* Centrado: en pantallas anchas va al medio de la barra; en las demás ocupa su propia fila, centrada si cabe y desplazable si no. */}
-          <nav className="order-last -mx-1 flex w-full overflow-x-auto xl:order-none xl:mx-0 xl:w-auto" aria-label="Secciones">
-            <div className="mx-auto flex w-max gap-1 px-1">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => irATab(id)} aria-current={tab === id ? 'page' : undefined}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${tab === id ? 'bg-navy text-white dark:text-[#0E1525]' : 'text-muted hover:bg-bg hover:text-ink'}`}>
-                <Icon className="size-4" />{label}
-              </button>
-            ))}
-            </div>
-          </nav>
-          <div className="ml-auto flex items-center gap-2 xl:justify-self-end">
-            <button onClick={() => store.refresh()} disabled={store.loading} aria-label="Actualizar datos" title={store.lastSync ? `Última sincronización ${store.lastSync.toLocaleTimeString('es-PE')}` : 'Actualizar'}
-              className="rounded-lg p-2 text-muted hover:bg-bg disabled:opacity-60">
-              <RefreshCw className={`size-4 ${store.loading ? 'animate-spin' : ''}`} />
-            </button>
-            <button type="button" onClick={() => setConexionAbierta(true)} aria-label={conn ? 'Conexión con Google Sheets (conectado)' : 'Conectar con Google Sheets'}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium whitespace-nowrap hover:bg-bg ${conn ? 'border-line text-ink' : 'border-navy/30 bg-primary-soft text-navy'}`}>
-              <Link2 className="size-4" /> {conn ? <><span className="size-2 rounded-full bg-lima" aria-hidden /> Conectado</> : 'Conectar'}
-            </button>
-            <a href={store.data?.sheetUrl || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!store.data?.sheetUrl || store.isDemo}
-              className={`inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium whitespace-nowrap text-ink hover:bg-bg ${!store.data?.sheetUrl || store.isDemo ? 'pointer-events-none opacity-50' : ''}`}>
-              <FileSpreadsheet className="size-4 text-lima" /> Mi hoja
-            </a>
-          </div>
-        </div>
-      </header>
-
+  const avisos = (
+    <>
       {!store.isDemo && store.data && !store.confirmado && (
         <div role="alert" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[#FFF6DB] px-4 py-1.5 text-center text-xs text-[#B7791F]" data-testid="sin-confirmar">
           <span>{store.loading ? 'Confirmando tus datos con la hoja…' : 'Estos datos se guardaron en este navegador y no se pudieron confirmar con tu hoja; pueden estar desactualizados.'}</span>
@@ -168,8 +118,11 @@ export default function App({ api }: { api?: Api }) {
           Modo demostración con datos de ejemplo. <button className="font-semibold underline" onClick={() => setConexionAbierta(true)}>Conecta tu Apps Script</button> para usar tu hoja.
         </div>
       )}
+    </>
+  )
 
-      <main className="mx-auto max-w-7xl px-4 py-4">
+  const contenido = (
+    <>
         {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
         {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
@@ -179,7 +132,15 @@ export default function App({ api }: { api?: Api }) {
           onRevisarGasto={g => { setFoco({ id: g.id, desde: 'salud' }); setTab('gastos'); if (!g.problemaId) openGasto('edit', g) }} /></Suspense>}
         {tab === 'catalogo' && <Catalogo store={store} />}
         {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCatalogo={() => setTab('catalogo')} />}
-      </main>
+    </>
+  )
+
+  return (
+    <div className="min-h-dvh">
+      <AppShell tab={tab} onTab={irATab} headerRef={headerRef} avisos={avisos}
+        acciones={{ loading: store.loading, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo }}>
+        {contenido}
+      </AppShell>
 
       {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} preset={modal.preset} onClose={() => setModal(null)} onSubmit={submitGasto} />}
       {/* "Usar" cierra las plantillas y abre el mismo formulario de Nuevo gasto con los datos precargados. */}

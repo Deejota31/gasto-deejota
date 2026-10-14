@@ -28,6 +28,19 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.16.0
+
+**Despliegue:** hay que volver a desplegar `Code.gs` en Apps Script (nueva acción `setEstadoLote`, zona horaria leída de `CONFIG`, comparación de token en tiempo constante) y publicar la web (Netlify). No cambia el esquema de la hoja.
+
+- **Navegación:** barra lateral (contraída por defecto, 68–76 px; expandida 220–248 px; el estado se guarda en `deejota.sidebar.collapsed`), barra superior compacta, panel temporal en tablet y barra inferior Dashboard / Gastos / Cajas / Más en móvil. Una sola lista central de módulos (`lib/navegacion.ts`).
+- **Preferencias:** todos los campos usan el `Combobox` moderno; la actualización automática ofrece solo 0 / 30 / 60 / 300 / 600 s. Un valor antiguo (120, 900, 1800…) se trata como Desactivada sin escribir en la hoja.
+- **Calendarios propios:** `DatePicker`, `MonthPicker` y selector de rango (período).
+- **Fuentes y subcajas:** vista Lista por defecto (se recuerda por separado), reordenar arrastrando o con teclado (Espacio y flechas), formulario de fuente mejorado.
+- **Medios por fuente:** una fuente puede tener 0, 1 o N medios; el importe no se multiplica ni se divide, y varias fuentes pueden compartir un medio (se usan en el orden de la lista hasta agotar su cupo).
+- **Gastos:** orden personalizado global, selección múltiple y eliminación en lote (todo o nada).
+- **Configuración:** grupos de funciones del backend y consola contraídos por defecto; plantilla mensual en dos columnas.
+- **Auditoría:** zona horaria desde `CONFIG`, comparación de token en tiempo constante, bundles divididos (entrada ~281 KB).
+
 ## Novedades v1.15.0
 
 - **Descripción dinámica:** en gastos y plantillas (nuevo, editar y clonar) la descripción sigue a la subcategoría. Si ya escribiste algo propio no se pisa: aparece un aviso “Reemplazar / Conservar la mía”. Abrir un registro nunca cambia su descripción. El campo va justo debajo de Subcategoría.

@@ -246,6 +246,10 @@ export function createApi(t: Transport) {
     async setEstado(id: string, estado: 'Activo' | 'Anulado'): Promise<{ actualizadoEn: string }> {
       return parse(z.object({ actualizadoEn: str }), await t('setEstado', { id, estado }))
     },
+    /** Elimina o restaura varios gastos en una sola petición (todo o nada). */
+    async setEstadoLote(ids: string[], estado: 'Activo' | 'Anulado'): Promise<{ actualizadoEn: string }> {
+      return parse(z.object({ actualizadoEn: str }), await t('setEstadoLote', { ids, estado }))
+    },
     async saveCatalogo(item: CatalogoItem): Promise<CatalogoItem> {
       return toCatalogo(parse(catRow, await t('saveCatalogo', item)))
     },

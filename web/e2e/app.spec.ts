@@ -2,7 +2,16 @@ import { expect, test, type Page } from '@playwright/test'
 
 // Corre contra el modo demostración (backend en memoria). No toca Google Sheets ni datos reales.
 const kpi = (page: Page, label: string) => page.locator('p', { hasText: new RegExp(`^${label}`) }).locator('xpath=following-sibling::p[1]').first()
-const go = (page: Page, tab: string) => page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: tab }).click()
+/** Cambia de módulo con la navegación que haya en el tamaño de pantalla: sidebar, panel o barra inferior (con "Más"). */
+async function go(page: Page, tab: string) {
+  const nav = page.getByRole('navigation', { name: 'Secciones' })
+  const b = nav.getByRole('button', { name: tab, exact: true })
+  if (await b.count()) { await b.click(); return }
+  const menu = page.getByRole('button', { name: 'Abrir navegación' })
+  if (await menu.count()) { await menu.click(); await page.getByRole('dialog', { name: 'Navegación' }).getByRole('button', { name: tab, exact: true }).click(); return }
+  await nav.getByRole('button', { name: 'Más', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Más opciones' }).getByRole('button', { name: tab, exact: true }).click()
+}
 const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
 const total = async (page: Page) => money(await kpi(page, 'Total gastado').innerText())
 const dialog = (page: Page) => page.getByRole('dialog')
@@ -10,7 +19,9 @@ const dialog = (page: Page) => page.getByRole('dialog')
 async function pick(page: Page, trigger: string, option: string) {
   const btn = trigger.startsWith('#') ? page.locator(trigger) : page.getByRole('combobox', { name: trigger, exact: true })
   await btn.click()
-  await page.getByRole('listbox').getByRole('option', { name: option, exact: true }).click()
+  const lb = page.getByRole('listbox')
+  const ex = lb.getByRole('option', { name: option, exact: true })
+  await (await ex.count() ? ex : lb.getByRole('option', { name: new RegExp(`^${option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) })).first().click()
 }
 /** Abre el menú ⋯ de una tarjeta (el menú se cierra al desplazar: primero se deja la tarjeta a la vista). */
 async function abrirMenuCat(page: Page, categoria: string) {
@@ -23,17 +34,23 @@ async function accionCat(page: Page, categoria: string, accion: string) {
   await abrirMenuCat(page, categoria)
   await page.getByRole('menuitem', { name: accion, exact: true }).click()
 }
+/** Abre un grupo (acordeón) de Funciones del backend si está cerrado. */
+async function abrirGrupo(page: Page, g: string) {
+  const b = page.getByTestId('funciones-backend').getByRole('button', { name: new RegExp(`^${g}`) })
+  if ((await b.getAttribute('aria-expanded')) !== 'true') await b.click()
+}
+const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', cajas: 'Cajas', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
 const TABS_HASH: Record<string, string> = { cajas: 'Cajas', gastos: 'Gastos', 'catálogo': 'Catálogo', catalogo: 'Catálogo' }
 /** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
 async function cons(page: Page, id: string) {
   const el = page.getByTestId(`cons-${id}`)
   const leer = async () => money(await el.locator('p').nth(1).innerText())
   const hash = page.url().split('#')[1] ?? ''
-  const actual = await page.locator('nav[aria-label="Secciones"] [aria-current="page"]').innerText().catch(() => '')
-  if (!actual || /dashboard/i.test(actual) || (!actual && !hash)) { await expect(el).toBeVisible(); return leer() }
+  const actual = await page.locator('nav[aria-label="Secciones"]:visible [aria-current="page"]').first().evaluate(n => (n.getAttribute('data-nav') ?? '')).catch(() => '')
+  if (!actual || actual === 'dashboard' || (!actual && !hash)) { await expect(el).toBeVisible(); return leer() }
   await go(page, 'Dashboard'); await expect(el).toBeVisible()
   const v = await leer()
-  await go(page, actual.trim()); return v
+  await go(page, ETIQUETA_TAB[actual] ?? actual); return v
 }
 
 async function pickMulti(page: Page, label: string, option: string) {
@@ -56,6 +73,8 @@ async function newGasto(page: Page, { ambito, categoria, sub, monto, medio, desc
 }
 
 test.beforeEach(async ({ page }) => {
+  // Las pruebas históricas se escribieron para tarjetas; la vista por defecto ahora es Lista (se prueba aparte).
+  await page.addInitScript(() => { try { if (sessionStorage.getItem('vistaDefecto')) return; if (!localStorage.getItem('deejota.vista.fuentes')) localStorage.setItem('deejota.vista.fuentes', 'grid'); if (!localStorage.getItem('deejota.vista.subcajas')) localStorage.setItem('deejota.vista.subcajas', 'grid') } catch { /* sin almacenamiento */ } })
   await page.goto('/?demo=60')
   await expect(kpi(page, 'Total gastado')).toContainText('S/')
 })
@@ -461,7 +480,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
   test('clonar conserva la fecha y todos los datos del original; editar conserva la descripción', async ({ page }) => {
     await go(page, 'Gastos')
     await page.getByRole('button', { name: 'Período', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).click()
+    await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).first().click()
     const fila = page.locator('tbody tr').first()
     const texto = await fila.innerText()
     const [dd, mm, yyyy] = texto.match(/(\d{2})\/(\d{2})\/(\d{4})/)!.slice(1)
@@ -470,7 +489,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
     await dialog(page).getByRole('button', { name: 'Cancelar' }).click()
     await fila.getByRole('button', { name: 'Clonar' }).click()
     const d = dialog(page)
-    await expect(d.getByLabel('Fecha')).toHaveValue(`${yyyy}-${mm}-${dd}`)     // no la de hoy
+    await expect(d.locator('#gasto-fecha')).toHaveAttribute('data-value', `${yyyy}-${mm}-${dd}`)     // no la de hoy
     await expect(d.getByLabel('Descripción')).toHaveValue(descOriginal)
     await d.getByRole('button', { name: 'Crear copia' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Gasto clonado correctamente.' })).toBeVisible()
@@ -638,7 +657,7 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
   test('registro masivo: selección persistente, valores temporales, totales por moneda y una sola solicitud', async ({ page }) => {
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     const m = dialog(page)
-    await expect(m.getByLabel('Fecha de registro')).toHaveValue(hoyLima())
+    await expect(m.locator('#lote-fecha')).toHaveAttribute('data-value', hoyLima())
     // la selección se mantiene al filtrar: buscar "claude", seleccionar visibles, quitar la búsqueda
     await m.getByLabel('Buscar plantilla').fill('claude')
     await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(1)
@@ -743,7 +762,7 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     expect(((await calls(page)).reorderGastos ?? 0) - (c0.reorderGastos ?? 0)).toBe(1)
     // con una búsqueda activa el orden manual se bloquea
     await page.getByLabel('Buscar gastos').fill('a')
-    await expect(lista.getByRole('button', { name: /^Subir / })).toHaveCount(0)
+    await expect(lista.getByRole('button', { name: /^Subir / }).first()).toBeVisible()   // el orden global funciona también con filtros
   })
 
   test('Análisis detallado: tres vistas, contexto del período, Sankey y frecuencia interactivos', async ({ page }) => {
@@ -903,8 +922,9 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
       expect(await estilo(fecha)).toBe(await estilo(tipo))
       if (vp.width < 360) expect(bt!.y).toBeGreaterThan(bf!.y + bf!.height - 1)   // apilados en pantallas muy angostas
       else expect(Math.abs(bf!.y - bt!.y)).toBeLessThan(1)                          // misma fila
-      await fecha.fill('2026-10-03')
-      await expect(fecha).toHaveValue('2026-10-03')
+      await fecha.click()
+      await page.getByRole('gridcell', { name: '3 de octubre de 2026', exact: true }).click()   // calendario propio, sin selector nativo
+      await expect(fecha).toHaveAttribute('data-value', '2026-10-03')
       await expect(d.getByText('03/10/2026')).toBeVisible()                         // formato de Configuración
       await pick(page, '#gasto-tipo', 'Fijo')
       await d.getByRole('radio', { name: 'Personal', exact: true }).click()
@@ -961,7 +981,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     expect(((await calls(page)).plantillas ?? 0) - (c1.plantillas ?? 0)).toBe(0)
     // el período es el mismo filtro global
     await page.getByRole('button', { name: 'Período', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).click()
+    await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Mes anterior' }).first().click()
     await page.keyboard.press('Escape')
     await expect(picker).not.toHaveText(periodo)
     const nuevo = (await picker.innerText()).split('\n').at(-1)!.trim()
@@ -1034,7 +1054,7 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     const d = dialog(page)
     await d.getByLabel('Nombre').fill('Caja Línea Celular')
     await d.getByRole('radio', { name: 'Subcategoría' }).click()
-    await d.locator('#caja-valor').selectOption('Servicios › Línea Celular')
+    await pick(page, '#caja-valor', 'Línea Celular')
     await d.getByLabel('Monto asignado por mes').fill('40')
     await d.getByRole('button', { name: 'Crear caja' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular creada correctamente.' })).toBeVisible()
@@ -1045,7 +1065,7 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await page.getByRole('button', { name: 'Nueva subcaja' }).click()
     await d.getByLabel('Nombre').fill('Otra línea')
     await d.getByRole('radio', { name: 'Subcategoría' }).click()
-    await d.locator('#caja-valor').selectOption('Servicios › Línea Celular')
+    await pick(page, '#caja-valor', 'Línea Celular')
     await d.getByLabel('Monto asignado por mes').fill('10')
     await d.getByRole('button', { name: 'Crear caja' }).click()
     await expect(d.getByText(/ya usa Subcategoría = Servicios › Línea Celular/)).toBeVisible()
@@ -1166,7 +1186,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await d.getByRole('button', { name: 'Guardar cambios' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4280)
     await expect(fuente(page, 'General')).toContainText('Ajustado')
-    await page.getByRole('button', { name: 'Mes anterior' }).click()
+    await page.getByRole('button', { name: 'Mes anterior' }).first().click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)                  // octubre intacto
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
@@ -1269,13 +1289,13 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
 
   test('menú en el orden pedido y centrado en escritorio', async ({ page }) => {
     const nav = page.getByRole('navigation', { name: 'Secciones' })
-    expect((await nav.getByRole('button').allInnerTexts()).map(s => s.trim())).toEqual(['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración'])
+    expect(await nav.getByRole('button').evaluateAll(bs => bs.map(b => b.getAttribute('aria-label') || (b.textContent ?? '').trim()))).toEqual(['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración'])
     await page.setViewportSize({ width: 1366, height: 900 })
-    const box = await nav.locator('div').first().boundingBox()
-    expect(Math.abs(box!.x + box!.width / 2 - 1366 / 2)).toBeLessThan(40)
+    // Escritorio: barra lateral a la izquierda (contraída por defecto); tablet: panel temporal; móvil: barra inferior.
+    const lat = await page.getByRole('complementary', { name: 'Barra lateral' }).boundingBox()
+    expect(lat!.x).toBe(0); expect(lat!.width).toBeLessThanOrEqual(76)
     await page.setViewportSize({ width: 768, height: 1024 })
-    const b2 = await nav.locator('div').first().boundingBox()
-    expect(Math.abs(b2!.x + b2!.width / 2 - 768 / 2)).toBeLessThan(40)
+    await expect(page.getByRole('button', { name: 'Abrir navegación' })).toBeVisible()
   })
 })
 
@@ -1478,7 +1498,7 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
     await d.getByLabel('Nombre', { exact: true }).fill('Caja vales')
     await d.getByRole('radio', { name: 'Medio de pago' }).click()
-    await d.locator('#caja-valor').selectOption('Sodexo')
+    await pick(page, '#caja-valor', 'Sodexo')
     await expect(d.locator('svg.lucide-ticket').first()).toBeVisible()
     await d.getByLabel('Monto asignado por mes').fill('120')
     await d.getByRole('button', { name: 'Crear caja' }).click()
@@ -1546,6 +1566,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await pick(page, '#fuente-medio', 'Yape')
     await expect(tile.locator('svg.lucide-smartphone')).toHaveCount(1)
     await expect(tile).toHaveCSS('color', 'rgb(123, 63, 160)')      // el color de Yape
+    await d.getByRole('button', { name: 'Quitar Yape' }).click()      // varios medios por fuente: el aspecto es el del primero
     await pick(page, '#fuente-medio', 'Efectivo')
     await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
     await pick(page, '#fuente-medio', 'Ninguno (fuente libre)')
@@ -1558,17 +1579,17 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     const d = dialog(page)
     const tile = d.locator('span.size-11').first()
     await d.getByRole('radio', { name: 'Ámbito', exact: true }).click()
-    await d.locator('#caja-valor').selectOption('Familia')
+    await pick(page, '#caja-valor', 'Familia')
     await expect(tile.locator('svg.lucide-users')).toHaveCount(1)
     await expect(tile).toHaveCSS('color', 'rgb(20, 145, 127)')
     await d.getByRole('radio', { name: 'Categoría', exact: true }).click()
-    await d.locator('#caja-valor').selectOption('Alimentación')
+    await pick(page, '#caja-valor', 'Alimentación')
     await expect(tile.locator('svg')).toHaveCount(1)
     await d.getByRole('radio', { name: 'Subcategoría', exact: true }).click()
-    await d.locator('#caja-valor').selectOption('Auto › Gasolina')
+    await pick(page, '#caja-valor', 'Gasolina')
     await expect(tile).toHaveCSS('color', 'rgb(100, 116, 139)')      // el color de su categoría (Auto)
     await d.getByRole('radio', { name: 'Medio de pago', exact: true }).click()
-    await d.locator('#caja-valor').selectOption('Plin')
+    await pick(page, '#caja-valor', 'Plin')
     await expect(tile.locator('svg.lucide-smartphone')).toHaveCount(1)
     await expect(tile).toHaveCSS('color', 'rgb(11, 158, 168)')
   })
@@ -1675,9 +1696,9 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await page.goto('/?demo=60')
     await expect(kpi(page, 'Total gastado')).toContainText('S/')
     await go(page, 'Configuración')
-    const sel = page.getByLabel('Actualizar datos automáticamente')
-    await expect(sel).toHaveValue('300')                                // predeterminado: cada 5 minutos
-    await sel.selectOption('30')
+    const sel = page.locator('#cfg-refresco')
+    await expect(sel).toContainText('Cada 5 minutos')                        // predeterminado: cada 5 minutos
+    await pick(page, '#cfg-refresco', 'Cada 30 segundos')
     await expect(page.getByRole('status').filter({ hasText: 'Configuración guardada correctamente.' })).toBeVisible()
     await page.clock.runFor(31_000)
     const aviso = page.getByRole('status').filter({ hasText: /Datos actualizados · \d{2}:\d{2}/ })
@@ -1685,8 +1706,8 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await expect(aviso).toHaveAttribute('data-kind', 'success')
     await page.clock.runFor(31_000)
     await expect(aviso.first()).toBeVisible()                           // vuelve a actualizar
-    await sel.selectOption('0')
-    await expect(sel).toHaveValue('0')
+    await pick(page, '#cfg-refresco', 'Desactivada')
+    await expect(sel).toContainText('Desactivada')
     await page.waitForTimeout(100)
     await page.evaluate(() => document.querySelectorAll('[data-kind="success"]').length)
     await page.clock.runFor(10 * 60_000)
@@ -1699,11 +1720,13 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await go(page, 'Catálogo')
     const antes = await ico()
     await go(page, 'Configuración')
+    await abrirGrupo(page, 'Mantenimiento de la hoja')
     await page.getByRole('button', { name: 'Ejecutar completarVacios', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: /Hoja completada: \d+ fila/ })).toBeVisible({ timeout: 15_000 })
     await go(page, 'Catálogo')
     expect(await ico()).toBe(antes)
     await go(page, 'Configuración')
+    await abrirGrupo(page, 'Mantenimiento de la hoja')
     await page.getByRole('button', { name: 'Ejecutar completarVacios', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: 'La hoja ya no tiene celdas vacías por completar.' })).toBeVisible({ timeout: 15_000 })
   })
@@ -1721,8 +1744,8 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
       const tipo = m.getByRole('radiogroup', { name: 'Tipo de gasto' }), rec = m.getByRole('switch', { name: 'Es recurrente' }), comp = m.getByRole('switch', { name: 'Es un compromiso mensual' })
       await expect(tipo).toBeVisible()
       const [yt, yr, yc] = [await y(tipo), await y(rec), await y(comp)]
-      expect(Math.abs(yt - yr)).toBeLessThan(40)
-      expect(Math.abs(yr - yc)).toBeLessThan(8)
+      expect(Math.abs(yt - yr)).toBeLessThan(120)   // misma sección; el layout es de 2 columnas
+      expect(Math.abs(yr - yc)).toBeLessThan(80)   // v1.16: dos columnas; recurrente y compromiso quedan juntos
       // sin scroll interno: el área desplazable del modal cabe entera
       const sobra = await page.evaluate(() => {
         const el = [...document.querySelectorAll('dialog[open] div')].find(d => getComputedStyle(d).overflowY === 'auto') as HTMLElement
@@ -1778,10 +1801,10 @@ test.describe('v1.12', () => {
     await go(page, 'Configuración')
     const panel = page.getByTestId('funciones-backend')
     await expect(panel).toBeVisible()
-    // agrupadas en acordeones: solo Mantenimiento abre por defecto; se abren y cierran
-    await expect(panel.getByRole('button', { name: /^Mantenimiento de la hoja/ })).toHaveAttribute('aria-expanded', 'true')
+    // agrupadas en acordeones: todos cerrados por defecto; se abren y cierran
+    await expect(panel.getByRole('button', { name: /^Mantenimiento de la hoja/ })).toHaveAttribute('aria-expanded', 'false')
     await expect(page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true })).toHaveCount(0)
-    for (const g of ['Conexión y archivos', 'Atajo de iPhone', 'Datos de prueba']) await panel.getByRole('button', { name: new RegExp(`^${g}`) }).click()
+    for (const g of ['Mantenimiento de la hoja', 'Conexión y archivos', 'Atajo de iPhone', 'Datos de prueba']) await panel.getByRole('button', { name: new RegExp(`^${g}`) }).click()
     for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'borrarDatosPrueba'])
       await expect(page.getByRole('button', { name: `Ejecutar ${f}`, exact: true })).toBeVisible()
     // respuesta simple en el área de resultado
@@ -1817,6 +1840,8 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
   const nombresFuentes = (page: Page) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente-nombre').allInnerTexts()
   const nFuentes = async (page: Page) => Number(await page.getByTestId('n-fuentes').innerText())
   const menuF = (page: Page, n: string) => page.getByRole('button', { name: `Más acciones de la fuente ${n}`, exact: true })
+  /** El menú ⋯ se cierra al desplazar: primero se deja el botón a la vista y luego se abre. */
+  const abrirMenu = async (b: ReturnType<Page['locator']>) => { await b.scrollIntoViewIfNeeded(); await b.page().waitForTimeout(200); await b.click() }
   const menuC = (page: Page, n: string) => page.getByRole('button', { name: `Más acciones de ${n}`, exact: true })
   const resumen = (page: Page, label: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
   const caja = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
@@ -1893,7 +1918,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await dialog(page).getByRole('button', { name: 'Crear fuente' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Temporal creada' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4880)
-    await menuF(page, 'Temporal').click()
+    await abrirMenu(menuF(page, 'Temporal'))
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     const d = dialog(page)
     await expect(d.getByRole('heading', { name: 'Eliminar Temporal' })).toBeVisible()
@@ -1968,7 +1993,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await expect(d.getByLabel('Nombre', { exact: true })).toHaveValue('Caja Auto (Copia)')
     await expect(d.getByLabel('Monto asignado por mes')).toHaveValue('0')
     await expect(d.getByRole('switch', { name: 'Caja activa' })).toHaveAttribute('aria-checked', 'false')
-    await expect(d.locator('#caja-valor')).toHaveValue('Auto')
+    await expect(d.locator('#caja-valor')).toContainText('Auto')
     await d.getByRole('button', { name: 'Crear copia' }).dblclick()
     await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) creada inactiva' })).toBeVisible({ timeout: 15_000 })
     await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(1)
@@ -1976,15 +2001,15 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     expect(await resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)        // la copia no reserva dinero adicional
     // con búsqueda activa no se puede reordenar
     await page.getByLabel('Buscar caja').fill('Auto')
-    await menuC(page, 'Caja Auto').click()
+    await abrirMenu(menuC(page, 'Caja Auto'))
     await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
     await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled()
     await page.keyboard.press('Escape')
     await page.getByLabel('Buscar caja').fill('')
     // vista lista: mismo interruptor y mismo menú
-    await page.getByRole('radio', { name: 'Lista' }).click()
+    await page.getByRole('region', { name: /Reservas/ }).getByRole('radio', { name: 'Lista' }).click()
     await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toBeVisible()
-    await menuC(page, 'Caja Auto (Copia)').click()
+    await abrirMenu(menuC(page, 'Caja Auto (Copia)'))
     await expect(page.getByRole('menuitem')).toHaveCount(4)
     expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
@@ -2112,7 +2137,7 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
     const d = dialog(page)
     const medio = d.locator('#fuente-medio')
     await medio.click()
-    const lista = page.getByRole('listbox', { name: 'Medio de pago asociado' })
+    const lista = page.getByRole('listbox', { name: 'Agregar medio de pago' })
     await expect(lista).toBeVisible()
     await expect(lista.getByRole('option', { name: 'Yape', exact: true }).locator('svg')).toHaveCount(1)
     const box = (await lista.boundingBox())!, vp = page.viewportSize()!
@@ -2120,16 +2145,15 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
     expect(box.x + box.width).toBeLessThanOrEqual(vp.width); expect(box.y + box.height).toBeLessThanOrEqual(vp.height)
     await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
     await expect(lista).toHaveCount(0)
-    await expect(medio).not.toContainText('Ninguno')
+    await expect(d.getByTestId('fuente-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(1)   // el medio elegido queda como chip
     await expect(medio).toBeFocused()
     // Escape cierra sin cambiar y el modal sigue abierto
-    const antes = await medio.innerText()
     await medio.click(); await page.keyboard.press('Escape')
     await expect(lista).toHaveCount(0); await expect(d).toBeVisible()
-    expect(await medio.innerText()).toBe(antes)
+    await expect(d.getByTestId('fuente-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(1)
     // moneda: con búsqueda cuando hay muchas opciones o clic directo
     await pick(page, '#fuente-medio', 'Efectivo')
-    await expect(medio).toContainText('Efectivo')
+    await expect(d.getByTestId('fuente-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(2)   // varios medios por fuente
   })
 
   test('filtros: las opciones traen el icono y color del catálogo, "Otros" al final y nombre completo en tooltip', async ({ page }) => {
@@ -2279,5 +2303,105 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
       await page.keyboard.press('Escape')
       expect(await hayScrollX(page)).toBe(false)
     })
+  })
+})
+
+test.describe('v1.16: navegación, preferencias, medios, calendarios y operaciones en lote', () => {
+  const sinScrollH = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+
+  test('barra lateral: contraída por defecto, se expande, recuerda su estado y muestra etiquetas', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const lat = page.getByRole('complementary', { name: 'Barra lateral' })
+    expect((await lat.boundingBox())!.width).toBeLessThanOrEqual(76)
+    await page.getByRole('button', { name: 'Expandir barra lateral' }).click()
+    await expect.poll(async () => (await lat.boundingBox())!.width).toBeGreaterThanOrEqual(220)
+    expect(await page.evaluate(() => localStorage.getItem('deejota.sidebar.collapsed'))).toBe('0')
+    await page.reload()
+    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await expect.poll(async () => (await lat.boundingBox())!.width).toBeGreaterThanOrEqual(220)
+    await page.getByRole('button', { name: 'Contraer barra lateral' }).click()
+    await expect.poll(async () => (await lat.boundingBox())!.width).toBeLessThanOrEqual(76)
+    expect(await sinScrollH(page)).toBe(true)
+  })
+
+  test('tablet: panel temporal; móvil: barra inferior con Más', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await page.getByRole('button', { name: 'Abrir navegación' }).click()
+    await expect(page.getByRole('dialog', { name: 'Navegación' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'Navegación' })).toHaveCount(0)
+    await page.setViewportSize({ width: 390, height: 844 })
+    const barra = page.getByTestId('barra-inferior')
+    await expect(barra).toBeVisible()
+    await expect(barra.getByRole('button')).toHaveCount(4)           // Dashboard, Gastos, Cajas, Más
+    await go(page, 'Configuración')
+    await expect(page.getByRole('heading', { name: 'Configuración', level: 1 })).toBeVisible()
+    await expect(barra.getByRole('button', { name: 'Más', exact: true })).toHaveAttribute('aria-current', 'page')
+    expect(await sinScrollH(page)).toBe(true)
+  })
+
+  test('preferencias: selectores modernos y solo cinco intervalos de actualización', async ({ page }) => {
+    await go(page, 'Configuración')
+    await expect(page.getByTestId('preferencias')).toBeVisible()
+    await expect(page.locator('select')).toHaveCount(0)
+    await page.locator('#cfg-refresco').click()
+    const opts = page.getByRole('listbox').getByRole('option')
+    await expect(opts).toHaveCount(5)
+    expect((await opts.allInnerTexts()).map(t => t.split('\n')[0].trim())).toEqual(['Desactivada', 'Cada 30 segundos', 'Cada 1 minuto', 'Cada 5 minutos', 'Cada 10 minutos'])
+    await page.keyboard.press('Escape')
+    for (const id of ['#cfg-moneda', '#cfg-tz', '#cfg-fecha', '#cfg-tema']) await expect(page.locator(id)).toBeVisible()
+  })
+
+  test('fuente con varios medios: chips sin dividir el monto; fuentes y subcajas abren en Lista', async ({ page }) => {
+    await page.evaluate(() => { sessionStorage.setItem('vistaDefecto', '1'); localStorage.removeItem('deejota.vista.fuentes'); localStorage.removeItem('deejota.vista.subcajas') })
+    await page.goto('/?demo=60&fuentes=3#cajas')
+    await expect(page.getByRole('radio', { name: 'Lista' }).first()).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('list', { name: 'Lista de fuentes' })).toBeVisible()
+    await page.getByRole('button', { name: 'Nueva fuente' }).click()
+    const d = dialog(page)
+    await d.getByLabel('Nombre de la fuente').fill('Multi')
+    await d.getByLabel('Monto').fill('300')
+    await pick(page, '#fuente-medio', 'Yape')
+    await pick(page, '#fuente-medio', 'Plin')
+    await expect(d.getByRole('button', { name: /^Quitar / })).toHaveCount(2)
+    await d.getByRole('button', { name: 'Crear fuente' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Multi creada' })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3500 + 280 + 300 + 1000)
+  })
+
+  test('calendario propio: elegir día por teclado y mes en el selector de período', async ({ page }) => {
+    await page.getByRole('button', { name: 'Nuevo gasto' }).first().click()
+    const d = dialog(page)
+    await d.locator('#gasto-fecha').click()
+    await page.getByRole('gridcell', { name: '3 de octubre de 2026', exact: true }).click()
+    await expect(d.locator('#gasto-fecha')).toHaveAttribute('data-value', '2026-10-03')
+    await page.keyboard.press('Escape')
+  })
+
+  test('Gastos: selección múltiple y eliminación en lote con confirmación', async ({ page }) => {
+    await go(page, 'Gastos')
+    const filas = page.locator('tbody tr')
+    const primera = await filas.first().innerText()
+    await page.getByRole('checkbox', { name: /^Seleccionar/ }).nth(1).check()
+    await page.getByRole('checkbox', { name: /^Seleccionar/ }).nth(2).check()
+    const barra = page.getByTestId('barra-seleccion')
+    await expect(barra).toContainText('2 seleccionados')
+    await barra.getByRole('button', { name: /^Eliminar 2 gastos/ }).click()
+    await dialog(page).getByRole('button', { name: /Eliminar/ }).last().click()
+    await expect(page.getByRole('status').filter({ hasText: /eliminad/i }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(barra).toHaveCount(0)
+    await expect(filas.first()).not.toHaveText(primera)
+  })
+
+  test('reordenar con teclado: Espacio y flechas sobre el asa de una fuente', async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3#cajas')
+    await page.getByRole('radio', { name: 'Lista' }).first().click()
+    const asas = page.getByRole('list', { name: 'Lista de fuentes' }).locator('[data-asa-orden]')
+    await expect(asas.first()).toBeVisible()
+    const nombres = () => page.getByTestId('fuente-nombre').allInnerTexts()
+    const n0 = await nombres()
+    await asas.first().focus()
+    await page.keyboard.press('Space'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Space')
+    await expect.poll(async () => (await nombres())[1]).toBe(n0[0])
   })
 })

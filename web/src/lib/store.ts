@@ -187,6 +187,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const r = await api.setEstado(g.id, estado)
       patch(d => ({ ...d, gastos: d.gastos.map(x => x.id === g.id ? { ...x, estado, actualizadoEn: r.actualizadoEn } : x) }))
     },
+    async setEstadoLote(gs: Gasto[], estado: 'Activo' | 'Anulado') {
+      const r = await api.setEstadoLote(gs.map(g => g.id), estado)   // se actualiza la pantalla SOLO tras la confirmación del backend
+      const ids = new Set(gs.map(g => g.id))
+      patch(d => ({ ...d, gastos: d.gastos.map(x => ids.has(x.id) ? { ...x, estado, actualizadoEn: r.actualizadoEn } : x) }))
+    },
     async saveCatalogo(item: CatalogoItem) {
       const s = await api.saveCatalogo(item)
       const key = (c: CatalogoItem) => `${c.ambito}|${c.categoria}|${c.subcategoria}`.toLowerCase()

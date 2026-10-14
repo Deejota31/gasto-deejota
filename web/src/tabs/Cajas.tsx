@@ -10,11 +10,14 @@ import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { AppData, Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
-import { cajaLook, COLORS, sortMedios } from '../lib/visual'
+import { ambitoLook, cajaLook, categoriaLook, COLORS, medioLook, sortMedios, subcategoriaLook } from '../lib/visual'
+import { Combobox, type Opcion } from '../components/Combobox'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { FuentesSeccion, Toggle } from '../components/fuentes'
 import { MenuAcciones } from '../components/MenuAcciones'
+import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
+import { guardarPref, leerPref } from '../lib/prefs'
 import { dependenciasCaja } from '../lib/dependencias'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch } from '../components/ui'
 
@@ -51,7 +54,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   const [alcance, setAlcance] = useState<'todos' | Alcance>('todos')
   const [estado, setEstado] = useState<'activas' | 'inactivas' | 'todas'>('todas')
   const [orden, setOrden] = useState<Orden>('manual')
-  const [vista, setVista] = useState<'grid' | 'lista'>('grid')
+  const [vista, setVistaState] = useState<'grid' | 'lista'>(() => leerPref('deejota.vista.subcajas', ['grid', 'lista'] as const, 'lista'))
+  const setVista = (v: 'grid' | 'lista') => { setVistaState(v); guardarPref('deejota.vista.subcajas', v) }
   const [form, setForm] = useState<{ caja: Caja | null; clonDe?: Caja | null } | null>(null)
   const [borrar, setBorrar] = useState<Caja | null>(null)
   const [ajustar, setAjustar] = useState<{ caja: Caja; asignado: number } | null>(null)
@@ -138,7 +142,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
             <option value="mas">Más gastadas</option><option value="menos">Menos gastadas</option><option value="uso">% de uso</option>
           </SelectField></div>
           <div className="flex items-center gap-1 rounded-xl bg-card p-1 ring-1 ring-line" role="radiogroup" aria-label="Vista">
-            {([['grid', LayoutGrid, 'Tarjetas'], ['lista', List, 'Lista']] as const).map(([v, Icon, l]) => (
+            {([['lista', List, 'Lista'], ['grid', LayoutGrid, 'Tarjetas']] as const).map(([v, Icon, l]) => (
               <button key={v} type="button" role="radio" aria-checked={vista === v} aria-label={l} title={l} onClick={() => setVista(v)}
                 className={`grid size-9 place-items-center rounded-lg transition ${vista === v ? 'bg-primary-soft text-navy' : 'text-muted hover:bg-bg'}`}><Icon className="size-4" /></button>
             ))}
@@ -154,21 +158,13 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
           <Vacio icon={Search} titulo="Ninguna caja coincide" accion={<Button variant="outline" onClick={() => { setQ(''); setAlcance('todos'); setEstado('todas') }}>Limpiar filtros</Button>}>
             Prueba con otra palabra, alcance o estado.
           </Vacio>
-        ) : vista === 'grid' ? (
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de cajas">
-            {visibles.map(i => (
-              <TarjetaCaja key={i.caja.id} i={i} catalogo={catalogo} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)} onToggle={() => activar(i.caja)}
-                acciones={<Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
-                  onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
-                  onClone={() => setForm({ caja: null, clonDe: i.caja })} onDelete={() => setBorrar(i.caja)} />}
-                onAjustar={() => i.r && setAjustar({ caja: i.caja, asignado: i.r.asignado })} />
-            ))}
-          </ul>
         ) : (
-          <ListaCajas items={visibles} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending}
-            acciones={i => <Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
-              onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
-              onClone={() => setForm({ caja: null, clonDe: i.caja })} onDelete={() => setBorrar(i.caja)} />} onToggle={i => activar(i.caja)} />
+          <ListadoCajas visibles={visibles} manual={manual} puedeOrdenar={puedeOrdenar} vista={vista} catalogo={catalogo} money={money} solapes={solapes} store={store}
+            motivo={orden !== 'manual' ? 'Usa “Orden manual” para reordenar' : 'Quita la búsqueda y los filtros para reordenar'}
+            onToggle={i => activar(i.caja)} onMover={mover} onEdit={caja => setForm({ caja })} onClone={caja => setForm({ caja: null, clonDe: caja })} onDelete={setBorrar}
+            onAjustar={i => i.r && setAjustar({ caja: i.caja, asignado: i.r.asignado })}
+            onCommit={ids => store.track('cajas:orden', { pending: 'Guardando el orden…', ok: 'Orden de cajas guardado.', error: 'No se pudo guardar el orden de las cajas. Se restauró el anterior.' },
+              () => store.actions.reorderCajas(ids), { retry: false })} />
         )}
       </section>
 
@@ -236,8 +232,37 @@ function estadoDe(i: Item, money: (n: number) => string) {
 const resumirNombres = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 3).join(', ')} y ${xs.length - 3} más`)
 const alcanceTxt = (c: Caja) => `${c.filtroCampo} · ${c.filtroValor}`
 
-function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, onToggle }: {
-  i: Item; catalogo: CatalogoItem[]; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void; onToggle: () => void
+function ListadoCajas({ visibles, manual, puedeOrdenar, vista, catalogo, money, solapes, store, motivo, onToggle, onMover, onEdit, onClone, onDelete, onAjustar, onCommit }: {
+  visibles: Item[]; manual: string[]; puedeOrdenar: boolean; vista: 'grid' | 'lista'; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; store: AppStore; motivo: string
+  onToggle: (i: Item) => void; onMover: (id: string, d: number) => void; onEdit: (c: Caja) => void; onClone: (c: Caja) => void; onDelete: (c: Caja) => void; onAjustar: (i: Item) => void; onCommit: (ids: string[]) => void
+}) {
+  // Arrastrar solo en "Orden manual" y sin búsqueda ni filtros: el orden visible es entonces el orden global.
+  const habilitado = puedeOrdenar && manual.length > 1
+  const dnd = useReorden({ ids: manual, habilitado, onCommit, nombre: id => visibles.find(i => i.caja.id === id)?.caja.nombre ?? 'Caja' })
+  const porId = new Map(visibles.map(i => [i.caja.id, i]))
+  const items = (habilitado ? dnd.orden : visibles.map(i => i.caja.id)).map(id => porId.get(id)).filter((i): i is Item => !!i)
+  const acc = (i: Item) => <Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
+    onEdit={() => onEdit(i.caja)} onUp={() => onMover(i.caja.id, -1)} onDown={() => onMover(i.caja.id, 1)} onClone={() => onClone(i.caja)} onDelete={() => onDelete(i.caja)} />
+  const asa = (i: Item) => <AsaOrden {...dnd.asa(i.caja.id)} habilitado={habilitado} motivo={motivo} />
+  return (
+    <>
+      {vista === 'grid' ? (
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de cajas">
+          {items.map(i => <TarjetaCaja key={i.caja.id} i={i} catalogo={catalogo} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)} onToggle={() => onToggle(i)}
+            dnd={dnd.item(i.caja.id)} asa={asa(i)} acciones={acc(i)} onAjustar={() => onAjustar(i)} />)}
+        </ul>
+      ) : (
+        <ListaCajas items={items} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending} acciones={acc} asa={asa} dnd={id => dnd.item(id)} onToggle={onToggle} />
+      )}
+      <AvisoOrden texto={dnd.aviso} />
+    </>
+  )
+}
+
+type DndItem = { ref: (el: HTMLElement | null) => void; 'data-arrastrando'?: string }
+
+function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, onToggle, dnd, asa }: {
+  dnd: DndItem; asa: ReactNode; i: Item; catalogo: CatalogoItem[]; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void; onToggle: () => void
 }) {
   const { caja, r } = i
   const { Icon, color } = cajaLook(caja, catalogo)
@@ -245,11 +270,12 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, o
   const e = estadoDe(i, money)
   const activa = cajaActiva(caja) && !!r
   return (
-    <li className={`group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${activa ? '' : 'opacity-75'}`}
+    <li {...dnd} className={`${CLASE_ARRASTRE} group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${activa ? '' : 'opacity-75'}`}
       data-testid="caja" style={{ boxShadow: r?.excedido ? `inset 0 0 0 1.5px ${TONO.alerta.fg}55` : undefined }}>
       <span className="h-1.5" style={{ background: activa ? `linear-gradient(90deg, ${color}, ${color}99)` : 'var(--line)' }} aria-hidden />
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-start gap-3">
+          {asa}
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl" style={{ background: `${color}1A`, color }}><Icon className="size-5" /></span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-ink">{caja.nombre}</p>
@@ -297,8 +323,8 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, o
   )
 }
 
-function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onToggle }: {
-  items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode; onToggle: (i: Item) => void
+function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onToggle, asa, dnd }: {
+  asa: (i: Item) => ReactNode; dnd: (id: string) => DndItem; items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode; onToggle: (i: Item) => void
 }) {
   return (
     <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de cajas">
@@ -307,7 +333,8 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onTogg
         const { Icon, color } = cajaLook(caja, catalogo)
         const e = estadoDe(i, money)
         return (
-          <li key={caja.id} data-testid="caja" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
+          <li key={caja.id} {...dnd(caja.id)} data-testid="caja" className={`${CLASE_ARRASTRE} grid grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-transparent px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
+            {asa(i)}
             <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
             <div className="min-w-0">
               <p className="flex items-center gap-2 truncate text-sm font-semibold">{caja.nombre}
@@ -315,7 +342,7 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onTogg
                 {pending.has(`caja:${caja.id}`) && <span className="text-[10px] font-normal text-muted">Guardando…</span>}</p>
               <p className="truncate text-[11px] text-muted">{alcanceTxt(caja)}{solapes.get(caja.id)?.length ? ` · comparte con ${resumirNombres(solapes.get(caja.id)!)}` : ''}</p>
             </div>
-            <div className="order-last col-span-3 sm:order-none sm:col-span-1">
+            <div className="order-last col-span-4 sm:order-none sm:col-span-1">
               {r ? (<>
                 <span className="block h-1.5 overflow-hidden rounded-full bg-bg"><span className="bar-grow block h-full rounded-full" style={{ width: `${Math.min(r.pct ?? 0, 100)}%`, background: r.excedido ? TONO.alerta.fg : color }} /></span>
                 <span className="tabular mt-1 block text-[11px] text-muted">{money(r.gastado)} de {r.asignado ? money(r.asignado) : '—'}</span>
@@ -413,6 +440,15 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
     const xs = opcionesValor(campo, catalogo, medios)
     return valor && !xs.includes(valor) ? [valor, ...xs] : xs
   }, [campo, catalogo, medios, valor])
+  // Opciones con el icono y color del catálogo; las subcategorías se agrupan por su categoría (que también se ve en el campo).
+  const opcionesCombo = useMemo<Opcion[]>(() => opciones.map(o => {
+    if (campo === 'Ámbito') { const l = ambitoLook(o, catalogo); return { value: o, label: o, Icon: l.Icon, color: l.color } }
+    if (campo === 'Categoría') { const l = categoriaLook(o, catalogo); return { value: o, label: o, Icon: l.Icon, color: l.color } }
+    if (campo === 'Medio de pago') { const l = medioLook(o); return { value: o, label: o, Icon: l.Icon, color: l.color } }
+    const [cat, sub] = o.includes(' › ') ? o.split(' › ') : ['', o]
+    const l = subcategoriaLook(sub, cat, catalogo)
+    return { value: o, label: sub, desc: cat ? `en ${cat}` : undefined, group: cat || 'Otras', Icon: l.Icon, color: l.color }
+  }), [opciones, campo, catalogo])
   const otras = cajas.filter(x => x.id !== id && x.filtroCampo !== 'Todos')
   // Automático: el de su alcance (medio de pago, ámbito, categoría o subcategoría). Elegir un icono o un color lo fija.
   const colorBase = caja?.color || COLORS[cajas.length % COLORS.length]
@@ -474,10 +510,8 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
           <p className="mt-1 text-[11px] text-muted">{campo === 'Medio de pago' ? 'Útil para Sodexo u otra tarjeta de uso exclusivo.' : 'Prioridad si se solapa: Subcategoría > Categoría > Ámbito > Medio de pago.'}</p>
         </div>
         <Field label={`Valor (${campo.toLowerCase()})`} error={errors.valor} htmlFor="caja-valor">
-          <SelectField id="caja-valor" value={valor} onChange={setValor} invalid={!!errors.valor}>
-            <option value="">Elige…</option>
-            {opciones.map(o => <option key={o} value={o}>{o}</option>)}
-          </SelectField>
+          <Combobox id="caja-valor" label={`Valor (${campo.toLowerCase()})`} value={valor} onChange={setValor} invalid={!!errors.valor} placeholder="Elige…" descEnTrigger searchable={opciones.length > 6} maxHeight={340}
+            options={opcionesCombo} vacio="Sin opciones activas en el catálogo." />
         </Field>
         {solapes.length > 0 && (
           <div className="rounded-xl px-3 py-2 text-xs" style={{ background: TONO.info.bg, color: TONO.info.fg }} data-testid="aviso-solape">
