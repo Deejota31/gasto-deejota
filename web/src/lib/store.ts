@@ -283,7 +283,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
         return { ambito: c.ambito, categoria: c.categoria, subcategoria: c.subcategoria, icono: claveDeIcono(l.Icon), color: l.color }
       })
       const r = await api.completarVacios(defs)
-      const n = r.cajas + r.fuentes + r.catalogo + r.config
+      const n = r.cajas + r.fuentes + r.catalogo + r.config + (r.medios ?? 0)
       if (n > 0) await refresh(true)
       return { ...r, total: n }
     },
