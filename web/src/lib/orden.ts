@@ -66,3 +66,35 @@ export function nextOrden(rows: { ambito: string; categoria: string; orden?: num
   const m = max(() => true)
   return m === null ? undefined : (Math.floor(m / 10000) + 1) * 10000 + (categoria ? 100 : 0) + (sub ? 1 : 0)
 }
+
+/**
+ * Orden nuevo de la columna Orden al reordenar las categorías de un ámbito (misma regla que reorderCategorias_ en Code.gs):
+ * cada categoría ocupa un bloque base + (posición+1)×100; su fila de categoría vale el bloque y sus subcategorías
+ * bloque+1, bloque+2… en el orden que ya tenían. Solo cambian las filas de ese ámbito. Devuelve un valor por fila de entrada.
+ */
+export function ordenTrasReordenarCategorias(rows: { ambito: string; categoria: string; subcategoria: string; orden?: number }[], ambito: string, nombres: string[]): (number | undefined)[] {
+  const out = rows.map(r => r.orden)
+  const idx = rows.map((r, i) => (normName(r.ambito) === normName(ambito) ? i : -1)).filter(i => i >= 0)
+  if (!idx.length) return out
+  const val = (i: number) => (typeof rows[i].orden === 'number' && Number.isFinite(rows[i].orden) ? rows[i].orden! : Infinity)
+  const porOrden = (a: number, b: number) => (val(a) - val(b)) || (a - b)
+  const nums = idx.map(val).filter(Number.isFinite)
+  let base: number
+  if (nums.length) base = Math.floor(Math.min(...nums) / 10000) * 10000
+  else {
+    const todos = rows.map(r => r.orden).filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    base = (todos.length ? Math.floor(Math.max(...todos) / 10000) + 1 : 1) * 10000
+  }
+  const actual: string[] = []
+  for (const i of [...idx].sort(porOrden)) { const c = normName(rows[i].categoria); if (c && !actual.includes(c)) actual.push(c) }
+  const pedido: string[] = []
+  for (const n of nombres) { const k = normName(n); if (actual.includes(k) && !pedido.includes(k)) pedido.push(k) }
+  for (const k of actual) if (!pedido.includes(k)) pedido.push(k)
+  pedido.forEach((k, j) => {
+    const bloque = base + (j + 1) * 100
+    const filas = idx.filter(i => normName(rows[i].categoria) === k)
+    filas.filter(i => !rows[i].subcategoria).forEach(i => { out[i] = bloque })
+    filas.filter(i => rows[i].subcategoria).sort(porOrden).forEach((i, m) => { out[i] = bloque + m + 1 })
+  })
+  return out
+}

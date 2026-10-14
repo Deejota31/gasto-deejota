@@ -58,3 +58,26 @@ describe('montos: base registrado vs ajuste vs aporte efectivo del período', ()
     expect(n.map(x => [x.fuente.id, x.asignado, x.ajustado])).toEqual([['sodexo', 28000, false], ['tesis', 100000, false]])   // la hoja FUENTES (base) sigue en 280 y 1,000
   })
 })
+
+import { dependenciasCategoria } from './dependencias'
+import type { CatalogoItem, Plantilla } from './types'
+
+describe('dependencias de una categoría (v1.15)', () => {
+  const cat = (ambito: string, categoria: string, subcategoria: string): CatalogoItem => ({ ambito, categoria, subcategoria, activo: true })
+  const pl = (over: Partial<Plantilla>): Plantilla => ({ id: 'p', ambito: 'Personal', categoria: 'Salud', subcategoria: 'Dentista', descripcion: 'x', creadoEn: '', actualizadoEn: '', monto: null, moneda: 'PEN', medioPago: '', orden: null, esCompromiso: false, tipoGasto: 'Variable', esRecurrente: false, ...over })
+  const catalogo = [cat('Personal', 'Salud', 'Dentista'), cat('Personal', 'Salud', 'Farmacia'), cat('Personal', 'Ocio', 'Cine'), cat('Hogar', 'Ocio', 'Juegos')]
+
+  it('cuenta gastos (también anulados), plantillas y compromisos; solo de ese ámbito+categoría', () => {
+    const d = data({ catalogo, gastos: [g({ categoria: 'Salud' }), g({ categoria: 'Salud', estado: 'Anulado' }), g({ categoria: 'Ocio' }), g({ categoria: 'Salud', ambito: 'Hogar' })] })
+    const r = dependenciasCategoria('Personal', 'Salud', d, [pl({}), pl({ id: 'q', esCompromiso: true }), pl({ id: 'r', categoria: 'Ocio' })])
+    expect(r).toMatchObject({ gastos: 2, plantillas: 2, compromisos: 1, cajas: 0, subcategorias: 2 })
+  })
+  it('subcajas: por categoría o por subcategoría, salvo que esa opción exista también en otro ámbito', () => {
+    const d = data({ catalogo, cajas: [caja('c1', 10, 'Categoría', 'Salud'), caja('c2', 10, 'Subcategoría', 'Dentista'), caja('c3', 10, 'Categoría', 'Ocio'), caja('c4', 10, 'Ámbito', 'Personal')] })
+    expect(dependenciasCategoria('Personal', 'Salud', d, []).cajas).toBe(2)
+    expect(dependenciasCategoria('Personal', 'Ocio', d, []).cajas).toBe(0)   // “Ocio” también existe en Hogar: la subcaja sigue viva
+  })
+  it('una categoría sin uso devuelve todo en cero', () => {
+    expect(dependenciasCategoria('Personal', 'Ocio', data({ catalogo }), [])).toMatchObject({ gastos: 0, plantillas: 0, compromisos: 0, cajas: 0 })
+  })
+})

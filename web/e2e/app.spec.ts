@@ -6,6 +6,23 @@ const go = (page: Page, tab: string) => page.getByRole('navigation', { name: 'Se
 const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
 const total = async (page: Page) => money(await kpi(page, 'Total gastado').innerText())
 const dialog = (page: Page) => page.getByRole('dialog')
+/** Elige una opción en un selector Combobox (por su id "#x" o su nombre accesible); la lista se pinta en un portal. */
+async function pick(page: Page, trigger: string, option: string) {
+  const btn = trigger.startsWith('#') ? page.locator(trigger) : page.getByRole('combobox', { name: trigger, exact: true })
+  await btn.click()
+  await page.getByRole('listbox').getByRole('option', { name: option, exact: true }).click()
+}
+/** Abre el menú ⋯ de una tarjeta (el menú se cierra al desplazar: primero se deja la tarjeta a la vista). */
+async function abrirMenuCat(page: Page, categoria: string) {
+  const b = page.getByRole('button', { name: `Acciones de ${categoria}`, exact: true }).first()
+  await b.scrollIntoViewIfNeeded(); await page.waitForTimeout(150)
+  await b.click()
+}
+/** Menú ⋯ de una tarjeta de categoría del Catálogo: abre y ejecuta una acción. */
+async function accionCat(page: Page, categoria: string, accion: string) {
+  await abrirMenuCat(page, categoria)
+  await page.getByRole('menuitem', { name: accion, exact: true }).click()
+}
 const TABS_HASH: Record<string, string> = { cajas: 'Cajas', gastos: 'Gastos', 'catálogo': 'Catálogo', catalogo: 'Catálogo' }
 /** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
 async function cons(page: Page, id: string) {
@@ -182,13 +199,13 @@ test('catálogo: renombrar categoría actualiza los gastos de ese ámbito', asyn
   await go(page, 'Gastos')
   await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: '7', medio: 'Efectivo', desc: 'Antes de renombrar' })
   await go(page, 'Catálogo')
-  await page.getByRole('button', { name: 'Editar Alimentación' }).click()
+  await accionCat(page, 'Alimentación', 'Editar')
   await expect(dialog(page).getByText(/Se renombrará también en \d+ gasto/)).toHaveCount(0)
   await dialog(page).getByLabel('Nombre').fill('Comida')
   await expect(dialog(page).getByText(/Se renombrará también en \d+ gasto/)).toBeVisible()
   await dialog(page).getByRole('button', { name: 'Guardar' }).click()
   await expect(dialog(page)).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Editar Comida' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Acciones de Comida' })).toBeVisible()
   await go(page, 'Gastos')
   const row = page.getByRole('row', { name: /Antes de renombrar/i })
   await expect(row).toContainText('Comida')
@@ -484,7 +501,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
     await expect(page.getByRole('status').filter({ hasText: 'Plantilla creada correctamente.' })).toBeVisible()
     await expect(filas).toHaveCount(12)
     await expect(m.getByLabel('Monto de Internet de la Casa')).toHaveValue('89.90')
-    await expect(m.getByLabel('Medio de pago de Internet de la Casa')).toHaveValue('Plin')
+    await expect(m.getByLabel('Medio de pago de Internet de la Casa')).toContainText('Plin')
     // duplicado exacto (otra capitalización y espacios) → rechazado
     await m.getByRole('button', { name: 'Nueva plantilla' }).click()
     await m.getByRole('radio', { name: 'Familia', exact: true }).click()
@@ -889,7 +906,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
       await fecha.fill('2026-10-03')
       await expect(fecha).toHaveValue('2026-10-03')
       await expect(d.getByText('03/10/2026')).toBeVisible()                         // formato de Configuración
-      await tipo.selectOption('Fijo')
+      await pick(page, '#gasto-tipo', 'Fijo')
       await d.getByRole('radio', { name: 'Personal', exact: true }).click()
       await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Alimentación', exact: true }).click()
       await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio', { name: 'Almuerzo', exact: true }).click()
@@ -976,7 +993,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     await expect(page.getByRole('status').filter({ hasText: 'Plantilla actualizada correctamente.' })).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     await expect(dialog(page).getByLabel('Monto de Luz')).toHaveValue('55.00')
-    await expect(dialog(page).getByLabel('Medio de pago de Luz')).toHaveValue('Plin')
+    await expect(dialog(page).getByLabel('Medio de pago de Luz')).toContainText('Plin')
   })
 
   test('con 15 s de latencia: crear y clonar siguen sin bloquear y no se duplican', async ({ page }) => {
@@ -1432,7 +1449,7 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(d.getByText('Icono y color')).toHaveCount(0)
     await d.getByLabel('Nombre de la fuente').fill('Vales Plin')
     await d.getByLabel('Monto').fill('50')
-    await d.locator('#fuente-medio').selectOption('Plin')
+    await pick(page, '#fuente-medio', 'Plin')
     await expect(d.locator('span.size-11').first()).toHaveCSS('color', 'rgb(11, 158, 168)')
     await d.getByRole('button', { name: 'Crear fuente' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Vales Plin creada' })).toBeVisible({ timeout: 15_000 })
@@ -1503,14 +1520,14 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await fila.getByRole('button', { name: 'Usar plantilla Servicio Fijo E2E' }).click()
     const g = dialog(page)
     await expect(g.getByText('Nuevo gasto', { exact: true })).toBeVisible()
-    await expect(g.locator('#gasto-tipo')).toHaveValue('Fijo')
+    await expect(g.locator('#gasto-tipo')).toContainText('Fijo')
     await expect(g.getByRole('switch', { name: 'Es recurrente' })).toHaveAttribute('aria-checked', 'true')
   })
 })
 
 test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, Conectar, refresco automático y plantilla compacta', () => {
   const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
-  const tarjetaCat = (page: Page, n: string) => page.locator('article').filter({ has: page.getByRole('button', { name: `Editar ${n}`, exact: true }) })
+  const tarjetaCat = (page: Page, n: string) => page.locator('article').filter({ has: page.getByRole('button', { name: `Acciones de ${n}`, exact: true }) })
 
   test('fuente: sin medio es como General; con medio es exactamente el del medio (Yape = Yape)', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
@@ -1526,12 +1543,12 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
     const tile = d.locator('span.size-11').first()
     await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
-    await d.locator('#fuente-medio').selectOption('Yape')
+    await pick(page, '#fuente-medio', 'Yape')
     await expect(tile.locator('svg.lucide-smartphone')).toHaveCount(1)
     await expect(tile).toHaveCSS('color', 'rgb(123, 63, 160)')      // el color de Yape
-    await d.locator('#fuente-medio').selectOption('Efectivo')
+    await pick(page, '#fuente-medio', 'Efectivo')
     await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
-    await d.locator('#fuente-medio').selectOption('')
+    await pick(page, '#fuente-medio', 'Ninguno (fuente libre)')
     await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
   })
 
@@ -1558,7 +1575,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
 
   test('categorías compartidas: editar una en Personal la actualiza en Trabajo; crearla en otro ámbito hereda su aspecto', async ({ page }) => {
     await go(page, 'Catálogo')
-    await page.getByRole('button', { name: 'Editar Transporte', exact: true }).click()
+    await accionCat(page, 'Transporte', 'Editar')
     let d = dialog(page)
     await expect(d.getByText('Se aplica a este nombre en todos los ámbitos.')).toBeVisible()
     await d.getByRole('button', { name: 'Icono rocket', exact: true }).click()
@@ -1573,7 +1590,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     }
     // Compras existe en Personal pero no en Trabajo: se edita en Personal y luego se crea en Trabajo
     await page.getByRole('tab', { name: /Personal/ }).click()
-    await page.getByRole('button', { name: 'Editar Compras', exact: true }).click()
+    await accionCat(page, 'Compras', 'Editar')
     d = dialog(page)
     await d.getByRole('button', { name: 'Icono gift', exact: true }).click()
     await d.getByRole('radio', { name: 'Color #8B7CF6' }).click()
@@ -1619,7 +1636,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await dialog(page).getByRole('radio', { name: 'Color #0E8FA8' }).click()
     await dialog(page).getByRole('button', { name: 'Guardar cambios' }).click()
     await expect(page.getByRole('list', { name: 'Medios de pago' }).getByRole('listitem').filter({ hasText: 'Yape' }).locator('span.size-7')).toHaveCSS('color', 'rgb(14, 143, 168)')
-    await expect(page.getByRole('list', { name: 'Medios de pago' }).getByRole('button', { name: 'Billetera X', exact: true })).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Medios de pago' }).getByRole('listitem').filter({ hasText: 'Billetera X' })).toBeVisible()
     // el enlace anterior #categorias sigue funcionando
     await page.goto('/?demo=60#categorias')
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Catálogo' })).toHaveAttribute('aria-current', 'page')
@@ -1678,7 +1695,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
   })
 
   test('Completar vacíos: rellena el catálogo sin cambiar lo que ves', async ({ page }) => {
-    const ico = async () => page.locator('article').filter({ has: page.getByRole('button', { name: 'Editar Auto', exact: true }) }).locator('svg').first().getAttribute('class')
+    const ico = async () => page.locator('article').filter({ has: page.getByRole('button', { name: 'Acciones de Auto', exact: true }) }).locator('svg').first().getAttribute('class')
     await go(page, 'Catálogo')
     const antes = await ico()
     await go(page, 'Configuración')
@@ -2005,5 +2022,262 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
     await expect(page.getByRole('alert').filter({ hasText: 'No se pudo eliminar Extra 1' })).toBeVisible({ timeout: 15_000 })
     expect(await nFuentes(page)).toBe(3)                                          // la fuente sigue ahí
+  })
+})
+
+test.describe('v1.15: descripción dinámica, selectores, orden y eliminación de categorías, switches', () => {
+  test.beforeEach(() => { test.slow() })
+  const grupo = (d: ReturnType<typeof dialog>, g: string, n: string) => d.getByRole('radiogroup', { name: g }).getByRole('radio', { name: n, exact: true })
+  const hayScrollX = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)
+
+  test('gasto nuevo: la descripción va justo debajo de la subcategoría y la sigue; el texto propio pide confirmación', async ({ page }) => {
+    await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    const d = dialog(page)
+    await grupo(d, 'Ámbito', 'Personal').click(); await grupo(d, 'Categoría', 'Alimentación').click(); await grupo(d, 'Subcategoría', 'Almuerzo').click()
+    const desc = d.getByLabel('Descripción')
+    await expect(desc).toHaveValue('Almuerzo')
+    // posición: Subcategoría → Descripción (y nada de por medio)
+    const ySub = (await d.getByRole('radiogroup', { name: 'Subcategoría' }).boundingBox())!, yDesc = (await desc.boundingBox())!
+    expect(yDesc.y).toBeGreaterThan(ySub.y + ySub.height - 1)
+    expect(yDesc.y - (ySub.y + ySub.height)).toBeLessThan(80)
+    await grupo(d, 'Subcategoría', 'Cena').click()
+    await expect(desc).toHaveValue('Cena')
+    await expect(d.getByTestId('desc-confirmar')).toHaveCount(0)
+    // texto propio: no se pisa; aparece la confirmación
+    await desc.fill('Cena de cumpleaños'); await desc.blur()
+    await grupo(d, 'Subcategoría', 'Desayuno').click()
+    await expect(desc).toHaveValue('Cena de Cumpleaños')
+    await expect(d.getByTestId('desc-confirmar')).toContainText('Desayuno')
+    await d.getByRole('button', { name: 'Conservar la mía' }).click()
+    await expect(desc).toHaveValue('Cena de Cumpleaños')
+    await expect(d.getByTestId('desc-confirmar')).toHaveCount(0)
+    await grupo(d, 'Subcategoría', 'Almuerzo').click()
+    await d.getByRole('button', { name: 'Reemplazar' }).click()
+    await expect(desc).toHaveValue('Almuerzo')
+  })
+
+  test('gasto: editar y clonar no sobrescriben la descripción al abrir; cambiar la subcategoría pide confirmar', async ({ page }) => {
+    await go(page, 'Gastos')
+    await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: '9', medio: 'Yape', desc: 'Menú con Ana' })
+    const row = page.getByRole('row', { name: /Menú con Ana/ })
+    for (const accion of ['Editar', 'Clonar']) {
+      await row.getByRole('button', { name: accion }).click()
+      const d = dialog(page)
+      await expect(d.getByLabel('Descripción')).toHaveValue('Menú con Ana')
+      await grupo(d, 'Subcategoría', 'Cena').click()
+      await expect(d.getByLabel('Descripción')).toHaveValue('Menú con Ana')
+      await expect(d.getByTestId('desc-confirmar')).toBeVisible()
+      await d.getByRole('button', { name: 'Reemplazar' }).click()
+      await expect(d.getByLabel('Descripción')).toHaveValue('Cena')
+      await d.getByRole('button', { name: 'Cancelar' }).click()
+    }
+  })
+
+  test('plantillas: nueva, editar y clonar siguen la subcategoría sin pisar el texto propio', async ({ page }) => {
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    const m = dialog(page)
+    await m.getByRole('button', { name: 'Nueva plantilla' }).click()
+    await grupo(m, 'Ámbito', 'Personal').click(); await grupo(m, 'Categoría', 'Alimentación').click(); await grupo(m, 'Subcategoría', 'Almuerzo').click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Almuerzo')
+    await grupo(m, 'Subcategoría', 'Cena').click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Cena')
+    await m.getByLabel('Descripción').fill('Cena fija')
+    await grupo(m, 'Subcategoría', 'Desayuno').click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Cena Fija')
+    await expect(m.getByTestId('desc-confirmar')).toBeVisible()
+    await m.getByRole('button', { name: 'Reemplazar' }).click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Desayuno')
+    await m.getByRole('button', { name: 'Guardar plantilla' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Plantilla creada correctamente.' })).toBeVisible()
+    // editar: se abre con su descripción; cambiar la sub (automática) la acompaña
+    await m.getByRole('button', { name: 'Más acciones de Desayuno' }).click()
+    await m.getByRole('menuitem', { name: 'Editar' }).click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Desayuno')
+    await m.getByLabel('Descripción').fill('Desayuno en casa'); await m.getByLabel('Descripción').blur()
+    await grupo(m, 'Subcategoría', 'Cena').click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Desayuno en Casa')
+    await expect(m.getByTestId('desc-confirmar')).toBeVisible()
+    await m.getByRole('button', { name: 'Conservar la mía' }).click()
+    await m.getByRole('button', { name: 'Guardar cambios' }).click()
+    await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem').filter({ hasText: 'Desayuno en Casa' })).toBeVisible()
+    // clonar: carga la descripción de la original
+    await m.getByRole('button', { name: 'Más acciones de Desayuno en Casa' }).click()
+    await m.getByRole('menuitem', { name: 'Clonar' }).click()
+    await expect(m.getByLabel('Descripción')).toHaveValue('Desayuno en Casa')
+  })
+
+  test('Combobox: busca, se maneja con teclado, muestra icono y no se corta dentro del modal', async ({ page }) => {
+    await go(page, 'Cajas')
+    await page.getByRole('button', { name: 'Nueva fuente' }).click()
+    const d = dialog(page)
+    const medio = d.locator('#fuente-medio')
+    await medio.click()
+    const lista = page.getByRole('listbox', { name: 'Medio de pago asociado' })
+    await expect(lista).toBeVisible()
+    await expect(lista.getByRole('option', { name: 'Yape', exact: true }).locator('svg')).toHaveCount(1)
+    const box = (await lista.boundingBox())!, vp = page.viewportSize()!
+    expect(box.x).toBeGreaterThanOrEqual(0); expect(box.y).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(vp.width); expect(box.y + box.height).toBeLessThanOrEqual(vp.height)
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
+    await expect(lista).toHaveCount(0)
+    await expect(medio).not.toContainText('Ninguno')
+    await expect(medio).toBeFocused()
+    // Escape cierra sin cambiar y el modal sigue abierto
+    const antes = await medio.innerText()
+    await medio.click(); await page.keyboard.press('Escape')
+    await expect(lista).toHaveCount(0); await expect(d).toBeVisible()
+    expect(await medio.innerText()).toBe(antes)
+    // moneda: con búsqueda cuando hay muchas opciones o clic directo
+    await pick(page, '#fuente-medio', 'Efectivo')
+    await expect(medio).toContainText('Efectivo')
+  })
+
+  test('filtros: las opciones traen el icono y color del catálogo, "Otros" al final y nombre completo en tooltip', async ({ page }) => {
+    await go(page, 'Gastos')
+    await page.getByRole('button', { name: 'Categoría', exact: true }).click()
+    const lista = page.getByRole('listbox', { name: 'Categoría' })
+    const opts = lista.getByRole('option')
+    await expect(opts.first().locator('svg').first()).toBeVisible()
+    await expect(opts.last()).toHaveAttribute('aria-label', 'Otros')
+    expect(await opts.first().getAttribute('title')).toBeTruthy()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Medio de pago', exact: true }).click()
+    await expect(page.getByRole('listbox', { name: 'Medio de pago' }).getByRole('option', { name: 'Yape', exact: true }).locator('svg').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+  })
+
+  test('Catálogo: reordenar categorías con Subir/Bajar persiste al releer; "Otros" fija; sin reordenar al buscar', async ({ page }) => {
+    await go(page, 'Catálogo')
+    const nombres = async () => (await page.locator('[data-testid="cat-card"]').evaluateAll(els => els.map(e => e.getAttribute('data-cat')))) as string[]
+    const antes = await nombres()
+    expect(antes.at(-1)).toBe('Otros')
+    const [a, b] = antes
+    await accionCat(page, a, 'Bajar')
+    await expect(page.getByRole('status').filter({ hasText: 'bajó de posición' })).toBeVisible()
+    const despues = await nombres()
+    expect(despues.slice(0, 2)).toEqual([b, a]); expect(despues.at(-1)).toBe('Otros')
+    await page.getByRole('button', { name: 'Actualizar datos' }).click()
+    await expect(page.getByRole('button', { name: 'Actualizar datos' })).toBeEnabled({ timeout: 15_000 })
+    expect((await nombres()).slice(0, 2)).toEqual([b, a])                                 // el orden salió de la "hoja", no solo de la pantalla
+    await accionCat(page, b, 'Bajar'); await expect(page.getByRole('status').filter({ hasText: 'bajó de posición' }).last()).toBeVisible()
+    // la primera no puede subir; "Otros" no se mueve; con búsqueda no se reordena
+    const primera = (await nombres())[0]
+    await abrirMenuCat(page, primera)
+    await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await abrirMenuCat(page, 'Otros')
+    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled(); await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await page.getByLabel('Buscar en el catálogo').fill('a')
+    await abrirMenuCat(page, primera)
+    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled()
+  })
+
+  test('Catálogo: eliminar categoría — bloqueada si la usan gastos; sin uso, pide confirmar las subcategorías y no borra gastos', async ({ page }) => {
+    const gastosAntes = await total(page)
+    await go(page, 'Catálogo')
+    // En uso → bloqueada, ofrece desactivar
+    await accionCat(page, 'Alimentación', 'Eliminar')
+    let d = dialog(page)
+    await expect(d.getByTestId('categoria-en-uso')).toContainText('gasto')
+    await expect(d.getByRole('button', { name: 'Eliminar' })).toHaveCount(0)
+    await d.getByRole('button', { name: 'Desactivar en su lugar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'desactivada' })).toBeVisible()
+    await expect(page.getByRole('switch', { name: 'Categoría Alimentación activa' })).toHaveAttribute('aria-checked', 'false')
+    // Categoría nueva con una subcategoría y sin uso → pide confirmación en cascada
+    await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Nueva categoría' }).click()
+    d = dialog(page)
+    await d.getByLabel('Nombre').fill('Mascotas E2E'); await d.getByRole('button', { name: 'Agregar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Categoría creada' })).toBeVisible()
+    await page.getByRole('button', { name: 'Agregar subcategoría a Mascotas E2E' }).click()
+    await dialog(page).getByLabel('Nombre').fill('Veterinaria E2E'); await dialog(page).getByRole('button', { name: 'Agregar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Subcategoría creada' })).toBeVisible()
+    await accionCat(page, 'Mascotas E2E', 'Eliminar')
+    d = dialog(page)
+    const eliminar = d.getByRole('button', { name: 'Eliminar' })
+    await expect(eliminar).toBeDisabled()
+    await d.getByRole('checkbox').check()
+    await eliminar.click()
+    await expect(page.getByRole('status').filter({ hasText: 'No se borró ningún gasto' })).toBeVisible()
+    await expect(page.locator('[data-cat="Mascotas E2E"]')).toHaveCount(0)
+    await go(page, 'Dashboard')
+    expect(await total(page)).toBe(gastosAntes)
+  })
+
+  test('switches: ámbito y categoría ocultan sus opciones en el formulario; reactivar conserva el estado de cada subcategoría; los medios también', async ({ page }) => {
+    await go(page, 'Catálogo')
+    // las subcategorías NO llevan switch
+    await expect(page.locator('[data-cat="Alimentación"]').getByRole('switch')).toHaveCount(1)
+    // una subcategoría inactiva por sí sola
+    await page.locator('[data-cat="Alimentación"]').getByRole('button', { name: 'Cena', exact: true }).click()
+    await dialog(page).getByRole('switch').click()
+    await dialog(page).getByRole('button', { name: 'Guardar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Subcategoría actualizada' })).toBeVisible()
+    // desactivar el ámbito Personal
+    await page.getByRole('switch', { name: 'Ámbito Personal activo' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Ámbito “Personal” desactivado' })).toBeVisible()
+    await go(page, 'Gastos'); await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    let d = dialog(page)
+    await expect(d.getByRole('radiogroup', { name: 'Ámbito' }).getByRole('radio', { name: 'Personal', exact: true })).toHaveCount(0)
+    await page.keyboard.press('Escape'); await go(page, 'Catálogo')
+    // reactivar: vuelve, y la subcategoría que estaba inactiva sigue inactiva
+    await page.getByRole('switch', { name: 'Ámbito Personal activo' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Ámbito “Personal” activado' })).toBeVisible()
+    await go(page, 'Gastos'); await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    d = dialog(page)
+    await grupo(d, 'Ámbito', 'Personal').click(); await grupo(d, 'Categoría', 'Alimentación').click()
+    await expect(grupo(d, 'Subcategoría', 'Almuerzo')).toBeVisible()
+    await expect(grupo(d, 'Subcategoría', 'Cena')).toHaveCount(0)
+    await page.keyboard.press('Escape'); await go(page, 'Catálogo')
+    // categoría OFF/ON
+    await page.getByRole('switch', { name: 'Categoría Compras activa' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Categoría “Compras” desactivada' })).toBeVisible()
+    await go(page, 'Gastos'); await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    d = dialog(page)
+    await grupo(d, 'Ámbito', 'Personal').click()
+    await expect(grupo(d, 'Categoría', 'Compras')).toHaveCount(0)
+    await page.keyboard.press('Escape'); await go(page, 'Catálogo')
+    // medio de pago OFF → no se ofrece al registrar
+    await page.getByRole('switch', { name: 'Medio de pago Plin activo' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Medio de pago guardado' })).toBeVisible()
+    await go(page, 'Gastos'); await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    await expect(dialog(page).getByRole('radiogroup', { name: 'Medio de pago' }).getByRole('radio', { name: 'Plin', exact: true })).toHaveCount(0)
+  })
+
+  test('selector de iconos: vista previa, familias, búsqueda y selección marcada', async ({ page }) => {
+    await go(page, 'Catálogo')
+    await accionCat(page, 'Transporte', 'Editar')
+    const d = dialog(page)
+    await expect(d.getByTestId('icono-elegido')).toBeVisible()
+    await d.getByRole('button', { name: 'Transporte y auto', exact: true }).click()
+    await expect(d.getByLabel('Transporte y auto').locator('button').first()).toBeVisible()
+    await expect(d.getByLabel('Hogar y servicios')).toHaveCount(0)                        // la familia filtra
+    await d.getByRole('button', { name: 'Icono rocket', exact: true }).click().catch(() => undefined)
+    await d.getByLabel('Buscar icono').fill('rocket')
+    await d.getByRole('button', { name: 'Icono rocket', exact: true }).click()
+    await expect(d.getByRole('button', { name: 'Icono rocket', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(d.getByTestId('icono-elegido')).toContainText('')
+    await expect(d.getByText('rocket', { exact: true }).first()).toBeVisible()
+  })
+
+  test.describe('móvil', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
+    test('Catálogo, formulario y selectores sin desplazamiento horizontal', async ({ page }) => {
+      await page.goto('/?demo=60#catalogo')
+      await expect(page.getByRole('tab').first()).toBeVisible()
+      expect(await hayScrollX(page)).toBe(false)
+      await abrirMenuCat(page, 'Alimentación')
+      await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await go(page, 'Dashboard')
+      await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+      const d = dialog(page)
+      await d.locator('#gasto-tipo').click()
+      const caja = (await page.getByRole('listbox').boundingBox())!
+      expect(caja.x).toBeGreaterThanOrEqual(0); expect(caja.x + caja.width).toBeLessThanOrEqual(390)
+      await page.keyboard.press('Escape')
+      expect(await hayScrollX(page)).toBe(false)
+    })
   })
 })

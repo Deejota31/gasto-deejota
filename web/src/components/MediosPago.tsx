@@ -5,7 +5,7 @@ import type { Medio } from '../lib/types'
 import { claveDeIcono, medioLook, medioLookBase, sortMedios } from '../lib/visual'
 import { ColorPicker, useApariencia } from './Apariencia'
 import { IconPicker } from './IconPicker'
-import { Button, Field, inputCls, Modal } from './ui'
+import { Button, Field, inputCls, Modal, Switch } from './ui'
 
 export type MedioEdicion = 'nuevo' | Medio | null
 
@@ -23,22 +23,22 @@ export function MediosPago({ store, editando, setEditando }: { store: AppStore; 
           const { Icon, color } = medioLook(m.nombre)
           const busy = store.pending.has(`medio:${m.nombre.toLowerCase()}`)
           return (
-            <li key={m.nombre} className={`flex items-center gap-1 rounded-xl border pr-1 transition ${m.activo ? 'border-line bg-card hover:bg-bg' : 'border-dashed border-line bg-bg/50 text-muted'}`}>
-              <button type="button" onClick={() => toggle(m)} disabled={busy} aria-pressed={m.activo}
-                title={m.activo ? 'Activo: toca para desactivar' : 'Inactivo: toca para reactivar'}
-                className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left text-sm">
+            <li key={m.nombre} className={`flex items-center gap-1.5 rounded-xl border pr-1.5 transition ${m.activo ? 'border-line bg-card hover:bg-bg' : 'border-dashed border-line bg-bg/50 text-muted'}`}>
+              <div className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-sm">
                 <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: m.activo ? `${color}1F` : undefined, color: m.activo ? color : undefined }}>
                   {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}
                 </span>
-                <span className={`min-w-0 flex-1 truncate font-medium ${m.activo ? '' : 'line-through'}`}>{m.nombre}</span>
-              </button>
+                <span className={`min-w-0 flex-1 truncate font-medium ${m.activo ? '' : 'line-through'}`} title={m.nombre}>{m.nombre}</span>
+              </div>
+              <Switch compact checked={m.activo} disabled={busy} label={`Medio de pago ${m.nombre} activo`}
+                title={m.activo ? 'Activo: toca para desactivar (deja de ofrecerse; el historial se conserva)' : 'Inactivo: toca para reactivar'} onChange={() => toggle(m)} />
               <button type="button" aria-label={`Personalizar ${m.nombre}`} title="Cambiar icono y color" onClick={() => setEditando(m)}
                 className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-bg hover:text-navy"><Pencil className="size-3.5" /></button>
             </li>
           )
         })}
       </ul>
-      <p className="text-[11px] text-muted">Toca un medio para activarlo o desactivarlo; el lápiz cambia su icono y color. “Otros” siempre va al final.</p>
+      <p className="text-[11px] text-muted">Usa el interruptor para activar o desactivar un medio; el lápiz cambia su icono y color. “Otros” siempre va al final.</p>
       {editando && <MedioForm key={editando === 'nuevo' ? 'nuevo' : editando.nombre} store={store} medio={editando === 'nuevo' ? null : editando} existentes={raw} onClose={() => setEditando(null)} />}
     </div>
   )

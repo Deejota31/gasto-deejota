@@ -3,7 +3,7 @@ import { createApi, httpTransport, type Api, type Connection, type FuenteInput, 
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
-import { sortCatalogo } from './orden'
+import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
@@ -205,6 +205,19 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
         catalogo: d.catalogo.map(c => (hit(c) ? { ...c, [col]: p.nuevo } : c)),
         gastos: d.gastos.map(g => (hit(g) ? { ...g, [col]: p.nuevo } : g)),
       }))
+      return r
+    },
+    /** Orden manual de categorías de un ámbito: se ve al instante; si falla, vuelve al anterior. */
+    async reorderCategorias(ambito: string, nombres: string[]) {
+      let previo: CatalogoItem[] = []
+      const aplicar = (d: AppData) => { const o = ordenTrasReordenarCategorias(d.catalogo, ambito, nombres); return { ...d, catalogo: d.catalogo.map((c, i) => ({ ...c, orden: o[i] })) } }
+      setData(d => { previo = d?.catalogo ?? []; return d && normalize(aplicar(d)) })
+      try { await api.reorderCategorias(ambito, nombres); patch(aplicar) } catch (e) { setData(d => d && { ...d, catalogo: previo }); throw e }
+    },
+    /** Elimina una categoría (y, con `cascada`, sus subcategorías) del catálogo. Nunca borra gastos. */
+    async deleteCategoria(ambito: string, categoria: string, cascada = false) {
+      const r = await api.deleteCategoria(ambito, categoria, cascada)
+      if (r.eliminada) patch(d => ({ ...d, catalogo: d.catalogo.filter(c => !(c.ambito === ambito && c.categoria === categoria)) }))
       return r
     },
     async saveMedio(m: Medio) {

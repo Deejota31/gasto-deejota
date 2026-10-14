@@ -1,10 +1,11 @@
 // Selector Ámbito → Categoría → Subcategoría compartido por el formulario de gasto y el de plantillas.
 // Usa el mismo catálogo (ya ordenado, "Otros" al final) y la misma regla de dependencias.
+import { useRef, useState, type ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import type { CatalogoItem } from '../lib/types'
 import { otrosAlFinal } from '../lib/orden'
 import { ambitoLook, categoriaLook, subcategoriaLook } from '../lib/visual'
-import { descripcionDeSubcategoria } from '../lib/texto'
+import { descripcionDeSubcategoria, formatearDescripcion } from '../lib/texto'
 import { catalogOptions } from './shared'
 
 export interface Clasif { ambito: string; categoria: string; subcategoria: string }
@@ -35,18 +36,58 @@ export function clasificacionVigente(catalogo: CatalogoItem[], v: Clasif): boole
 }
 
 /**
- * Autocompletado de la descripción al elegir subcategoría.
- * Solo reemplaza si la descripción está vacía o sigue siendo la que se completó sola (`auto`);
- * si la escribiste tú, no se toca. "Otros" y "Por Clasificar" dejan la descripción vacía.
+ * Descripción ligada a la subcategoría (gastos y plantillas). Reglas:
+ *  - Al abrir un registro se conserva su descripción; solo se considera "automática" si coincide con el nombre de su subcategoría.
+ *  - Al elegir otra subcategoría, una descripción vacía o automática se actualiza al instante con el nombre nuevo.
+ *  - Si la descripción es personalizada, NO se pisa: se pide confirmar (Reemplazar / Conservar).
+ *  - "Otros" y "Por Clasificar" no generan descripción: nunca borran un texto personalizado.
+ * `auto` recuerda el último texto generado, así cambiar de ámbito o categoría (que limpia la subcategoría) no lo vuelve "personalizado".
  */
-export function autocompletar(descripcion: string, auto: string | null, sub: string): { descripcion: string; auto: string | null } {
-  if (descripcion.trim() !== '' && descripcion !== auto) return { descripcion, auto }
-  const nueva = descripcionDeSubcategoria(sub)
-  return { descripcion: nueva, auto: nueva }
+export function useDescripcionSub(inicial: string, subInicial: string) {
+  const [descripcion, setDescripcionRaw] = useState(inicial)
+  const auto = useRef<string | null>(inicial && formatearDescripcion(inicial) === formatearDescripcion(descripcionDeSubcategoria(subInicial)) ? inicial : null)
+  const [pendiente, setPendiente] = useState<{ sub: string; nueva: string } | null>(null)
+
+  const esAuto = (d: string) => d.trim() === '' || (auto.current !== null && formatearDescripcion(d) === formatearDescripcion(auto.current))
+  const aplicar = (nueva: string) => { auto.current = nueva; setDescripcionRaw(nueva); setPendiente(null) }
+
+  return {
+    descripcion, pendiente,
+    /** Escritura del usuario: pasa a ser personalizada y cancela una confirmación abierta. */
+    escribir: (v: string) => { setDescripcionRaw(v); setPendiente(null) },
+    /** Al salir del campo (formato de mayúsculas); si seguía siendo la automática, sigue siéndolo. */
+    alSalir: () => { const f = formatearDescripcion(descripcion); if (f === descripcion) return; if (auto.current !== null && descripcion === auto.current) auto.current = f; setDescripcionRaw(f) },
+    /** El usuario eligió otra subcategoría. */
+    alCambiarSub: (sub: string) => {
+      if (!sub) return
+      const nueva = descripcionDeSubcategoria(sub)
+      if (esAuto(descripcion)) return aplicar(nueva)
+      if (!nueva || formatearDescripcion(descripcion) === formatearDescripcion(nueva)) return setPendiente(null)
+      setPendiente({ sub, nueva })
+    },
+    reemplazar: () => { if (pendiente) aplicar(pendiente.nueva) },
+    conservar: () => setPendiente(null),
+  }
 }
 
-export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, keepCurrent = false }: {
+/** Aviso en línea para confirmar el reemplazo de una descripción personalizada. */
+export function ConfirmarDescripcion({ d }: { d: ReturnType<typeof useDescripcionSub> }) {
+  if (!d.pendiente) return null
+  return (
+    <div role="alert" data-testid="desc-confirmar" className="mt-1.5 rounded-xl border border-[#F5DDA8] bg-[#FFF7E6] p-2.5 text-xs text-[#8A5A0B] dark:border-[#5a4a20] dark:bg-[#33290f] dark:text-[#f1d391]">
+      <p>Cambiaste la subcategoría a <b>{d.pendiente.sub}</b>. ¿Reemplazar tu descripción “{d.descripcion}” por “{d.pendiente.nueva}”?</p>
+      <div className="mt-1.5 flex gap-2">
+        <button type="button" onClick={d.reemplazar} className="rounded-lg bg-navy px-2.5 py-1 font-semibold text-white dark:text-[#0E1525]">Reemplazar</button>
+        <button type="button" onClick={d.conservar} className="rounded-lg border border-line bg-card px-2.5 py-1 font-semibold text-ink">Conservar la mía</button>
+      </div>
+    </div>
+  )
+}
+
+export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, keepCurrent = false, children }: {
   catalogo: CatalogoItem[]; value: Clasif; onChange: (next: Clasif) => void; errors?: Record<string, string>; keepCurrent?: boolean
+  /** Se pinta justo debajo de la subcategoría: la descripción va pegada al campo del que depende. */
+  children?: ReactNode
 }) {
   const o = opcionesClasif(catalogo, value, keepCurrent)
   const err = (k: string) => errors[k] && <span className="text-xs text-[#D2463C]">{errors[k]}</span>
@@ -87,6 +128,7 @@ export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, ke
         )}
         {err('subcategoria')}
       </div>
+      {children}
     </div>
   )
 }

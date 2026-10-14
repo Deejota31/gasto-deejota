@@ -12,6 +12,7 @@ import type { AppData, Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { dependenciasFuente } from '../lib/dependencias'
 import { MenuAcciones } from './MenuAcciones'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
+import { Combobox } from './Combobox'
 
 /**
  * Fuentes de dinero (v1.8): General, Sodexo, Extra 1… Cada fuente activa suma su importe del mes al presupuesto
@@ -430,7 +431,7 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
             <input id="fuente-monto" className={`${inputCls} tabular h-11 text-base font-semibold`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
           </Field>
           <Field label="Moneda" error={errors.moneda} htmlFor="fuente-moneda">
-            <SelectField id="fuente-moneda" value={moneda} onChange={setMoneda}>{monedas.map(x => <option key={x} value={x}>{x}</option>)}</SelectField>
+            <Combobox id="fuente-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={monedas.map(x => ({ value: x, label: x }))} />
           </Field>
         </div>
         {editar && mes && !esMesBase && recurrencia === 'mensual' && (
@@ -452,10 +453,8 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
           </span>
         </Field>
         <Field label="Medio de pago asociado (opcional)" error={errors.medio} htmlFor="fuente-medio" hint="Ej. Sodexo: los gastos pagados con ese medio se atribuyen a esta fuente. No cambia ningún gasto.">
-          <SelectField id="fuente-medio" value={medio} onChange={setMedio}>
-            <option value="">Ninguno (fuente libre)</option>
-            {mediosOpc.map(x => <option key={x} value={x}>{x}</option>)}
-          </SelectField>
+          <Combobox id="fuente-medio" label="Medio de pago asociado" value={medio} onChange={setMedio} placeholder="Ninguno (fuente libre)"
+            options={[{ value: '', label: 'Ninguno (fuente libre)' }, ...mediosOpc.map(x => { const l = medioLook(x); return { value: x, label: x, Icon: l.Icon, color: l.color } })]} />
         </Field>
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Fuente activa" />

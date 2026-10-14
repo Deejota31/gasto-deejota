@@ -1,6 +1,6 @@
 import { aggregate, cajaMatches } from './engine'
 import { ratesFromConfig } from './money'
-import type { AppData, Caja, Filters, Fuente } from './types'
+import type { AppData, Caja, Filters, Fuente, Plantilla } from './types'
 
 /**
  * Dependencias de una fuente o subcaja antes de eliminarla. Ningún gasto guarda el ID de una fuente ni de una caja
@@ -35,4 +35,30 @@ export function dependenciasCaja(c: Caja, data: AppData): DepsCaja {
     gastos: data.gastos.filter(g => g.estado !== 'Anulado' && c.filtroCampo !== 'Todos' && cajaMatches(c, g)).length,
     presupuestos: data.presupuestos.filter(p => p.cajaId === c.id).length,
   }
+}
+
+export interface DepsCategoria { gastos: number; plantillas: number; compromisos: number; cajas: number; subcategorias: number }
+
+const nm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+
+/**
+ * Qué usa una categoría de un ámbito (espejo de `dependenciasCategoria_` del backend): gastos y plantillas con esa
+ * ámbito+categoría, cuántas de esas plantillas son compromisos, y subcajas que apuntan a la categoría o a sus
+ * subcategorías (solo cuentan si esa opción no existe también en otro ámbito).
+ */
+export function dependenciasCategoria(ambito: string, categoria: string, data: AppData, plantillas: Plantilla[]): DepsCategoria {
+  const a = nm(ambito), c = nm(categoria)
+  const filas = data.catalogo.filter(x => nm(x.ambito) === a && nm(x.categoria) === c)
+  const subs = filas.filter(x => x.subcategoria).map(x => nm(x.subcategoria))
+  const gastos = data.gastos.filter(g => nm(g.ambito) === a && nm(g.categoria) === c).length
+  const pl = plantillas.filter(p => nm(p.ambito) === a && nm(p.categoria) === c)
+  const existeEnOtro = data.catalogo.some(x => nm(x.ambito) !== a && nm(x.categoria) === c)
+  const subEnOtro = (s: string) => data.catalogo.some(x => nm(x.ambito) !== a && nm(x.subcategoria) === s)
+  const cajas = data.cajas.filter(k => {
+    const v = nm(k.filtroValor)
+    if (k.filtroCampo === 'Categoría') return v === c && !existeEnOtro
+    if (k.filtroCampo === 'Subcategoría') return subs.includes(v) && !subEnOtro(v)
+    return false
+  }).length
+  return { gastos, plantillas: pl.length, compromisos: pl.filter(p => p.esCompromiso).length, cajas, subcategorias: subs.length }
 }

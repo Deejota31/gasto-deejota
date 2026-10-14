@@ -28,6 +28,20 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.15.0
+
+- **Descripción dinámica:** en gastos y plantillas (nuevo, editar y clonar) la descripción sigue a la subcategoría. Si ya escribiste algo propio no se pisa: aparece un aviso “Reemplazar / Conservar la mía”. Abrir un registro nunca cambia su descripción. El campo va justo debajo de Subcategoría.
+- **Selectores modernos y reutilizables:** un único `Combobox` (icono y color por opción, búsqueda, teclado, no se corta dentro de los modales) para monedas, medios de pago, tipo de gasto, ámbito y categoría; `Checkbox` propio; los filtros muestran el icono y color reales del catálogo, "Otros" al final y tooltip con el nombre completo.
+- **Selector de iconos y colores rediseñado:** vista previa, búsqueda fija, familias, cuadrícula compacta con marca de selección. Reutiliza el catálogo de iconos existente.
+- **Categorías:** menú ⋯ (Editar, Subir, Bajar, Eliminar). El orden se guarda por ámbito en la columna `Orden` de `CATALOGO` (sin hojas nuevas); "Otros" queda siempre al final y no se reordena mientras hay una búsqueda.
+- **Eliminación segura de categorías:** revisa gastos, plantillas, compromisos y subcajas. Si hay uso, no borra nada y ofrece **Desactivar en su lugar**; si solo tiene subcategorías pide una confirmación expresa. Nunca borra gastos.
+- **Interruptores ON/OFF** en ámbitos, categorías y medios de pago (no en subcategorías). Desactivar un nivel oculta sus hijos sin tocar su estado propio: al reactivarlo cada subcategoría vuelve como estaba. Desactivar un ámbito/categoría que no tenía fila propia ya no la cambia de posición.
+- Nuevas acciones de backend `reorderCategorias` y `deleteCategoria`.
+
+### Despliegue de v1.15.0
+
+Vuelve a pegar `apps-script/Code.gs` en tu proyecto de Apps Script y haz **Implementar → Administrar implementaciones → Nueva versión** (sin esto la web no puede reordenar ni eliminar categorías en tu hoja; el resto funciona igual).
+
 ## Novedades v1.14.0
 
 - **Configuración rediseñada** (sin perder funciones): encabezado con estado, conexión a Google Sheets (token oculto con ojo para verlo), Preferencias en tres grupos (Moneda y finanzas · Regionalización · Interfaz y experiencia), Administración de datos, Funciones del backend en acordeones por categoría con una **consola de resultados** (función, estado, duración, copiar, expandir/contraer, desplazamiento interno) y "Acerca de" compacto.
