@@ -284,7 +284,7 @@ export function createApi(t: Transport) {
     /** Crea la fuente General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
     /** Rellena celdas vacías de la hoja (Activo, Icono, Medio, Orden…). `catalogo` trae el icono/color a escribir en cada fila vacía. */
     async completarVacios(catalogo: { ambito: string; categoria: string; subcategoria: string; icono: string; color: string }[]) {
-      return parse(z.object({ cajas: z.number(), fuentes: z.number(), catalogo: z.number(), config: z.number() }), await t('completarVacios', { catalogo }))
+      return parse(z.object({ cajas: z.number(), fuentes: z.number(), catalogo: z.number(), config: z.number(), medios: z.number().optional() }), await t('completarVacios', { catalogo }))
     },
     async migrarGeneralAFuente() {
       const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fuente: fuenteRow.optional(), ajustes: z.array(fuenteMesRow).optional() }), await t('migrarGeneralAFuente', {}))
