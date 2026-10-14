@@ -666,6 +666,132 @@ describe('backend Apps Script', () => {
     expect(b.post('plantillas').data.find((x: unknown[]) => x[0] === id).slice(11)).toEqual([false, 'Extraordinario', false])
   })
 
+  describe('v1.11 categorías compartidas entre ámbitos', () => {
+    const cat = () => b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
+    const cabeza = (nombre: string) => cat().filter(r => r[1] === nombre && r[2] === '')
+    const sub = (c: string, s: string) => cat().filter(r => r[1] === c && r[2] === s)
+
+    // Las categorías no tienen fila propia hasta que se edita su aspecto: se crean las de tres ámbitos como las crea la web.
+    const conCabezas = () => { for (const a of ['Personal', 'Trabajo', 'Amigos']) b.post('saveCatalogo', { ambito: a, categoria: 'Alimentación', subcategoria: '', activo: true }) }
+
+    it('editar el icono y color de una categoría en un ámbito lo escribe en todos; el estado (activo) sigue siendo de cada ámbito', () => {
+      conCabezas()
+      expect(cabeza('Alimentación')).toHaveLength(3)
+      const w = b.ss.getSheetByName('CATALOGO')!.writes
+      const r = b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: '', activo: false, icono: 'rocket', color: '#E5484D' })
+      expect(r.ok).toBe(true)
+      expect(b.ss.getSheetByName('CATALOGO')!.writes - w).toBe(2)               // la fila editada + una sola escritura para las demás
+      for (const row of cabeza('Alimentación')) { expect(row[4]).toBe('rocket'); expect(row[5]).toBe('#E5484D') }
+      const estados = cabeza('Alimentación').map(row => [row[0], row[3]])
+      expect(estados.find(x => x[0] === 'Personal')![1]).toBe(false)
+      expect(estados.filter(x => x[0] !== 'Personal').every(x => x[1] === true)).toBe(true)
+      // las subcategorías y los ámbitos no se tocan
+      expect(sub('Alimentación', 'Almuerzo').every(row => row[4] === '')).toBe(true)
+      expect(cat().filter(row => row[1] === '').every(row => row[4] !== 'rocket')).toBe(true)
+    })
+
+    it('una subcategoría comparte su icono entre ámbitos; ámbitos distintos no comparten nada', () => {
+      expect(sub('Alimentación', 'Almuerzo').length).toBeGreaterThan(1)
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', icono: 'gift' })
+      for (const row of sub('Alimentación', 'Almuerzo')) expect(row[4]).toBe('gift')
+      expect(sub('Alimentación', 'Cena').every(row => row[4] === '')).toBe(true)
+      b.post('saveCatalogo', { ambito: 'Personal', icono: 'star', color: '#4F7BE8' })
+      expect(cat().filter(row => row[1] === '' && row[0] !== 'Personal').every(row => row[4] !== 'star')).toBe(true)
+    })
+
+    it('al crear una categoría o subcategoría que ya existe en otro ámbito hereda su aspecto en vez de pisarlo', () => {
+      conCabezas()
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: '', icono: 'rocket', color: '#E5484D' })
+      const r = b.post('saveCatalogo', { ambito: 'Nuevo ámbito', categoria: 'Alimentación', subcategoria: '', icono: 'tag', color: '#4F7BE8' })
+      expect(r.data.slice(4, 6)).toEqual(['rocket', '#E5484D'])
+      expect(cabeza('Alimentación').every(row => row[4] === 'rocket' && row[5] === '#E5484D')).toBe(true)
+      // una categoría realmente nueva usa lo que se envía
+      const n = b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Categoría inventada', subcategoria: '', icono: 'gift', color: '#6366F1' })
+      expect(n.data.slice(4, 6)).toEqual(['gift', '#6366F1'])
+    })
+  })
+
+  describe('v1.11 hoja sin celdas vacías', () => {
+    it('fuentes: Icono = auto y Medio de pago = Libre en la hoja; la web los recibe vacíos', () => {
+      const f = b.post('saveFuente', { id: 'f-ica', nombre: 'Viaje a Ica', monto: 1000, moneda: 'PEN', color: '#B4693C', orden: 2, recurrencia: 'unica', mes: '2026-10' })
+      expect(f.ok).toBe(true)
+      const fila = b.ss.getSheetByName('FUENTES')!.rows.find(r => r[0] === 'f-ica')!
+      expect([fila[5], fila[10]]).toEqual(['auto', 'Libre'])
+      expect([f.data[5], f.data[10]]).toEqual(['', ''])
+      const d = b.post('data', { fresh: true }).data
+      expect(d.fuentes.find((x: unknown[]) => x[0] === 'f-ica').filter((_: unknown, i: number) => i === 5 || i === 10)).toEqual(['', ''])
+      // volver a guardar con un medio real y con "Libre" explícito
+      expect(b.post('saveFuente', { id: 'f-ica', nombre: 'Viaje a Ica', monto: 1000, moneda: 'PEN', orden: 2, recurrencia: 'unica', mes: '2026-10', medioPago: 'Libre' }).data[10]).toBe('')
+      expect(b.post('saveFuente', { id: 'f-ica', nombre: 'Viaje a Ica', monto: 1000, moneda: 'PEN', orden: 2, recurrencia: 'unica', mes: '2026-10', medioPago: 'Yape' }).data[10]).toBe('Yape')
+      expect(b.ss.getSheetByName('FUENTES')!.rows.find(r => r[0] === 'f-ica')![10]).toBe('Yape')
+      // "Libre" no se puede usar como medio de pago real
+      expect(b.post('saveMedio', { nombre: 'Libre' }).error.code).toBe('VALIDATION')
+      expect(b.post('saveMedio', { nombre: ' libre ' }).error.code).toBe('VALIDATION')
+    })
+
+    it('cajas: guardar escribe Activo, Icono = auto y Todos en la general; la web recibe icono vacío y valor vacío en la general', () => {
+      const g = b.post('saveCaja', { id: 'general', nombre: 'Caja general', presupuesto: 3000, filtroCampo: 'Todos', filtroValor: '', color: '#1e3a8a', orden: 1 })
+      expect(g.data.slice(3)).toEqual(['Todos', '', '#1e3a8a', 1, true, '', ''])
+      const fila = b.ss.getSheetByName('CAJAS')!.rows.find(r => r[0] === 'general')!
+      expect([fila[4], fila[7], fila[9]]).toEqual(['Todos', true, 'auto'])
+      const d = b.post('data', { fresh: true }).data
+      const general = d.cajas.find((x: unknown[]) => x[0] === 'general')
+      expect([general[4], general[7], general[9]]).toEqual(['', true, ''])
+    })
+
+    it('completarVacios rellena solo lo vacío (cajas, fuentes, catálogo, config), no pisa nada y es idempotente', () => {
+      const cajas = b.ss.getSheetByName('CAJAS')!
+      // como en tu hoja: general sin Activo ni valor, otra caja sin orden ni icono
+      cajas.rows[1] = ['general', 'Caja general', 3000, 'Todos', '', '#1e3a8a', 1, '', '']
+      cajas.rows[2] = ['auto', 'Caja Auto', 250, 'Categoría', 'Auto', '#64748b', '', true, 'Mi nota', 'rocket']
+      b.post('saveFuente', { id: 'f-1', nombre: 'General', monto: 3109.75, moneda: 'PEN', color: '#1E3A8A', orden: 1, recurrencia: 'unica', mes: '2026-10' })
+      const f = b.ss.getSheetByName('FUENTES')!.rows.find(r => r[0] === 'f-1')!
+      f[5] = ''; f[10] = ''                                                    // celdas vacías, como las que tenías
+      const cat = b.ss.getSheetByName('CATALOGO')!
+      const antes = JSON.stringify(cat.rows.map(r => [r[4], r[5]]))
+      cat.rows[2][3] = ''                                                       // Activo vacío = activo
+      const r = b.post('completarVacios', { catalogo: [
+        { ambito: 'Personal', categoria: '', subcategoria: '', icono: 'user', color: '#4F7BE8' },
+        { ambito: 'Personal', categoria: 'Auto', subcategoria: '', icono: 'car', color: '#64748B' },
+        { ambito: 'Personal', categoria: 'Auto', subcategoria: 'Gasolina', icono: 'fuel', color: '#64748B' },
+        { ambito: 'Nada', categoria: '', subcategoria: '', icono: 'x', color: '#000000' },
+        { ambito: 'Personal', categoria: 'Auto', subcategoria: 'SOAT', icono: 'Bad Icon!', color: 'rojo' },
+      ] })
+      expect(r.ok).toBe(true)
+      expect(r.data.cajas).toBeGreaterThanOrEqual(2)
+      expect(r.data.fuentes).toBe(1)
+      expect(r.data.catalogo).toBeGreaterThan(0)
+      const gen = cajas.rows[1]
+      expect([gen[3], gen[4], gen[6], gen[7], gen[9]]).toEqual(['Todos', 'Todos', 1, true, 'auto'])
+      const aut = cajas.rows[2]
+      expect([aut[6], aut[7], aut[8], aut[9]]).toEqual([5, true, 'Mi nota', 'rocket'])      // Orden = siguiente al mayor; lo demás intacto
+      expect([f[5], f[10]]).toEqual(['auto', 'Libre'])
+      const personal = cat.rows.find(x => x[0] === 'Personal' && x[1] === '')!
+      expect([personal[3], personal[4], personal[5]]).toEqual([true, 'user', '#4F7BE8'])
+      const gasolina = cat.rows.find(x => x[0] === 'Personal' && x[2] === 'Gasolina')!
+      expect([gasolina[4], gasolina[5]]).toEqual(['fuel', '#64748B'])
+      const soat = cat.rows.find(x => x[0] === 'Personal' && x[2] === 'SOAT')!
+      expect([soat[4], soat[5]]).toEqual(['', ''])                                           // datos inválidos no se escriben
+      expect(cat.rows[2][3]).toBe(true)
+      expect(JSON.stringify(cat.rows.map(x => [x[4], x[5]])) === antes).toBe(false)
+      // config: la clave nueva se agrega con su valor
+      expect(b.ss.getSheetByName('CONFIG')!.rows.some(x => x[0] === 'refresco_segundos' && x[1] === '300')).toBe(true)
+      // idempotente: la segunda vez no cambia nada
+      const w = [cajas.writes, cat.writes, b.ss.getSheetByName('FUENTES')!.writes]
+      const r2 = b.post('completarVacios', { catalogo: [{ ambito: 'Personal', categoria: '', subcategoria: '', icono: 'star', color: '#000000' }] })
+      expect(r2.data).toEqual({ cajas: 0, fuentes: 0, catalogo: 0, config: 0 })
+      expect([cajas.writes, cat.writes, b.ss.getSheetByName('FUENTES')!.writes]).toEqual(w)
+      expect(personal[4]).toBe('user')                                                       // no pisó lo ya relleno
+    })
+
+    it('la web lee las cajas y fuentes ya rellenadas sin marcadores', () => {
+      b.post('completarVacios', {})
+      const d = b.post('data', { fresh: true }).data
+      for (const c of d.cajas) expect(c[9]).toBe('')
+      expect(d.cajas.find((x: unknown[]) => x[3] === 'Todos')[4]).toBe('')
+    })
+  })
+
   describe('v1.8 fuentes de dinero', () => {
     // Instalación anterior a v1.8: todavía no existen las hojas de fuentes.
     beforeEach(() => { b.ss.sheets.delete('FUENTES'); b.ss.sheets.delete('FUENTES_MESES') })

@@ -28,6 +28,22 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.11.0
+
+- **Aspecto automático coherente:** una fuente con medio de pago se ve exactamente como ese medio (Yape = Yape); una fuente libre se ve como **General**. Las cajas toman el icono y color de su alcance (ámbito, categoría, subcategoría o medio de pago).
+- **Categorías y subcategorías compartidas entre ámbitos:** cambiar el icono o color de "Transporte" en Personal lo cambia en todos los ámbitos; crear una categoría que ya existe en otro ámbito hereda su aspecto.
+- **Selector de color compacto:** una fila de 10 colores y, en "Más colores", la paleta completa (64) y un color libre.
+- **Pestaña Catálogo** (antes Categorías): ámbitos, categorías, subcategorías **y medios de pago** (ya no se agregan en Configuración).
+- **Conectar** junto a "Mi hoja", disponible en cualquier pestaña.
+- **Actualización automática** configurable en Configuración (desactivada, 30 s … 30 min; por defecto 5 min) con aviso verde "Datos actualizados".
+- **Hoja sin celdas vacías:** Activo = TRUE, Orden correlativo, Icono = `auto` y, en fuentes sin medio, Medio de pago = `Libre`; botón "Completar vacíos" en Configuración (se ejecuta solo una vez por versión).
+- **Plantilla compacta:** Tipo de gasto, Es recurrente y Es compromiso en una sola fila; el formulario cabe sin desplazarse en escritorio.
+
+### Despliegue de v1.11.0
+
+1. Copia `apps-script/Code.gs` a tu proyecto de Apps Script y publica una **nueva versión** de la implementación (la URL no cambia).
+2. Abre la web: la primera vez rellena los vacíos de la hoja solo (o usa Configuración → Completar vacíos).
+
 ## Novedades v1.10.0
 
 - **Cascada de fuentes libres:** un gasto consume primero la fuente principal (General) hasta su tope y el resto pasa a la siguiente fuente libre (p. ej. Viaje a Ica); nadie queda en negativo mientras haya saldo. Las fuentes ligadas a un medio de pago (Sodexo…) solo cubren su propio medio.

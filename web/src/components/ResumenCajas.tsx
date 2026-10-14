@@ -27,7 +27,7 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
         {c.fuentes.lista.length ? (
           <ul className="divide-y divide-line/70" aria-label="Fuentes del período">
             {c.fuentes.lista.map(r => (
-              <Fila key={r.fuente.id} look={fuenteLook(r.fuente)} nombre={r.fuente.nombre}
+              <Fila key={r.fuente.id} look={fuenteLook(r.fuente, c.fuentes.lista.map(x => x.fuente))} nombre={r.fuente.nombre}
                 detalle={r.fuente.activo ? (r.fuente.medioPago ? `Medio ${r.fuente.medioPago}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
                 apagada={!r.fuente.activo}
                 cols={[['Asignado', money(r.asignado)], ['Gastado', money(r.gastado)], ['Disponible', r.fuente.activo ? money(r.disponible) : '—', r.disponible < 0 && r.fuente.activo ? ESTADO.alerta : undefined]]} />

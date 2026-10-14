@@ -46,7 +46,7 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
   if (view.kind === 'form') {
     const title = view.cloneOf ? 'Clonar plantilla' : (view.plantilla || view.draft?.existente) ? 'Editar plantilla' : 'Nueva plantilla'
     return (
-      <Modal open onClose={onClose} size="lg" title={title} icon={<CalendarDays className="size-5" />}
+      <Modal open onClose={onClose} size="xl" title={title} icon={<CalendarDays className="size-5" />}
         subtitle={view.cloneOf ? `Se creará una plantilla nueva a partir de “${view.cloneOf.descripcion}”. La original no cambia.` : 'Plantilla de gasto frecuente'}>
         <PlantillaForm store={store} plantilla={view.plantilla} draft={view.draft} cloneOf={view.cloneOf} items={items}
           onDone={() => setView({ kind: 'list' })} onReopen={onReopen} />
@@ -437,55 +437,61 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   }
 
   return (
-    <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
+    <form className="space-y-3" noValidate onSubmit={e => { e.preventDefault(); save() }}>
       {cloneOf && <p className="rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy">Estás creando una <b>plantilla nueva</b> (copia de “{cloneOf.descripcion}”). Cambia al menos un valor; se ubicará justo después de la original.</p>}
-      <ClasificacionPicker catalogo={catalogo} value={v} onChange={change} errors={errors} keepCurrent={!!base} />
-      <Field label="Descripción" error={errors.descripcion} htmlFor="plantilla-desc" hint="Se completa con la subcategoría; puedes cambiarla.">
-        <input id="plantilla-desc" className={inputCls} maxLength={200} value={descripcion} placeholder="Ej. ChatGPT Plus"
-          onChange={e => setDescripcion(e.target.value)} onBlur={() => { const f = formatearDescripcion(descripcion); if (descripcion === descAuto) setDescAuto(f); setDescripcion(f) }} />
-      </Field>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-        <Field label="Monto predeterminado" error={errors.monto} htmlFor="plantilla-monto" hint="Opcional. Podrás cambiarlo cada mes al registrar.">
-          <span className="relative block">
-            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted">{simbolo(moneda)}</span>
-            <input id="plantilla-monto" className={`${inputCls} tabular h-11 pl-10`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
-          </span>
-        </Field>
-        <Field label="Moneda" htmlFor="plantilla-moneda">
-          <SelectField id="plantilla-moneda" value={moneda} onChange={setMoneda}>
-            {[...new Set([...monedas, moneda])].map(x => <option key={x}>{x}</option>)}
-          </SelectField>
-        </Field>
-      </div>
-      <div>
-        <p className="mb-1.5 text-xs font-medium text-muted">Medio de pago predeterminado</p>
-        <div role="radiogroup" aria-label="Medio de pago predeterminado" className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-          {[...new Set([...medios, ...(medioPago ? [medioPago] : [])])].map(x => {
-            const l = medioLook(x)
-            const on = medioPago === x
-            return (
-              <button key={x} type="button" role="radio" aria-checked={on} onClick={() => setMedioPago(on ? '' : x)}
-                className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-xs font-medium transition ${on ? 'shadow-sm' : 'border-line hover:bg-bg'}`}
-                style={on ? { background: `${l.color}1A`, borderColor: l.color, color: l.color } : undefined}>
-                <l.Icon className="size-4" style={{ color: l.color }} />{x}
-              </button>
-            )
-          })}
+      {/* En escritorio, dos columnas: a la izquierda la clasificación y a la derecha el resto, para verlo todo sin desplazarse. */}
+      <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+        <ClasificacionPicker catalogo={catalogo} value={v} onChange={change} errors={errors} keepCurrent={!!base} />
+        <div className="space-y-3">
+          <Field label="Descripción" error={errors.descripcion} htmlFor="plantilla-desc" hint="Se completa con la subcategoría; puedes cambiarla.">
+            <input id="plantilla-desc" className={inputCls} maxLength={200} value={descripcion} placeholder="Ej. ChatGPT Plus"
+              onChange={e => setDescripcion(e.target.value)} onBlur={() => { const f = formatearDescripcion(descripcion); if (descripcion === descAuto) setDescAuto(f); setDescripcion(f) }} />
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+            <Field label="Monto predeterminado" error={errors.monto} htmlFor="plantilla-monto" hint="Opcional. Podrás cambiarlo cada mes al registrar.">
+              <span className="relative block">
+                <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted">{simbolo(moneda)}</span>
+                <input id="plantilla-monto" className={`${inputCls} tabular h-11 pl-10`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
+              </span>
+            </Field>
+            <Field label="Moneda" htmlFor="plantilla-moneda">
+              <SelectField id="plantilla-moneda" value={moneda} onChange={setMoneda}>
+                {[...new Set([...monedas, moneda])].map(x => <option key={x}>{x}</option>)}
+              </SelectField>
+            </Field>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">Medio de pago predeterminado</p>
+            <div role="radiogroup" aria-label="Medio de pago predeterminado" className="grid grid-cols-3 gap-1.5">
+              {[...new Set([...medios, ...(medioPago ? [medioPago] : [])])].map(x => {
+                const l = medioLook(x)
+                const on = medioPago === x
+                return (
+                  <button key={x} type="button" role="radio" aria-checked={on} onClick={() => setMedioPago(on ? '' : x)}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition ${on ? 'shadow-sm' : 'border-line hover:bg-bg'}`}
+                    style={on ? { background: `${l.color}1A`, borderColor: l.color, color: l.color } : undefined}>
+                    <l.Icon className="size-4 shrink-0" style={{ color: l.color }} /><span className="truncate">{x}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
+      {/* Tipo de gasto, recurrente y compromiso: una sola fila (en el móvil se apilan). */}
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-xl border border-line p-2.5">
           <p className="mb-1.5 text-xs font-medium text-muted">Tipo de gasto</p>
           <Segmented label="Tipo de gasto" value={tipoGasto} onChange={v => setTipoGasto(v as TipoGasto)} options={TIPOS_GASTO.map(x => ({ value: x, label: x }))} />
         </div>
-        <div className="rounded-xl border border-line p-3">
+        <div className="rounded-xl border border-line p-2.5">
           <Switch checked={esRecurrente} onChange={setEsRecurrente} label="Es recurrente" />
-          <p className="mt-1 text-[11px] text-muted">Los gastos que registres con esta plantilla se marcarán como recurrentes.</p>
+          <p className="mt-1 text-[11px] text-muted">Sus gastos se marcarán como recurrentes.</p>
         </div>
-      </div>
-      <div className="rounded-xl border border-line p-3">
-        <Switch checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
-        <p className="mt-1 text-[11px] text-muted">Actívalo para pagos que haces cada mes (luz, internet, apoyo familiar…). Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.</p>
+        <div className="rounded-xl border border-line p-2.5" title="Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.">
+          <Switch checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
+          <p className="mt-1 text-[11px] text-muted">Pagos de cada mes (luz, internet…): se reservan en Salud financiera.</p>
+        </div>
       </div>
       <div className="flex justify-between gap-2 border-t border-line pt-3">
         <Button type="button" variant="outline" onClick={onDone}><ArrowLeft className="size-4" /> Volver</Button>

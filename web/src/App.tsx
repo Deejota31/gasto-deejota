@@ -1,20 +1,22 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, FileSpreadsheet, HeartPulse, LayoutDashboard, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
+import { Boxes, FileSpreadsheet, HeartPulse, LayoutDashboard, Link2, Receipt, RefreshCw, Settings, Tags, Wallet } from 'lucide-react'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
 import Toaster from './components/Toaster'
+import ConexionModal from './components/ConexionModal'
 import GastoModal, { GASTO_MSG, type GastoDraft, type GastoPreset, type ModalMode } from './components/GastoModal'
 import PlantillasModal, { type PlantillaDraft } from './components/PlantillasModal'
 import type { GastoInput } from './lib/api'
 import type { Gasto } from './lib/types'
 import { showToast } from './lib/toast'
+import { refrescoSegundos } from './lib/refresco'
 import { emptyFilters } from './components/shared'
 import { todayIn } from './lib/dates'
 import type { Filters } from './lib/types'
 import Gastos from './tabs/Gastos'
-import Categorias from './tabs/Categorias'
-import Configuracion from './tabs/Configuracion'
+import Catalogo from './tabs/Categorias'
+import Configuracion, { APP_VERSION } from './tabs/Configuracion'
 
 // Recharts es la dependencia más pesada: el Dashboard se carga aparte para que Gastos abra rápido.
 const Dashboard = lazy(() => import('./tabs/Dashboard'))
@@ -25,16 +27,22 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'gastos', label: 'Gastos', icon: Receipt },
   { id: 'cajas', label: 'Cajas', icon: Boxes },
-  { id: 'categorias', label: 'Categorías', icon: Tags },
+  { id: 'catalogo', label: 'Catálogo', icon: Tags },
   { id: 'salud', label: 'Salud financiera', icon: HeartPulse },
   { id: 'config', label: 'Configuración', icon: Settings },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
+const tabDeHash = (h: string): TabId | null => {
+  const id = h.replace(/^#/, '') === 'categorias' ? 'catalogo' : h.replace(/^#/, '') // el enlace anterior sigue funcionando
+  return TABS.some(t => t.id === id) ? (id as TabId) : null
+}
+
 export default function App({ api }: { api?: Api }) {
   const [conn, setConn] = useState<Connection | null>(() => loadConnection())
   const store = useAppData(conn, api)
-  const [tab, setTab] = useState<TabId>(() => (TABS.some(t => `#${t.id}` === location.hash) ? (location.hash.slice(1) as TabId) : 'dashboard'))
+  const [tab, setTab] = useState<TabId>(() => tabDeHash(location.hash) ?? 'dashboard')
+  const [conexionAbierta, setConexionAbierta] = useState(false)
   // Un solo formulario de gasto para toda la app (Dashboard y Gastos lo abren igual).
   const [modal, setModal] = useState<{ mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; preset?: GastoPreset; key: number } | null>(null)
   const openGasto = useCallback((mode: ModalMode, gasto: Gasto | null, draft?: GastoDraft, preset?: GastoPreset) => setModal({ mode, gasto, draft, preset, key: Date.now() }), [])
@@ -54,7 +62,7 @@ export default function App({ api }: { api?: Api }) {
   }, [tab])
   // Enlaces directos (#salud, #gastos…) y cambios manuales de la dirección: cambia de pestaña sin recargar.
   useEffect(() => {
-    const onHash = () => { const h = location.hash.slice(1); if (TABS.some(t => t.id === h)) irATab(h as TabId) }
+    const onHash = () => { const t = tabDeHash(location.hash); if (t) irATab(t) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [irATab])
@@ -69,6 +77,42 @@ export default function App({ api }: { api?: Api }) {
   }, [])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
   const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') showToast('success', m) }
+
+  // Una vez por versión (y por hoja conectada), con el backend al día: rellena las celdas vacías de la hoja (Activo, Icono,
+  // Medio "Libre"…) para que quede coherente con lo que ves en la web. Nunca pisa lo que ya tiene contenido.
+  const vaciosIntentado = useRef('')
+  useEffect(() => {
+    if (!conn || !store.data || !store.lastSync) return
+    const v = (store.data.version ?? '0').split('.').map(Number)
+    if (!(v[0] > 1 || (v[0] === 1 && v[1] >= 11))) return            // backend anterior: primero hay que volver a desplegarlo
+    const marca = `${APP_VERSION}|${conn.url}`
+    let hecho = ''
+    try { hecho = localStorage.getItem('gd.vacios') ?? '' } catch { /* modo privado */ }
+    if (hecho === marca || vaciosIntentado.current === marca) return
+    vaciosIntentado.current = marca
+    store.actions.completarVacios().then(r => {
+      try { localStorage.setItem('gd.vacios', marca) } catch { /* modo privado */ }
+      if (r.total > 0) showToast('success', `Hoja completada: ${r.total} fila(s) con valores que estaban vacíos.`)
+    }, () => { /* se reintenta en la próxima carga */ vaciosIntentado.current = '' })
+  }, [conn, store.data, store.lastSync, store.actions])
+
+  // Actualización automática: cada N segundos (Configuración) relee la hoja y avisa en verde. No corre con la pestaña
+  // oculta ni mientras se guarda algo; al volver a la pestaña se pone al día si ya pasó el intervalo.
+  const segundos = refrescoSegundos(store.data?.config.refresco_segundos)
+  const vivo = useRef({ loading: store.loading, pendientes: store.pending.size, lastSync: store.lastSync, refresh: store.refresh })
+  vivo.current = { loading: store.loading, pendientes: store.pending.size, lastSync: store.lastSync, refresh: store.refresh }
+  useEffect(() => {
+    if (!segundos || !store.data) return
+    const correr = async () => {
+      const v = vivo.current
+      if (document.visibilityState === 'hidden' || v.loading || v.pendientes > 0) return
+      if (await v.refresh(true)) showToast('success', `Datos actualizados · ${new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`)
+    }
+    const id = setInterval(() => void correr(), segundos * 1000)
+    const alVolver = () => { if (document.visibilityState === 'visible' && Date.now() - (vivo.current.lastSync?.getTime() ?? 0) >= segundos * 1000) void correr() }
+    document.addEventListener('visibilitychange', alVolver)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', alVolver) }
+  }, [segundos, !!store.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Guardar no bloquea: el formulario se cierra al aceptar la operación y el resultado real llega como notificación.
   function submitGasto(input: GastoInput, mode: ModalMode, draft: GastoDraft): boolean {
@@ -101,6 +145,10 @@ export default function App({ api }: { api?: Api }) {
               className="rounded-lg p-2 text-muted hover:bg-bg disabled:opacity-60">
               <RefreshCw className={`size-4 ${store.loading ? 'animate-spin' : ''}`} />
             </button>
+            <button type="button" onClick={() => setConexionAbierta(true)} aria-label={conn ? 'Conexión con Google Sheets (conectado)' : 'Conectar con Google Sheets'}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium whitespace-nowrap hover:bg-bg ${conn ? 'border-line text-ink' : 'border-navy/30 bg-primary-soft text-navy'}`}>
+              <Link2 className="size-4" /> {conn ? <><span className="size-2 rounded-full bg-lima" aria-hidden /> Conectado</> : 'Conectar'}
+            </button>
             <a href={store.data?.sheetUrl || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!store.data?.sheetUrl || store.isDemo}
               className={`inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium whitespace-nowrap text-ink hover:bg-bg ${!store.data?.sheetUrl || store.isDemo ? 'pointer-events-none opacity-50' : ''}`}>
               <FileSpreadsheet className="size-4 text-lima" /> Mi hoja
@@ -111,7 +159,7 @@ export default function App({ api }: { api?: Api }) {
 
       {store.isDemo && (
         <div className="bg-morado/10 px-4 py-1.5 text-center text-xs text-morado">
-          Modo demostración con datos de ejemplo. Conecta tu Apps Script en <button className="font-semibold underline" onClick={() => setTab('config')}>Configuración</button>.
+          Modo demostración con datos de ejemplo. <button className="font-semibold underline" onClick={() => setConexionAbierta(true)}>Conecta tu Apps Script</button> para usar tu hoja.
         </div>
       )}
 
@@ -123,8 +171,8 @@ export default function App({ api }: { api?: Api }) {
         {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}
           onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
           onRevisarGasto={g => { setFoco({ id: g.id, desde: 'salud' }); setTab('gastos'); if (!g.problemaId) openGasto('edit', g) }} /></Suspense>}
-        {tab === 'categorias' && <Categorias store={store} />}
-        {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCategorias={() => setTab('categorias')} />}
+        {tab === 'catalogo' && <Catalogo store={store} />}
+        {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCatalogo={() => setTab('catalogo')} />}
       </main>
 
       {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} preset={modal.preset} onClose={() => setModal(null)} onSubmit={submitGasto} />}
@@ -132,6 +180,7 @@ export default function App({ api }: { api?: Api }) {
       {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} onClose={() => setPlantillasOpen(false)}
         onUse={p => { setPlantillasOpen(false); openGasto('create', null, undefined, p) }}
         onReopen={draft => { setModal(null); setPlantillasOpen({ draft, key: Date.now() }) }} />}
+      {conexionAbierta && <ConexionModal conn={conn} onConnect={setConn} onClose={() => setConexionAbierta(false)} />}
       <Toaster />
     </div>
   )

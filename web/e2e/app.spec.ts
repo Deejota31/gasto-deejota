@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('navega por las pestañas; ya no existe el gráfico "Últimos 6 meses"', async ({ page }) => {
-  for (const tab of ['Gastos', 'Salud financiera', 'Categorías', 'Configuración', 'Dashboard']) {
+  for (const tab of ['Gastos', 'Salud financiera', 'Catálogo', 'Configuración', 'Dashboard']) {
     await go(page, tab)
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: tab })).toHaveAttribute('aria-current', 'page')
   }
@@ -153,7 +153,7 @@ test('tabla: paginación 5/10/15/25/50 con "Mostrando x–y de N"', async ({ pag
 })
 
 test('catálogo: crear subcategoría y usarla al registrar', async ({ page }) => {
-  await go(page, 'Categorías')
+  await go(page, 'Catálogo')
   await page.getByRole('button', { name: 'Agregar subcategoría a Alimentación' }).click()
   await dialog(page).getByLabel('Nombre').fill('Café de prueba')
   await dialog(page).getByRole('button', { name: 'Agregar' }).click()
@@ -169,7 +169,7 @@ test('catálogo: crear subcategoría y usarla al registrar', async ({ page }) =>
 test('catálogo: renombrar categoría actualiza los gastos de ese ámbito', async ({ page }) => {
   await go(page, 'Gastos')
   await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: '7', medio: 'Efectivo', desc: 'Antes de renombrar' })
-  await go(page, 'Categorías')
+  await go(page, 'Catálogo')
   await page.getByRole('button', { name: 'Editar Alimentación' }).click()
   await expect(dialog(page).getByText(/Se renombrará también en \d+ gasto/)).toHaveCount(0)
   await dialog(page).getByLabel('Nombre').fill('Comida')
@@ -187,7 +187,7 @@ test.describe('móvil', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true })
 
   test('sin scroll horizontal en ninguna pestaña', async ({ page }) => {
-    for (const tab of ['Dashboard', 'Gastos', 'Categorías', 'Configuración']) {
+    for (const tab of ['Dashboard', 'Gastos', 'Catálogo', 'Configuración']) {
       await go(page, tab)
       await page.waitForTimeout(300)
       const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
@@ -309,7 +309,7 @@ test('formulario y filtros: "Otros" al final, Transporte nuevo y catálogo por �
 })
 
 test('Categorías: agregar una subcategoría la deja antes de "Otros"', async ({ page }) => {
-  await go(page, 'Categorías')
+  await go(page, 'Catálogo')
   await page.getByRole('button', { name: 'Agregar subcategoría a Alimentación' }).click()
   await dialog(page).getByLabel('Nombre').fill('Merienda')
   await dialog(page).getByRole('button', { name: 'Agregar' }).click()
@@ -350,7 +350,7 @@ test.describe('Apps Script lento o caído', () => {
     await newGasto(page, { ambito: 'Trabajo', categoria: 'Transporte', sub: 'Moto Taxi', monto: '4', medio: 'Yape', desc: 'Lento' })
     await expect(page.locator('[data-kind="pending"]')).toContainText('Guardando gasto…')
     // la interfaz sigue usable: cambiar de pestaña, usar filtros y volver
-    await go(page, 'Categorías')
+    await go(page, 'Catálogo')
     await go(page, 'Gastos')
     await expect(page.getByRole('row', { name: /Lento/ })).toHaveCount(0) // aún no confirmado: no se muestra como guardado
     await go(page, 'Dashboard')
@@ -543,9 +543,12 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
     // v1.8: cajas y presupuestos se administran solo en la pestaña Cajas (sin formularios duplicados aquí)
     await expect(page.getByText('Cajas y presupuestos')).toHaveCount(0)
     await expect(page.getByRole('button', { name: /Guardar Caja/ })).toHaveCount(0)
-    for (const t of ['Conexión con Google Sheets', 'Preferencias', 'Medios de pago', 'Administración de datos', 'Acerca de']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible()
+    for (const t of ['Conexión con Google Sheets', 'Preferencias', 'Administración de datos', 'Acerca de']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible()
+    // v1.11: los medios de pago ya no se administran en Configuración, sino en la pestaña Catálogo
+    await expect(page.getByLabel('Nuevo medio de pago')).toHaveCount(0)
+    await go(page, 'Catálogo')
     await page.getByLabel('Nuevo medio de pago').fill('Tarjeta')
-    await page.getByRole('button', { name: 'Agregar' }).click()
+    await page.getByRole('region', { name: 'Medios de pago' }).getByRole('button', { name: 'Agregar' }).click()
     const medios = page.getByRole('list', { name: 'Medios de pago' }).getByRole('button')
     await expect(medios).toHaveCount(7)
     expect((await medios.allInnerTexts()).map(s => s.trim()).at(-1)).toBe('Otros')
@@ -1236,7 +1239,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
 
   test('menú en el orden pedido y centrado en escritorio', async ({ page }) => {
     const nav = page.getByRole('navigation', { name: 'Secciones' })
-    expect((await nav.getByRole('button').allInnerTexts()).map(s => s.trim())).toEqual(['Dashboard', 'Gastos', 'Cajas', 'Categorías', 'Salud financiera', 'Configuración'])
+    expect((await nav.getByRole('button').allInnerTexts()).map(s => s.trim())).toEqual(['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración'])
     await page.setViewportSize({ width: 1366, height: 900 })
     const box = await nav.locator('div').first().boundingBox()
     expect(Math.abs(box!.x + box!.width / 2 - 1366 / 2)).toBeLessThan(40)
@@ -1310,7 +1313,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
   })
 
   test('iconos: buscar por sinónimo, sugerencias según el nombre y guardar el icono de una subcategoría', async ({ page }) => {
-    await go(page, 'Categorías')
+    await go(page, 'Catálogo')
     await page.getByRole('button', { name: 'Gasolina', exact: true }).first().click()
     const d = dialog(page)
     await expect(d.getByRole('region', { name: 'Sugeridos' }).or(d.getByLabel('Sugeridos'))).toBeVisible()
@@ -1435,14 +1438,14 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(fuente(page, 'Vales Plin').locator('svg.lucide-rocket')).toHaveCount(1)
   })
 
-  test('una fuente con medio de pago se ve igual que ese medio en Cajas, Dashboard y Configuración', async ({ page }) => {
+  test('una fuente con medio de pago se ve igual que ese medio en Cajas, Dashboard y Catálogo', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     const tile = fuente(page, 'Sodexo').locator('span.size-11').first()
     await expect(tile.locator('svg.lucide-ticket')).toHaveCount(1)
     await expect(tile).toHaveCSS('color', 'rgb(210, 70, 60)')
-    await go(page, 'Configuración')
-    await expect(page.locator('svg.lucide-ticket').first()).toBeVisible()
+    await go(page, 'Catálogo')                                   // los medios de pago se ven (y se administran) en el Catálogo
+    await expect(page.getByRole('list', { name: 'Medios de pago' }).locator('svg.lucide-ticket')).toHaveCount(1)
     await go(page, 'Dashboard')
     await page.getByRole('button', { name: /^Fuentes de dinero/ }).click()
     const fila = page.getByRole('list', { name: 'Fuentes del período' }).getByRole('listitem').filter({ hasText: 'Sodexo' })
@@ -1461,6 +1464,7 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(auto).toHaveAttribute('aria-pressed', 'true')
     await expect(auto).toContainText('como Sodexo')
     await expect(d.locator('svg.lucide-ticket').first()).toBeVisible()
+    await d.getByRole('button', { name: 'Más colores' }).click()
     await d.getByRole('radio', { name: 'Color #15803D' }).click()
     await expect(auto).toHaveAttribute('aria-pressed', 'false')
     await expect(d.getByRole('button', { name: 'Icono ticket', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -1472,12 +1476,15 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(tarjeta.locator('span.size-11').first()).toHaveCSS('color', 'rgb(21, 128, 61)')
   })
 
-  test('selector de color: 64 colores y uno libre; Categorías usa el mismo selector', async ({ page }) => {
+  test('selector de color: una fila de 10 y, en "Más colores", 64 y uno libre; Catálogo usa el mismo selector', async ({ page }) => {
     await page.goto('/?demo=60#categorias')
-    await go(page, 'Categorías')
+    await go(page, 'Catálogo')
     await page.getByRole('button', { name: 'Editar ámbito' }).click()
     const d = dialog(page)
-    await expect(d.getByRole('radiogroup', { name: 'Color' }).getByRole('radio')).toHaveCount(64)
+    await expect(d.getByRole('radiogroup', { name: 'Color' }).getByRole('radio')).toHaveCount(10)   // una sola fila de 10
+    await expect(d.getByTestId('paleta-completa')).toHaveCount(0)
+    await d.getByRole('button', { name: 'Más colores' }).click()
+    await expect(d.getByRole('radiogroup', { name: 'Paleta completa' }).getByRole('radio')).toHaveCount(64)
     await expect(d.getByLabel('Otro color')).toBeVisible()
   })
 
@@ -1503,5 +1510,208 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
     await expect(g.getByText('Nuevo gasto', { exact: true })).toBeVisible()
     await expect(g.locator('#gasto-tipo')).toHaveValue('Fijo')
     await expect(g.getByRole('switch', { name: 'Es recurrente' })).toHaveAttribute('aria-checked', 'true')
+  })
+})
+
+test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, Conectar, refresco automático y plantilla compacta', () => {
+  const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
+  const tarjetaCat = (page: Page, n: string) => page.locator('article').filter({ has: page.getByRole('button', { name: `Editar ${n}`, exact: true }) })
+
+  test('fuente: sin medio es como General; con medio es exactamente el del medio (Yape = Yape)', async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3#cajas')
+    // las fuentes libres existentes se ven igual que General
+    const icono = (n: string) => fuente(page, n).locator('span.size-11 svg').first().getAttribute('class')
+    await expect.poll(() => fuente(page, 'Extra 1').count()).toBe(1)
+    expect(await icono('Extra 1')).toBe(await icono('General'))
+    await expect(fuente(page, 'General').locator('svg.lucide-banknote')).toHaveCount(1)
+    await expect(fuente(page, 'Extra 1').locator('span.size-11').first()).toHaveCSS('color', 'rgb(30, 58, 138)')
+    // Nueva fuente
+    await page.getByRole('button', { name: 'Nueva fuente' }).click()
+    const d = dialog(page)
+    const auto = d.getByTestId('apariencia').getByRole('button', { name: /utomático/ })
+    await expect(auto).toContainText('como General')
+    await expect(d.getByRole('button', { name: 'Icono banknote', exact: true }).first()).toHaveAttribute('aria-pressed', 'true')
+    await d.locator('#fuente-medio').selectOption('Yape')
+    await expect(auto).toContainText('como Yape')
+    await expect(d.getByRole('button', { name: 'Icono smartphone', exact: true }).first()).toHaveAttribute('aria-pressed', 'true')
+    await expect(d.getByRole('radio', { name: 'Color #7B3FA0' })).toHaveAttribute('aria-checked', 'true')      // el color de Yape
+    await d.locator('#fuente-medio').selectOption('Efectivo')
+    await expect(auto).toContainText('como Efectivo')
+    await expect(d.getByRole('button', { name: 'Icono banknote', exact: true }).first()).toHaveAttribute('aria-pressed', 'true')
+    await d.locator('#fuente-medio').selectOption('')
+    await expect(auto).toContainText('como General')
+  })
+
+  test('caja: el alcance (ámbito, categoría, subcategoría, medio) fija su icono y color automáticos', async ({ page }) => {
+    await page.goto('/?demo=60#cajas')
+    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    const d = dialog(page)
+    const auto = d.getByTestId('apariencia').getByRole('button', { name: /utomático/ })
+    const pressed = (k: string) => d.getByRole('button', { name: `Icono ${k}`, exact: true }).first()
+    await d.getByRole('radio', { name: 'Ámbito', exact: true }).click()
+    await d.locator('#caja-valor').selectOption('Familia')
+    await expect(auto).toContainText('como Familia')
+    await expect(pressed('users')).toHaveAttribute('aria-pressed', 'true')
+    await expect(d.getByRole('radio', { name: 'Color #14917F' })).toHaveAttribute('aria-checked', 'true')
+    await d.getByRole('radio', { name: 'Categoría', exact: true }).click()
+    await d.locator('#caja-valor').selectOption('Alimentación')
+    await expect(auto).toContainText('como Alimentación')
+    await expect(pressed('utensils')).toHaveAttribute('aria-pressed', 'true')
+    await d.getByRole('radio', { name: 'Subcategoría', exact: true }).click()
+    await d.locator('#caja-valor').selectOption('Auto › Gasolina')
+    await expect(auto).toContainText('como Gasolina')
+    await expect(d.getByRole('radio', { name: 'Color #64748B' })).toHaveAttribute('aria-checked', 'true')    // el color de su categoría (Auto)
+    await d.getByRole('radio', { name: 'Medio de pago', exact: true }).click()
+    await d.locator('#caja-valor').selectOption('Plin')
+    await expect(auto).toContainText('como Plin')
+    await expect(pressed('smartphone')).toHaveAttribute('aria-pressed', 'true')
+    await expect(d.getByRole('radio', { name: 'Color #0B9EA8' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  test('categorías compartidas: editar una en Personal la actualiza en Trabajo; crearla en otro ámbito hereda su aspecto', async ({ page }) => {
+    await go(page, 'Catálogo')
+    await page.getByRole('button', { name: 'Editar Transporte', exact: true }).click()
+    let d = dialog(page)
+    await expect(d.getByText('Se aplica a este nombre en todos los ámbitos.')).toBeVisible()
+    await d.getByRole('button', { name: 'Icono rocket', exact: true }).click()
+    await d.getByRole('radio', { name: 'Color #E5484D' }).click()
+    await d.getByRole('button', { name: 'Guardar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Categoría actualizada correctamente.' })).toBeVisible({ timeout: 15_000 })
+    for (const amb of ['Trabajo', 'Pareja', 'Familia', 'Amigos']) {
+      await page.getByRole('tab', { name: new RegExp(amb) }).click()
+      const t = tarjetaCat(page, 'Transporte')
+      await expect(t.locator('svg.lucide-rocket').first(), amb).toBeVisible()
+      await expect(t.locator('span').filter({ has: page.locator('svg.lucide-rocket') }).first(), amb).toHaveCSS('color', 'rgb(229, 72, 77)')
+    }
+    // Compras existe en Personal pero no en Trabajo: se edita en Personal y luego se crea en Trabajo
+    await page.getByRole('tab', { name: /Personal/ }).click()
+    await page.getByRole('button', { name: 'Editar Compras', exact: true }).click()
+    d = dialog(page)
+    await d.getByRole('button', { name: 'Icono gift', exact: true }).click()
+    await d.getByRole('radio', { name: 'Color #8B7CF6' }).click()
+    await d.getByRole('button', { name: 'Guardar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Categoría actualizada correctamente.' }).last()).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('tab', { name: /Trabajo/ }).click()
+    await expect(tarjetaCat(page, 'Compras')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Categoría', exact: true }).click()
+    d = dialog(page)
+    await d.getByLabel('Nombre').fill('Compras')
+    await expect(d.getByTestId('apariencia-heredada')).toBeVisible()
+    await expect(d.getByRole('radiogroup', { name: 'Color' })).toHaveCount(0)
+    await d.getByRole('button', { name: 'Agregar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Categoría creada correctamente.' })).toBeVisible({ timeout: 15_000 })
+    const nueva = tarjetaCat(page, 'Compras')
+    await expect(nueva.locator('svg.lucide-gift').first()).toBeVisible()
+    await expect(nueva.locator('span').filter({ has: page.locator('svg.lucide-gift') }).first()).toHaveCSS('color', 'rgb(139, 124, 246)')
+    // y las filas de Personal siguen igual
+    await page.getByRole('tab', { name: /Personal/ }).click()
+    await expect(tarjetaCat(page, 'Compras').locator('svg.lucide-gift').first()).toBeVisible()
+  })
+
+  test('Catálogo: incluye los medios de pago; se agrega uno y aparece al registrar un gasto', async ({ page }) => {
+    await go(page, 'Catálogo')
+    await expect(page.getByRole('heading', { name: 'Catálogo' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Medios de pago' })).toBeVisible()
+    await page.getByRole('button', { name: /^Agregar/ }).first().click()
+    await page.getByRole('menuitem', { name: 'Nuevo medio de pago' }).click()
+    await expect(page.getByLabel('Nuevo medio de pago')).toBeFocused()
+    await page.getByLabel('Nuevo medio de pago').fill('Billetera X')
+    await page.getByRole('region', { name: 'Medios de pago' }).getByRole('button', { name: 'Agregar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Medio de pago guardado correctamente.' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('list', { name: 'Medios de pago' }).getByRole('button', { name: /Billetera X/ })).toBeVisible()
+    // el enlace anterior #categorias sigue funcionando
+    await page.goto('/?demo=60#categorias')
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Catálogo' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('Conectar junto a "Mi hoja": se abre en cualquier pestaña, valida y se cierra', async ({ page }) => {
+    const conectar = page.getByRole('button', { name: 'Conectar con Google Sheets' })
+    await expect(conectar).toBeVisible()
+    const hoja = page.getByRole('link', { name: 'Mi hoja' })
+    const [bc, bh] = [await conectar.boundingBox(), await hoja.boundingBox()]
+    expect(Math.abs(bc!.y - bh!.y)).toBeLessThan(6)                    // misma fila
+    expect(bc!.x + bc!.width).toBeLessThanOrEqual(bh!.x + 1)           // y justo antes de Mi hoja
+    for (const tab of ['Gastos', 'Catálogo']) {
+      await go(page, tab)
+      await conectar.click()
+      const d = dialog(page)
+      await expect(d.getByText('Conectar con Google Sheets', { exact: true })).toBeVisible()
+      await d.getByLabel('URL de Apps Script (/exec)').fill('https://ejemplo.com/x')
+      await d.getByLabel('Token').fill('corto')
+      await d.getByRole('button', { name: 'Conectar', exact: true }).click()
+      await expect(d.getByRole('alert')).toContainText('La URL debe ser la del despliegue')
+      await d.getByLabel('URL de Apps Script (/exec)').fill('https://script.google.com/macros/s/AKfycbxEjemplo123/exec')
+      await d.getByRole('button', { name: 'Conectar', exact: true }).click()
+      await expect(d.getByRole('alert')).toContainText('El token parece incompleto')
+      await d.getByRole('button', { name: 'Cancelar' }).click()
+      await expect(dialog(page)).toHaveCount(0)
+    }
+    expect(await page.evaluate(() => localStorage.getItem('gd.connection'))).toBeNull()      // nada se guardó
+    // el aviso del modo demostración también lo abre
+    await page.getByRole('button', { name: 'Conecta tu Apps Script' }).click()
+    await expect(dialog(page).getByLabel('Token')).toBeVisible()
+  })
+
+  test('actualización automática: se elige en Configuración, avisa en verde y se puede desactivar', async ({ page }) => {
+    await page.clock.install()
+    await page.goto('/?demo=60')
+    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await go(page, 'Configuración')
+    const sel = page.getByLabel('Actualizar datos automáticamente')
+    await expect(sel).toHaveValue('300')                                // predeterminado: cada 5 minutos
+    await sel.selectOption('30')
+    await expect(page.getByRole('status').filter({ hasText: 'Configuración guardada correctamente.' })).toBeVisible()
+    await page.clock.runFor(31_000)
+    const aviso = page.getByRole('status').filter({ hasText: /Datos actualizados · \d{2}:\d{2}/ })
+    await expect(aviso).toBeVisible()
+    await expect(aviso).toHaveAttribute('data-kind', 'success')
+    await page.clock.runFor(31_000)
+    await expect(aviso.first()).toBeVisible()                           // vuelve a actualizar
+    await sel.selectOption('0')
+    await expect(sel).toHaveValue('0')
+    await page.waitForTimeout(100)
+    await page.evaluate(() => document.querySelectorAll('[data-kind="success"]').length)
+    await page.clock.runFor(10 * 60_000)
+    await page.clock.runFor(1000)
+    await expect(page.getByRole('status').filter({ hasText: /Datos actualizados/ })).toHaveCount(0)
+  })
+
+  test('Completar vacíos: rellena el catálogo sin cambiar lo que ves', async ({ page }) => {
+    const ico = async () => page.locator('article').filter({ has: page.getByRole('button', { name: 'Editar Auto', exact: true }) }).locator('svg').first().getAttribute('class')
+    await go(page, 'Catálogo')
+    const antes = await ico()
+    await go(page, 'Configuración')
+    await page.getByRole('button', { name: /Completar vacíos/ }).click()
+    await expect(page.getByRole('status').filter({ hasText: /Hoja completada: \d+ fila/ })).toBeVisible({ timeout: 15_000 })
+    await go(page, 'Catálogo')
+    expect(await ico()).toBe(antes)
+    await go(page, 'Configuración')
+    await page.getByRole('button', { name: /Completar vacíos/ }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'La hoja ya no tiene celdas vacías por completar.' })).toBeVisible({ timeout: 15_000 })
+  })
+
+  test.describe('plantilla compacta en escritorio', () => {
+    test.use({ viewport: { width: 1366, height: 768 } })
+    test('Tipo de gasto, Es recurrente y compromiso en una sola fila, y todo a la vista sin desplazarse', async ({ page }) => {
+      await page.goto('/?demo=60')
+      await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+      const m = dialog(page)
+      await m.getByRole('button', { name: 'Nueva plantilla' }).click()
+      await m.getByRole('radio', { name: 'Personal', exact: true }).click()
+      await m.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Auto', exact: true }).click()   // la de más subcategorías
+      const y = async (l: ReturnType<Page['locator']>) => Math.round((await l.boundingBox())!.y)
+      const tipo = m.getByRole('radiogroup', { name: 'Tipo de gasto' }), rec = m.getByRole('switch', { name: 'Es recurrente' }), comp = m.getByRole('switch', { name: 'Es un compromiso mensual' })
+      await expect(tipo).toBeVisible()
+      const [yt, yr, yc] = [await y(tipo), await y(rec), await y(comp)]
+      expect(Math.abs(yt - yr)).toBeLessThan(40)
+      expect(Math.abs(yr - yc)).toBeLessThan(8)
+      // sin scroll interno: el área desplazable del modal cabe entera
+      const sobra = await page.evaluate(() => {
+        const el = [...document.querySelectorAll('dialog[open] div')].find(d => getComputedStyle(d).overflowY === 'auto') as HTMLElement
+        return el.scrollHeight - el.clientHeight
+      })
+      expect(sobra).toBeLessThanOrEqual(1)
+      await expect(m.getByRole('button', { name: 'Guardar plantilla' })).toBeInViewport()
+    })
   })
 })

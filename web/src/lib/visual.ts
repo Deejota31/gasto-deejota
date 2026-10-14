@@ -115,22 +115,29 @@ export function ambitoLook(name: string, catalogo: CatalogoItem[] = []): Look {
   return { Icon: ICONS[row?.icono ?? ''] ?? ICONS[def.icon] ?? ICONS.tag, color: pick(row?.color, def.color) }
 }
 
-/** Estilo de una categoría (de un ámbito concreto si se indica). */
-export function categoriaLook(name: string, catalogo: CatalogoItem[] = [], ambito?: string): Look {
-  const row = catalogo.find(c => c.categoria === name && !c.subcategoria && (!ambito || c.ambito === ambito) && (c.icono || c.color))
+/**
+ * Las categorías y subcategorías se COMPARTEN entre ámbitos: "Alimentación" es la misma en Personal, Trabajo o Amigos,
+ * así que su icono y color también. Se toma el primero guardado en cualquier ámbito (al editar, el backend los
+ * escribe en todos). El parámetro de ámbito se acepta por compatibilidad, pero ya no cambia el resultado.
+ */
+const hexOk = (v: string | undefined): v is string => !!v && /^#[0-9a-fA-F]{6}$/.test(v)
+export function categoriaLook(name: string, catalogo: CatalogoItem[] = [], _ambito?: string): Look {
+  const rows = catalogo.filter(c => c.categoria === name && !c.subcategoria)
   const def = CATEGORIAS[name] ?? { icon: 'tag', color: hashColor(name) }
-  return { Icon: ICONS[row?.icono ?? ''] ?? ICONS[def.icon] ?? ICONS.tag, color: pick(row?.color, def.color) }
+  const icono = rows.find(r => r.icono && ICONS[r.icono])?.icono
+  const color = rows.find(r => hexOk(r.color))?.color
+  return { Icon: ICONS[icono ?? ''] ?? ICONS[def.icon] ?? ICONS.tag, color: pick(color, def.color) }
 }
 
 /**
- * Estilo de una subcategoría: el icono guardado en su fila del catálogo o, si no hay, el más relacionado con su
- * nombre (sugerencia contextual) y si no, el de su categoría. El color es siempre el de su categoría.
+ * Estilo de una subcategoría: el icono guardado en su fila del catálogo (de cualquier ámbito: se comparte) o, si no hay,
+ * el más relacionado con su nombre (sugerencia contextual) y si no, el de su categoría. El color es el de su categoría.
  */
 const subCache = new Map<string, string>()
-export function subcategoriaLook(sub: string, categoria: string, catalogo: CatalogoItem[] = [], ambito?: string): Look {
-  const cat = categoriaLook(categoria, catalogo, ambito)
-  const row = catalogo.find(c => c.subcategoria === sub && c.categoria === categoria && (!ambito || c.ambito === ambito) && c.icono)
-  if (row?.icono && ICONS[row.icono]) return { Icon: ICONS[row.icono], color: cat.color }
+export function subcategoriaLook(sub: string, categoria: string, catalogo: CatalogoItem[] = [], _ambito?: string): Look {
+  const cat = categoriaLook(categoria, catalogo)
+  const row = catalogo.find(c => c.subcategoria === sub && c.categoria === categoria && c.icono && ICONS[c.icono])
+  if (row) return { Icon: ICONS[row.icono ?? ""], color: cat.color }
   const k = `${categoria}|${sub}`
   let key = subCache.get(k)
   // Solo si el NOMBRE de la subcategoría coincide con algo; la categoría solo desempata (Gas en Auto → surtidor).
@@ -162,20 +169,28 @@ const CLAVE_DE = new Map<LucideIcon, string>()
 for (const i of ICONOS) if (!CLAVE_DE.has(i.Icon)) CLAVE_DE.set(i.Icon, i.key)
 export const claveDeIcono = (Icon: LucideIcon): string => CLAVE_DE.get(Icon) ?? 'tag'
 
-const FUENTE_POR_NOMBRE: [RegExp, string][] = [
-  [/general|sueldo|salario|planilla/, 'banknote'], [/sodexo|aliment|vale/, 'utensils'], [/viaj|vuelo|vacacion|ica\b/, 'plane'],
-  [/extra|adicional/, 'sparkles'], [/bono|bonific|aguinaldo|gratific|premio/, 'gift'], [/reembolso|devoluc|venta|alquiler/, 'receipt'],
-  [/freelance|independiente|trabajo|comisi/, 'briefcase'], [/ahorro|cts|interes|dividend/, 'piggy-bank'], [/regalo/, 'hand-coins'],
-  [/tarjeta/, 'credit-card'], [/tesis|carpeta|educ|maestr|curso|titulo/, 'graduation-cap'],
-]
+/** Aspecto de la fuente General (y de toda fuente libre sin icono propio): billete en azul marino. */
+const LIBRE_BASE: Look = { Icon: ICONS.banknote, color: '#1E3A8A' }
+const esGeneral = (f: Pick<Fuente, 'nombre' | 'medioPago'>) => !f.medioPago && f.nombre.trim().toLowerCase() === 'general'
 
-/** Estilo de una fuente de dinero. */
-export function fuenteLook(f: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>): Look {
-  if (f.icono && ICONS[f.icono]) return { Icon: ICONS[f.icono], color: pick(f.color, '#1E3A8A') }
+/** Aspecto de la fuente que elegiste (icono guardado) o, si no, el automático de ese caso. */
+function propio(f: Pick<Fuente, 'icono' | 'color'>): Look | null {
+  return f.icono && ICONS[f.icono] ? { Icon: ICONS[f.icono], color: pick(f.color, LIBRE_BASE.color) } : null
+}
+
+/**
+ * Estilo de una fuente de dinero:
+ *  1. lo que elegiste (icono + color);
+ *  2. si tiene medio de pago, el de ese medio (Yape se ve como Yape en todas partes);
+ *  3. si es libre, el de la fuente General (la que tengas llamada así, con lo que haya elegido; si no, el base).
+ * `todas` permite encontrar a General; sin ella se usa el aspecto base.
+ */
+export function fuenteLook(f: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>, todas: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>[] = []): Look {
+  const mio = propio(f)
+  if (mio) return mio
   if (f.medioPago) return medioLook(f.medioPago)
-  const k = f.nombre.toLowerCase()
-  const key = FUENTE_POR_NOMBRE.find(([re]) => re.test(k))?.[1] ?? 'coins'
-  return { Icon: ICONS[key] ?? ICONS.coins, color: pick(f.color, '#1E3A8A') }
+  const general = todas.find(esGeneral)
+  return (general && propio(general)) || LIBRE_BASE
 }
 
 /** Estilo de una caja: el elegido o, en automático, el de su alcance. */

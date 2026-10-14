@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { ICONOS, ICONS } from './iconos'
-import { ambitoLook, cajaLook, categoriaLook, claveDeIcono, COLORS, fuenteLook, medioLook, PALETA } from './visual'
+import { ambitoLook, cajaLook, categoriaLook, claveDeIcono, COLORS, fuenteLook, medioLook, PALETA, subcategoriaLook } from './visual'
+import { COLORES_RAPIDOS } from '../components/Apariencia'
 import { useApariencia } from '../components/Apariencia'
 import type { Caja, Fuente } from './types'
 
@@ -45,11 +46,22 @@ describe('coherencia visual: un mismo medio / alcance se ve igual en toda la web
     const l = fuenteLook(fu({ nombre: 'Sodexo', medioPago: 'Sodexo', icono: 'gift', color: '#C2569B' }))
     expect(l.Icon).toBe(ICONS.gift)
     expect(l.color).toBe('#C2569B')
-    expect(fuenteLook(fu({ nombre: 'Viaje a Ica', color: '#B4693C' })).Icon).toBe(ICONS.plane)
     expect(fuenteLook(fu({ nombre: 'General', color: '#1E3A8A' })).Icon).toBe(ICONS.banknote)
-    expect(fuenteLook(fu({ nombre: 'Carpeta Tesis' })).Icon).toBe(ICONS['graduation-cap'])
-    expect(fuenteLook(fu({ nombre: 'Algo raro' })).Icon).toBe(ICONS.coins)
     expect(fuenteLook(fu({ nombre: 'Algo raro', color: 'rojo' })).color).toBe('#1E3A8A') // color inválido → predeterminado
+  })
+  it('fuente libre sin icono propio = el mismo aspecto que General (el elegido en General si lo cambió)', () => {
+    const general = fu({ nombre: 'General' })
+    const ica = fu({ nombre: 'Viaje a Ica', color: '#B4693C' })        // el color guardado se ignora mientras sea automática
+    expect(fuenteLook(ica, [general, ica])).toEqual(fuenteLook(general, [general, ica]))
+    expect(fuenteLook(ica, [general, ica]).Icon).toBe(ICONS.banknote)
+    expect(fuenteLook(fu({ nombre: 'Carpeta Tesis' }), [general]).Icon).toBe(ICONS.banknote)
+    const generalElegida = fu({ nombre: 'General', icono: 'rocket', color: '#E5484D' })
+    expect(fuenteLook(ica, [generalElegida, ica])).toEqual({ Icon: ICONS.rocket, color: '#E5484D' })
+    // con medio de pago manda el medio; con icono propio, el propio
+    expect(fuenteLook(fu({ nombre: 'Vales', medioPago: 'Yape' }), [generalElegida])).toEqual(medioLook('Yape'))
+    expect(fuenteLook(fu({ nombre: 'Ica', icono: 'gift', color: '#C2569B' }), [generalElegida])).toEqual({ Icon: ICONS.gift, color: '#C2569B' })
+    // sin General en la lista: aspecto base
+    expect(fuenteLook(ica, [])).toEqual(fuenteLook(general, []))
   })
   it('caja automática: hereda el look de su alcance (medio, ámbito, categoría, subcategoría)', () => {
     expect(cajaLook(cj({ filtroCampo: 'Medio de pago', filtroValor: 'Sodexo' }))).toEqual(medioLook('Sodexo'))
@@ -68,6 +80,37 @@ describe('coherencia visual: un mismo medio / alcance se ve igual en toda la web
     expect(l.color).toBe('#E5484D')
     expect(cajaLook(cj({ icono: 'no-existe', color: '#E5484D' }))).toEqual(categoriaLook('Auto')) // clave rota → vuelve al automático
     expect(cajaLook(cj({ color: '#E5484D' })).color).toBe(categoriaLook('Auto').color)
+  })
+})
+
+describe('categorías y subcategorías compartidas entre ámbitos', () => {
+  const fila = (ambito: string, categoria: string, subcategoria: string, icono = '', color = '') => ({ ambito, categoria, subcategoria, activo: true, icono, color })
+  const cat = [
+    fila('Personal', 'Auto', '', 'rocket', '#E5484D'), fila('Trabajo', 'Auto', ''), fila('Amigos', 'Auto', ''),
+    fila('Personal', 'Auto', 'Gasolina', 'gift'), fila('Trabajo', 'Auto', 'Gasolina'),
+  ]
+  it('lo que editas en un ámbito se ve igual en los demás, aunque sus filas estén vacías', () => {
+    for (const a of ['Personal', 'Trabajo', 'Amigos']) {
+      const l = categoriaLook('Auto', cat, a)
+      expect(l.Icon).toBe(ICONS.rocket)
+      expect(l.color).toBe('#E5484D')
+      expect(subcategoriaLook('Gasolina', 'Auto', cat, a).Icon).toBe(ICONS.gift)
+      expect(subcategoriaLook('Gasolina', 'Auto', cat, a).color).toBe('#E5484D') // sub = color de su categoría
+    }
+  })
+  it('sin nada guardado usa el predeterminado; una caja por categoría ve lo mismo que el catálogo', () => {
+    expect(categoriaLook('Auto', [fila('Trabajo', 'Auto', '')]).Icon).toBe(ICONS.car)
+    expect(cajaLook(cj({ filtroCampo: 'Categoría', filtroValor: 'Auto' }), cat)).toEqual(categoriaLook('Auto', cat, 'Trabajo'))
+    expect(cajaLook(cj({ filtroCampo: 'Subcategoría', filtroValor: 'Auto › Gasolina' }), cat)).toEqual(subcategoriaLook('Gasolina', 'Auto', cat, 'Amigos'))
+  })
+})
+
+describe('colores rápidos', () => {
+  it('son 10, únicos, válidos y todos están en la paleta completa', () => {
+    expect(COLORES_RAPIDOS).toHaveLength(10)
+    expect(new Set(COLORES_RAPIDOS).size).toBe(10)
+    const paleta = PALETA.flatMap(f => f.tonos).map(c => c.toLowerCase())
+    for (const c of COLORES_RAPIDOS) { expect(c).toMatch(/^#[0-9A-F]{6}$/i); expect(paleta).toContain(c.toLowerCase()) }
   })
 })
 
