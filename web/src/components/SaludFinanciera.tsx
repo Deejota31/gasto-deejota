@@ -12,7 +12,8 @@ import {
   type GrupoSimilar, type MiPresupuesto, type NivelComparacion, type NivelPresupuesto, type Oportunidad, type Rango,
 } from '../lib/salud'
 import type { AppStore } from '../lib/store'
-import type { EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
+import type { CatalogoItem, EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
+import { cajaLook } from '../lib/visual'
 import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField, useDismiss } from './ui'
 
 type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos'
@@ -139,7 +140,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       <div id={`salud-${vista}`} role="tabpanel" aria-labelledby={`salud-tab-${vista}`} key={vista}
         className="fade-in rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)] sm:p-5">
         {vista === 'calidad' && <PanelCalidad c={calidad} onRevisar={() => setRevisar(true)} />}
-        {vista === 'presupuesto' && <PanelPresupuesto p={pres} comp={comp} money={money} />}
+        {vista === 'presupuesto' && <PanelPresupuesto p={pres} comp={comp} money={money} catalogo={data.catalogo} />}
         {vista === 'evolucion' && (
           <PanelEvolucion evo={evo} ahorro={ahorro} money={money} fmt={fmt} per={per} modo={modo} setModo={setModo} nivel={nivel} setNivel={setNivel}
             mesA={mesA} mesB={mesB} setMesA={setMesA} setMesB={setMesB} meses={mesesConDatos} />
@@ -358,7 +359,7 @@ function PanelCalidad({ c, onRevisar }: { c: CalidadDatos; onRevisar: () => void
 
 /* ================================ Presupuesto ================================ */
 
-function PanelPresupuesto({ p, comp, money }: { p: MiPresupuesto; comp: Compromisos; money: (c: number) => string }) {
+function PanelPresupuesto({ p, comp, money, catalogo }: { p: MiPresupuesto; comp: Compromisos; money: (c: number) => string; catalogo: CatalogoItem[] }) {
   if (!p.presupuesto) {
     return <Vacio icon={PiggyBank} titulo="Aún no defines tu presupuesto" tono={TONO.neutro}>Usa “Ajustar caja” en el Dashboard para fijar tu presupuesto mensual y ver cuánto puedes gastar todavía.</Vacio>
   }
@@ -406,12 +407,12 @@ function PanelPresupuesto({ p, comp, money }: { p: MiPresupuesto; comp: Compromi
           <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {p.cajas.map(c => {
               const t = c.asignado ? TONO[NIVEL[c.nivel].tono] : TONO.neutro
-              const color = c.caja.color || '#1e3a8a'
+              const { Icon: CajaIcon, color } = cajaLook(c.caja, catalogo)
               return (
                 <li key={c.caja.id} className="rounded-2xl border border-line p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
-                      <span className="grid size-8 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Wallet className="size-4" /></span>
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><CajaIcon className="size-4" /></span>
                       <span className="truncate">{c.caja.nombre}</span>
                     </span>
                     <Chip tono={t}>{c.asignado ? pctTxt(c.pct) : 'Sin asignar'}</Chip>

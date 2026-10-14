@@ -10,9 +10,10 @@ import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
-import { COLORS, sortMedios } from '../lib/visual'
+import { cajaLook, COLORS, sortMedios } from '../lib/visual'
 import { PeriodPicker } from '../components/shared'
-import { CajaModal, cajaIcon } from '../components/cajas'
+import { CajaModal } from '../components/cajas'
+import { AparienciaCampos, useApariencia } from '../components/Apariencia'
 import { FuentesSeccion } from '../components/fuentes'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from '../components/ui'
@@ -26,7 +27,6 @@ const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
 ]
 const alcanceIcon = (c: FiltroCampo) => ALCANCES.find(a => a.value === c)?.Icon ?? Wallet
 type Orden = 'manual' | 'nombre' | 'monto' | 'mas' | 'menos' | 'uso'
-const COLORES = COLORS
 const TONO = {
   ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
@@ -159,7 +159,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
         ) : vista === 'grid' ? (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de cajas">
             {visibles.map(i => (
-              <TarjetaCaja key={i.caja.id} i={i} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)}
+              <TarjetaCaja key={i.caja.id} i={i} catalogo={catalogo} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)}
                 acciones={<Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
                   onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
                   onToggle={() => activar(i.caja)} onDelete={() => setBorrar(i.caja)} />}
@@ -167,7 +167,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
             ))}
           </ul>
         ) : (
-          <ListaCajas items={visibles} money={money} solapes={solapes} pending={store.pending}
+          <ListaCajas items={visibles} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending}
             acciones={i => <Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
               onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
               onToggle={() => activar(i.caja)} onDelete={() => setBorrar(i.caja)} />} />
@@ -237,12 +237,11 @@ function estadoDe(i: Item, money: (n: number) => string) {
 const resumirNombres = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 3).join(', ')} y ${xs.length - 3} más`)
 const alcanceTxt = (c: Caja) => `${c.filtroCampo} · ${c.filtroValor}`
 
-function TarjetaCaja({ i, money, solapes, busy, acciones, onAjustar }: {
-  i: Item; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void
+function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar }: {
+  i: Item; catalogo: CatalogoItem[]; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void
 }) {
   const { caja, r } = i
-  const color = caja.color || '#4F7BE8'
-  const Icon = cajaIcon(caja)
+  const { Icon, color } = cajaLook(caja, catalogo)
   const AIcon = alcanceIcon(caja.filtroCampo)
   const e = estadoDe(i, money)
   const activa = cajaActiva(caja) && !!r
@@ -298,15 +297,14 @@ function TarjetaCaja({ i, money, solapes, busy, acciones, onAjustar }: {
   )
 }
 
-function ListaCajas({ items, money, solapes, pending, acciones }: {
-  items: Item[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode
+function ListaCajas({ items, catalogo, money, solapes, pending, acciones }: {
+  items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode
 }) {
   return (
     <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de cajas">
       {items.map(i => {
         const { caja, r } = i
-        const color = caja.color || '#4F7BE8'
-        const Icon = cajaIcon(caja)
+        const { Icon, color } = cajaLook(caja, catalogo)
         const e = estadoDe(i, money)
         return (
           <li key={caja.id} data-testid="caja" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
@@ -408,7 +406,6 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
   const editar = !!caja
   const [id] = useState(() => caja?.id ?? `caja-${crypto.randomUUID().slice(0, 8)}`)
   const [nombre, setNombre] = useState(caja?.nombre ?? '')
-  const [color, setColor] = useState(caja?.color || COLORES[cajas.length % COLORES.length])
   const [monto, setMonto] = useState(caja ? String(caja.presupuesto) : '')
   const [campo, setCampo] = useState<Alcance>(caja && caja.filtroCampo !== 'Todos' ? caja.filtroCampo : 'Categoría')
   const [valor, setValor] = useState(caja?.filtroValor ?? '')
@@ -420,7 +417,12 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
     return valor && !xs.includes(valor) ? [valor, ...xs] : xs
   }, [campo, catalogo, medios, valor])
   const otras = cajas.filter(x => x.id !== id && x.filtroCampo !== 'Todos')
-  const borrador: Caja = { id, nombre: nombre.trim() || 'Nueva caja', presupuesto: Number(monto) || 0, filtroCampo: campo, filtroValor: valor, color, orden: caja?.orden ?? 0, activo, descripcion }
+  // Automático: el de su alcance (medio de pago, ámbito, categoría o subcategoría). Elegir un icono o un color lo fija.
+  const colorBase = caja?.color || COLORS[cajas.length % COLORS.length]
+  const auto = valor ? cajaLook({ filtroCampo: campo, filtroValor: valor, color: colorBase, icono: '' }, catalogo) : { ...cajaLook({ filtroCampo: 'Todos', filtroValor: '', color: colorBase, icono: '' }), color: colorBase }
+  const ap = useApariencia({ icono: caja?.icono ?? '', color: colorBase }, auto)
+  const { Icon: IconoCaja, color } = ap.look
+  const borrador: Caja = { id, nombre: nombre.trim() || 'Nueva caja', presupuesto: Number(monto) || 0, filtroCampo: campo, filtroValor: valor, color, icono: ap.icono, orden: caja?.orden ?? 0, activo, descripcion }
   const solapes = valor && activo ? calcularSolapes([borrador, ...otras.filter(cajaActiva)], catalogo, medios).get(id) ?? [] : []
   const gana = (otro: string) => {
     const o = otras.find(x => x.nombre === otro)!
@@ -453,22 +455,12 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : 'Crear caja'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
-          {(() => { const I = cajaIcon(borrador); return <span className="grid size-11 place-items-center rounded-2xl bg-card" style={{ color }}><I className="size-5" /></span> })()}
+          <span className="grid size-11 place-items-center rounded-2xl bg-card" style={{ color }}><IconoCaja className="size-5" /></span>
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{borrador.nombre}</p><p className="truncate text-[11px] text-muted">{valor ? `${campo} · ${valor}` : 'Elige el alcance'}</p></div>
         </div>
         <Field label="Nombre" error={errors.nombre} htmlFor="caja-nombre">
           <input id="caja-nombre" className={inputCls} maxLength={40} placeholder="Ej. Caja Salud" value={nombre} onChange={e => setNombre(e.target.value)} />
         </Field>
-        <div>
-          <p className="mb-1.5 text-xs font-medium text-muted">Color</p>
-          <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Color">
-            {COLORES.map(c => (
-              <button key={c} type="button" role="radio" aria-checked={color.toLowerCase() === c.toLowerCase()} aria-label={`Color ${c}`} onClick={() => setColor(c)}
-                className="size-8 rounded-full ring-offset-2 ring-offset-card transition hover:scale-110" style={{ background: c, boxShadow: color.toLowerCase() === c.toLowerCase() ? `0 0 0 2px var(--card), 0 0 0 4px ${c}` : undefined }} />
-            ))}
-            <input type="color" aria-label="Otro color" value={color} onChange={e => setColor(e.target.value)} className="size-8 cursor-pointer rounded-full border border-line bg-card p-0.5" />
-          </div>
-        </div>
         <Field label="Monto asignado por mes" error={errors.monto} htmlFor="caja-asignado" hint="Se descuenta del libre de la caja general. Para cambiar solo un mes usa “Ajustar monto”.">
           <span className="relative block">
             <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted">S/</span>
@@ -498,6 +490,7 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
             })()}
           </div>
         )}
+        <AparienciaCampos ap={ap} nombre={nombre} contexto={[campo, valor.split(' › ').at(-1) ?? '']} autoTexto={valor ? `como ${valor.split(' › ').at(-1)}` : 'según el alcance'} />
         <Field label="Descripción (opcional)" htmlFor="caja-desc">
           <input id="caja-desc" className={inputCls} maxLength={200} placeholder="Ej. Médico, farmacia y exámenes" value={descripcion} onChange={e => setDescripcion(e.target.value)} />
         </Field>

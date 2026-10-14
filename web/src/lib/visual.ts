@@ -1,6 +1,6 @@
 import { ArrowLeftRight, Banknote, CreditCard, Smartphone, Ticket, Wallet, type LucideIcon } from 'lucide-react'
-import type { CatalogoItem } from './types'
-import { ICONS, sugerirIconos } from './iconos'
+import type { Caja, CatalogoItem, Fuente } from './types'
+import { ICONOS, ICONS, sugerirIconos } from './iconos'
 
 export { ICONS }
 
@@ -19,6 +19,29 @@ export const ESTADOS = {
 
 /** Paleta de clasificación (también la que ofrece el selector de color). Contraste ≥ 3:1 sobre blanco como icono. */
 export const COLORS = ['#4F7BE8', '#6366F1', '#8B7CF6', '#C2569B', '#DB5A9A', '#0E8FA8', '#14917F', '#2F9E6B', '#6B8E23', '#B4693C', '#8A6A4F', '#64748B']
+
+/**
+ * Paleta amplia para los selectores (v1.10): 16 familias × 4 tonos. Todas con contraste suficiente como icono sobre
+ * blanco; el primer tono de cada familia es el "base". `COLORS` (arriba) sigue siendo la paleta de los predeterminados.
+ */
+export const PALETA: { nombre: string; tonos: string[] }[] = [
+  { nombre: 'Rojo', tonos: ['#E5484D', '#C0362C', '#A52A2A', '#F0777A'] },
+  { nombre: 'Naranja', tonos: ['#F76B15', '#D2640E', '#B4693C', '#FF9A5C'] },
+  { nombre: 'Ámbar', tonos: ['#F5A524', '#D69E2E', '#B7791F', '#E8B84A'] },
+  { nombre: 'Lima', tonos: ['#84A515', '#6B8E23', '#4D7C0F', '#A3C23A'] },
+  { nombre: 'Verde', tonos: ['#2F9E6B', '#22A35A', '#15803D', '#5BBF8A'] },
+  { nombre: 'Esmeralda', tonos: ['#14917F', '#0F8A6B', '#0B6B55', '#3DB8A4'] },
+  { nombre: 'Turquesa', tonos: ['#0E8FA8', '#0B9EA8', '#0B7285', '#3DB5C7'] },
+  { nombre: 'Celeste', tonos: ['#3B9BE0', '#2B84C6', '#1C6BA8', '#6DB5EA'] },
+  { nombre: 'Azul', tonos: ['#4F7BE8', '#3B6FD9', '#1E3A8A', '#7C9BF0'] },
+  { nombre: 'Índigo', tonos: ['#6366F1', '#4F46E5', '#3730A3', '#8B8FF5'] },
+  { nombre: 'Violeta', tonos: ['#8B7CF6', '#7B3FA0', '#6D5BD0', '#A99BF8'] },
+  { nombre: 'Fucsia', tonos: ['#C2569B', '#A8338A', '#86227A', '#D985BC'] },
+  { nombre: 'Rosa', tonos: ['#DB5A9A', '#E0457B', '#BE3A6E', '#EE86B3'] },
+  { nombre: 'Marrón', tonos: ['#8A6A4F', '#7A5A3E', '#5F4632', '#A98A70'] },
+  { nombre: 'Gris azulado', tonos: ['#64748B', '#475569', '#334155', '#94A3B8'] },
+  { nombre: 'Neutro', tonos: ['#6B7280', '#4B5563', '#1F2937', '#9CA3AF'] },
+]
 
 const AMBITOS: Record<string, { icon: string; color: string }> = {
   Personal: { icon: 'user', color: '#4F7BE8' },
@@ -48,6 +71,10 @@ const CATEGORIAS: Record<string, { icon: string; color: string }> = {
   'Cuidado Personal': { icon: 'sparkles', color: '#C2569B' },
   'Herramientas y Equipamiento': { icon: 'wrench', color: '#8A6A4F' },
   Salidas: { icon: 'film', color: '#6B8E23' },
+  Viajes: { icon: 'plane', color: '#0B7285' },
+  Mascotas: { icon: 'paw-print', color: '#8A6A4F' },
+  Impuestos: { icon: 'landmark', color: '#475569' },
+  Ahorro: { icon: 'piggy-bank', color: '#0F8A6B' },
 }
 
 const MEDIOS: Record<string, { icon: LucideIcon; color: string }> = {
@@ -119,3 +146,50 @@ export function medioLook(name: string): Look {
 
 /** Fondo pastel a partir del color (alfa en hexadecimal). */
 export const soft = (hex: string, alpha = '1A') => `${hex}${alpha}`
+
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * Coherencia visual (v1.10): un medio de pago, una fuente o una caja se ven igual en TODA la web.
+ *  - Medio de pago: su icono y color propios (arriba).
+ *  - Fuente: lo que elijas (icono + color); si no eliges nada ("automático"), hereda el de su medio de pago
+ *    y, si no tiene medio, uno según su nombre.
+ *  - Caja: lo que elijas; si no, el de su alcance (medio de pago, ámbito, categoría o subcategoría).
+ * "Elegido" = la fila tiene icono guardado; mientras no lo tenga, el color guardado se ignora y manda el automático.
+ * ------------------------------------------------------------------------------------------------------------- */
+
+/** Clave de icono → componente inverso: para guardar como elegido el icono que se estaba viendo automáticamente. */
+const CLAVE_DE = new Map<LucideIcon, string>()
+for (const i of ICONOS) if (!CLAVE_DE.has(i.Icon)) CLAVE_DE.set(i.Icon, i.key)
+export const claveDeIcono = (Icon: LucideIcon): string => CLAVE_DE.get(Icon) ?? 'tag'
+
+const FUENTE_POR_NOMBRE: [RegExp, string][] = [
+  [/general|sueldo|salario|planilla/, 'banknote'], [/sodexo|aliment|vale/, 'utensils'], [/viaj|vuelo|vacacion|ica\b/, 'plane'],
+  [/extra|adicional/, 'sparkles'], [/bono|bonific|aguinaldo|gratific|premio/, 'gift'], [/reembolso|devoluc|venta|alquiler/, 'receipt'],
+  [/freelance|independiente|trabajo|comisi/, 'briefcase'], [/ahorro|cts|interes|dividend/, 'piggy-bank'], [/regalo/, 'hand-coins'],
+  [/tarjeta/, 'credit-card'], [/tesis|carpeta|educ|maestr|curso|titulo/, 'graduation-cap'],
+]
+
+/** Estilo de una fuente de dinero. */
+export function fuenteLook(f: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>): Look {
+  if (f.icono && ICONS[f.icono]) return { Icon: ICONS[f.icono], color: pick(f.color, '#1E3A8A') }
+  if (f.medioPago) return medioLook(f.medioPago)
+  const k = f.nombre.toLowerCase()
+  const key = FUENTE_POR_NOMBRE.find(([re]) => re.test(k))?.[1] ?? 'coins'
+  return { Icon: ICONS[key] ?? ICONS.coins, color: pick(f.color, '#1E3A8A') }
+}
+
+/** Estilo de una caja: el elegido o, en automático, el de su alcance. */
+export function cajaLook(c: Pick<Caja, 'filtroCampo' | 'filtroValor' | 'color' | 'icono'>, catalogo: CatalogoItem[] = []): Look {
+  if (c.icono && ICONS[c.icono]) return { Icon: ICONS[c.icono], color: pick(c.color, '#4F7BE8') }
+  const v = c.filtroValor
+  switch (c.filtroCampo) {
+    case 'Medio de pago': return medioLook(v)
+    case 'Ámbito': return ambitoLook(v, catalogo)
+    case 'Categoría': return categoriaLook(v, catalogo)
+    case 'Subcategoría': {
+      const [cat, sub] = v.includes(' › ') ? v.split(' › ') : ['', v]
+      return cat ? subcategoriaLook(sub, cat, catalogo) : { Icon: (sugerirIconos(sub, [], 1)[0]?.Icon) ?? ICONS.tag, color: hashColor(sub) }
+    }
+    default: return { Icon: ICONS.wallet, color: pick(c.color, '#1E3A8A') }
+  }
+}

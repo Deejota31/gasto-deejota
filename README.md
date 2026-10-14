@@ -28,6 +28,14 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.10.0
+
+- **Cascada de fuentes libres:** un gasto consume primero la fuente principal (General) hasta su tope y el resto pasa a la siguiente fuente libre (p. ej. Viaje a Ica); nadie queda en negativo mientras haya saldo. Las fuentes ligadas a un medio de pago (Sodexo…) solo cubren su propio medio.
+- **Icono y color** elegibles en fuentes y cajas; por defecto siguen al medio de pago (fuentes) o al ámbito/categoría/medio (cajas). Un solo aspecto en Dashboard, Cajas, Configuración y Categorías.
+- **Paleta de 64 colores + color libre** y ~250 iconos para ámbitos, categorías y subcategorías.
+- **Plantillas con "Tipo de gasto" y "Es recurrente"** (se precargan en Nuevo gasto).
+- Hoja: `CAJAS` gana la columna *Icono* y `PLANTILLAS_MENSUALES` las columnas *Tipo de gasto* y *Es recurrente* (se migran solas). **Vuelve a desplegar el Apps Script (v1.10.0).**
+
 ## Novedades v1.9.2
 
 | Punto | Qué cambió |

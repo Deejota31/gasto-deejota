@@ -4,6 +4,7 @@ import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
 import { ambitoLook, categoriaLook, COLORS, ICONS, subcategoriaLook } from '../lib/visual'
 import { IconPicker } from '../components/IconPicker'
+import { ColorPicker } from '../components/Apariencia'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
@@ -291,13 +292,7 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         {usaVisual && (
           <>
             <Picker label="Color">
-              <div className="flex flex-wrap gap-2">
-                {COLORS.map(c => (
-                  <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c} onClick={() => setColor(c)}
-                    className={`size-8 rounded-full ring-offset-2 ring-offset-[var(--card)] transition ${color === c ? 'ring-2' : 'hover:scale-110'}`}
-                    style={{ background: c, ['--tw-ring-color' as string]: c }} />
-                ))}
-              </div>
+              <ColorPicker value={color} onChange={setColor} />
             </Picker>
           </>
         )}

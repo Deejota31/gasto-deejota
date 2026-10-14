@@ -190,7 +190,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       if (p.filtroCampo !== 'Todos' && p.activo !== false && db.cajas.some(r => r[0] !== p.id && r[3] === p.filtroCampo && norm(r[4]) === norm(p.filtroValor) && r[7] !== false)) {
         throw fail('VALIDATION', `Otra caja ya usa ${p.filtroCampo} = ${p.filtroValor}. Cambia el alcance o desactívala primero.`)
       }
-      return upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor ?? '', p.color, Number(p.orden), p.activo !== false, p.descripcion ?? ''])
+      return upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor ?? '', p.color, Number(p.orden), p.activo !== false, p.descripcion ?? '', p.icono ?? ''])
     },
     deleteCaja: p => {
       const r = db.cajas.find(x => x[0] === p.id)
@@ -264,7 +264,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       if (monto !== '' && !(Number(monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
       const prevRow = db.plantillas.find(r => r[0] === p.id)
       const row = [p.id, p.ambito, p.categoria, p.subcategoria, p.descripcion, now, now, monto, p.moneda || 'PEN', p.medioPago ?? '', 0,
-        p.esCompromiso === undefined ? (prevRow?.[11] ?? false) : p.esCompromiso === true]
+        p.esCompromiso === undefined ? (prevRow?.[11] ?? false) : p.esCompromiso === true,
+        p.tipoGasto === undefined ? (prevRow?.[12] ?? 'Variable') : p.tipoGasto, p.esRecurrente === undefined ? (prevRow?.[13] ?? false) : p.esRecurrente === true]
       if (![row[1], row[2], row[3], row[4]].every(v => String(v ?? '').trim())) throw fail('VALIDATION', 'Ámbito, categoría, subcategoría y descripción son obligatorios.')
       if (db.plantillas.some(r => r[0] !== p.id && k(r) === k(row))) throw fail('VALIDATION', 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.')
       const i = db.plantillas.findIndex(r => r[0] === p.id)

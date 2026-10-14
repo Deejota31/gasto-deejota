@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.9.2';
+var APP_VERSION = '1.10.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -15,12 +15,13 @@ var SHEETS = {
   CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'],
   MEDIOS_PAGO: ['Nombre', 'Activo'],
   // Activo y Descripción (v1.7): cajas personalizadas. Una caja inactiva no reserva dinero ni toma gastos.
-  CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción'],
+  // Icono (v1.10): vacío = automático (el de su alcance); si lo eliges, manda junto con el Color.
+  CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción', 'Icono'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
   CONFIG: ['Clave', 'Valor'],
   // Plantillas de gastos frecuentes: solo configuración reutilizable, nunca movimientos ni montos.
   PLANTILLAS_MENSUALES: ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en',
-    'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso'],
+    'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'],
   // Orden personalizado de la tabla de Gastos (por ID). Hoja aparte: reordenar nunca mueve ni reescribe GASTOS.
   ORDEN_GASTOS: ['ID', 'Orden'],
   // Qué gasto pagó qué plantilla (compromiso). Hoja aparte: no cambia el esquema de GASTOS. Plantilla vacía = sin vínculo.
@@ -635,7 +636,7 @@ function getData_(fresh) {
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
     catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5]), str_(r[6]) === '' ? '' : num_(r[6])]; }),
     medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
-    cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6]), str_(r[7]) === '' ? true : bool_(r[7]), str_(r[8]).replace(/^'/, '')]; }),
+    cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[4]), str_(r[5]), num_(r[6]), str_(r[7]) === '' ? true : bool_(r[7]), str_(r[8]).replace(/^'/, ''), str_(r[9])]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
     config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {}),
     ordenGastos: ss.getSheetByName('ORDEN_GASTOS') ? readRows_(ss, 'ORDEN_GASTOS').map(function (r) { return [str_(r[0]), num_(r[1])]; }) : [],
@@ -871,8 +872,10 @@ function saveCaja_(p) {
   if (CAJA_CAMPOS.indexOf(campo) < 0) throw appError_('VALIDATION', 'Filtro de caja inválido.');
   var activo = p.activo === undefined ? true : p.activo === true;
   var valor = campo === 'Todos' ? '' : text_(p.filtroValor, 'Valor del alcance', 130, true);
+  var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
+  if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
   var row = [id, text_(p.nombre, 'Nombre', 40, true), amount_(p.presupuesto, true), campo, valor,
-    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden), activo, text_(p.descripcion, 'Descripción', 200, false)];
+    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden), activo, text_(p.descripcion, 'Descripción', 200, false), icono];
   var sh = cajasSheet_();
   var n = Math.max(lastDataRow_(sh) - 1, 0);
   var rows = n ? sh.getRange(2, 1, n, SHEETS.CAJAS.length).getValues() : [];
@@ -998,7 +1001,7 @@ function generarDatosPrueba() {
     appendRows_(plSh, defs.map(function (d, i) {
       var id = Utilities.getUuid();
       pl[d[0]] = id; reg.plantillas.push(id);
-      return [id, d[1], d[2], d[3], d[4], now, now, d[5], d[6], d[7], ordenBase + i, true];
+      return [id, d[1], d[2], d[3], d[4], now, now, d[5], d[6], d[7], ordenBase + i, true, 'Fijo', true];
     }));
     // ---------- Gastos ----------
     var gastos = [], vinc = [];
@@ -1531,13 +1534,14 @@ function renameCatalogo_(p) {
 // 11 Es compromiso (la decides tú: solo las marcadas cuentan como compromisos mensuales).
 
 var PL_ID = /^pl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-var PL_COLS = 12;
+var PL_COLS = 14;
 
 function plantillaRow_(r) {
   var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
   var opt = function (v) { return str_(v) === '' ? '' : num_(v); };
   return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), ts(r[5]), ts(r[6]),
-    opt(r[7]), str_(r[8]) || 'PEN', str_(r[9]).replace(/^'/, ''), opt(r[10]), bool_(r[11])];
+    opt(r[7]), str_(r[8]) || 'PEN', str_(r[9]).replace(/^'/, ''), opt(r[10]), bool_(r[11]),
+    TIPOS_GASTO.indexOf(str_(r[12])) >= 0 ? str_(r[12]) : 'Variable', bool_(r[13])];
 }
 
 // Orden estable: por la columna Orden; las filas sin orden (versión anterior) quedan después, en orden de creación.
@@ -1576,14 +1580,18 @@ var PL_ALIAS = {
   'Moneda': ['moneda', 'moneda predeterminada'],
   'Medio de pago': ['medio de pago', 'medio de pago predeterminado', 'medio predeterminado'],
   'Orden': ['orden'],
-  'Es compromiso': ['es compromiso', 'es_compromiso', 'compromiso']
+  'Es compromiso': ['es compromiso', 'es_compromiso', 'compromiso'],
+  'Tipo de gasto': ['tipo de gasto', 'tipo'],
+  'Es recurrente': ['es recurrente', 'recurrente']
 };
 var PL_TIPO = {
   'Monto': function (v) { return v === '' || (esNumero_(v) && Number(v) >= 0); },
   'Moneda': function (v) { return v === '' || /^[A-Z]{3}$/.test(str_(v)); },
   'Medio de pago': function (v) { return v === '' || (typeof v === 'string' && str_(v).length <= 40); },
   'Orden': function (v) { return v === '' || (esNumero_(v) && Number(v) >= 0 && Math.floor(Number(v)) === Number(v)); },
-  'Es compromiso': function (v) { return v === '' || v === true || v === false || /^(TRUE|FALSE)$/i.test(str_(v)); }
+  'Es compromiso': function (v) { return v === '' || v === true || v === false || /^(TRUE|FALSE)$/i.test(str_(v)); },
+  'Tipo de gasto': function (v) { return v === '' || TIPOS_GASTO.indexOf(str_(v)) >= 0; },
+  'Es recurrente': function (v) { return v === '' || v === true || v === false || /^(TRUE|FALSE)$/i.test(str_(v)); }
 };
 
 // Número real (o texto numérico como "4"); nunca fechas ni casillas TRUE/FALSE.
@@ -1695,6 +1703,9 @@ function savePlantilla_(p) {
   if (!/^[A-Z]{3}$/.test(moneda)) throw appError_('VALIDATION', 'Moneda inválida.');
   var medio = text_(p.medioPago, 'Medio de pago', 40, false);
   if (p.esCompromiso !== undefined && typeof p.esCompromiso !== 'boolean') throw appError_('VALIDATION', 'Es compromiso debe ser verdadero o falso.');
+  var tipoNuevo = p.tipoGasto === undefined ? undefined : str_(p.tipoGasto);
+  if (tipoNuevo !== undefined && TIPOS_GASTO.indexOf(tipoNuevo) < 0) throw appError_('VALIDATION', 'Tipo de gasto inválido.');
+  if (p.esRecurrente !== undefined && typeof p.esRecurrente !== 'boolean') throw appError_('VALIDATION', 'Es recurrente debe ser verdadero o falso.');
   var sh = plantillasSheet_();
   var rows = leerPlantillas_(sh);
   var plain = function (v) { return norm_(str_(v).replace(/^'/, '')); }; // ignora el apóstrofo anti-fórmulas
@@ -1713,12 +1724,14 @@ function savePlantilla_(p) {
   if (idx >= 0) { // edición (o reintento de un alta ya guardada): conserva creación y orden
     var prev = rows[idx];
     var comp = p.esCompromiso === undefined ? bool_(prev[11]) : p.esCompromiso;
-    var upd = [id, ambito, categoria, sub, desc, plantillaRow_(prev)[5], now, monto, moneda, medio, prev[10], comp];
+    var tipoF = tipoNuevo === undefined ? plantillaRow_(prev)[12] : tipoNuevo;
+    var recF = p.esRecurrente === undefined ? bool_(prev[13]) : p.esRecurrente;
+    var upd = [id, ambito, categoria, sub, desc, plantillaRow_(prev)[5], now, monto, moneda, medio, prev[10], comp, tipoF, recF];
     sh.getRange(idx + 2, 1, 1, PL_COLS).setValues([upd]);
     return plantillaRow_(upd);
   }
   if (p.mode === 'update') throw appError_('NOT_FOUND', 'La plantilla ya no existe.');
-  var row = [id, ambito, categoria, sub, desc, now, now, monto, moneda, medio, '', p.esCompromiso === true];
+  var row = [id, ambito, categoria, sub, desc, now, now, monto, moneda, medio, '', p.esCompromiso === true, tipoNuevo || 'Variable', p.esRecurrente === true];
   appendRows_(sh, [row]);
   // Nueva al final; una copia (afterId), justo después de la original. Se renumera en una sola escritura.
   rows.push(row);

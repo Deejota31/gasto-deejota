@@ -15,7 +15,8 @@ import type { Caja, Filters, Fuente, FuenteMes, Gasto, Presupuesto } from './typ
  *    Cada gasto se imputa como máximo a una subcaja (la primera que coincide, por orden).
  *  - Fuentes (v1.8): si hay al menos una fuente, P = Σ aportes del período de las fuentes ACTIVAS (las reservas no suman).
  *    Sin fuentes, P sigue siendo el presupuesto de la caja general (compatibilidad con hojas anteriores).
- *    Cada gasto se atribuye a UNA fuente efectiva: la que tiene su medio de pago asociado, o la fuente principal.
+ *    Cada gasto se atribuye en cascada: primero la fuente de su medio de pago, luego las fuentes libres en orden (la
+ *    principal hasta su tope, después la siguiente). Una fuente solo queda en negativo si el consolidado también lo está.
  */
 
 export interface Ctx {
@@ -250,6 +251,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const principal = libres.find(r => r.aporta > 0) ?? libres[0] ?? null
   if (principal) principal.principal = true
   let gastadoInactivas = 0, countInactivas = 0, gastadoSinFuente = 0, countSinFuente = 0
+  const elegibles: { g: Gasto; cents: number }[] = []
 
   for (const g of gastos) {
     if (g.estado === 'Anulado' || g.fecha < f.desde || g.fecha > f.hasta) continue
@@ -260,13 +262,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     totalPeriodo += cents
     const dueña = cajaDe(priorizadas, g)
     if (dueña) { const i = indice.get(dueña)!; subGastado[i] += cents; subCount[i]++ } else gastadoLibre += cents
-    if (fResumen.length) {
-      const fm = porMedio.get(nrm(g.medioPago))
-      const efectiva = fm ?? principal
-      if (fm && !fm.fuente.activo) { gastadoInactivas += cents; countInactivas++ }
-      if (efectiva) { efectiva.gastado += cents; efectiva.count++ }
-      if (!efectiva) { gastadoSinFuente += cents; countSinFuente++ }
-    }
+    if (fResumen.length) elegibles.push({ g, cents })
 
     if (!matchesDims(g, f)) continue
     total += cents
@@ -297,6 +293,39 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     monedas.add(g.moneda)
     if (!primerFecha || g.fecha < primerFecha) primerFecha = g.fecha
     if (!ultimaFecha || g.fecha > ultimaFecha) ultimaFecha = g.fecha
+  }
+
+  // Cascada de fuentes (v1.10). En orden cronológico, cada gasto toma primero la fuente de su medio de pago (Sodexo…) y,
+  // si no tiene o ya se agotó, las fuentes libres en orden: la principal hasta su tope, luego la siguiente. Un gasto que
+  // cruza un tope se reparte (cuenta como movimiento en la primera fuente que lo recibe). Lo que sobra tras agotar todo
+  // queda en la última fuente libre: una fuente solo muestra saldo negativo si el presupuesto consolidado también lo es.
+  // El resultado por fuente no depende del orden de los gastos; solo cambia cuántos movimientos cuenta cada una.
+  if (fResumen.length) {
+    const libresOrden = principal ? [principal, ...libres.filter(r => r !== principal)] : []
+    const cupo = new Map(fResumen.map(r => [r, Math.max(0, r.aporta)]))
+    const cronologico = elegibles.sort((a, b) => a.g.fecha.localeCompare(b.g.fecha) || a.g.creadoEn.localeCompare(b.g.creadoEn) || a.g.id.localeCompare(b.g.id))
+    for (const { g, cents } of cronologico) {
+      const fm = porMedio.get(nrm(g.medioPago))
+      if (fm && !fm.fuente.activo) { gastadoInactivas += cents; countInactivas++; fm.gastado += cents; fm.count++; continue }
+      let resto = cents, contado = false
+      const poner = (r: FuenteResumen, monto: number) => {
+        if (monto <= 0) return
+        r.gastado += monto
+        cupo.set(r, (cupo.get(r) ?? 0) - monto)
+        if (!contado) { r.count++; contado = true }
+        resto -= monto
+      }
+      if (fm) poner(fm, Math.min(resto, Math.max(0, cupo.get(fm) ?? 0)))
+      for (const r of libresOrden) {
+        if (resto <= 0) break
+        poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
+      }
+      if (resto > 0) {
+        const ultimo = libresOrden[libresOrden.length - 1] ?? fm
+        if (ultimo) poner(ultimo, resto)
+        else { gastadoSinFuente += resto; countSinFuente++ }
+      }
+    }
   }
 
   // Cajas (P, R, Gs, Gl). El exceso de una subcaja sobre su asignación se descuenta del saldo libre.

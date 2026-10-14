@@ -1,13 +1,15 @@
 import { useId, useState, type ReactNode } from 'react'
 import { Boxes, ChevronDown, ChevronRight, CircleDollarSign } from 'lucide-react'
 import type { CajasResumen } from '../lib/engine'
+import type { CatalogoItem } from '../lib/types'
+import { cajaLook, fuenteLook, soft, type Look } from '../lib/visual'
 import { ESTADO } from './PresupuestoConsolidado'
 
 /**
  * Dos acordeones compactos bajo el Presupuesto consolidado del Dashboard: Fuentes de dinero y Subcajas / reservas.
  * Empiezan cerrados cada vez que entras al Dashboard; no editan nada (eso vive en Cajas) ni hacen consultas propias.
  */
-export function ResumenCajas({ c, money, onIrCajas }: { c: CajasResumen; money: (n: number) => string; onIrCajas?: () => void }) {
+export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasResumen; money: (n: number) => string; catalogo?: CatalogoItem[]; onIrCajas?: () => void }) {
   const [abierto, setAbierto] = useState<{ fuentes: boolean; subcajas: boolean }>({ fuentes: false, subcajas: false })
   const fuentesAct = c.fuentes.lista.filter(r => r.fuente.activo)
   const resumenFuentes = c.origen === 'fuentes'
@@ -25,7 +27,7 @@ export function ResumenCajas({ c, money, onIrCajas }: { c: CajasResumen; money: 
         {c.fuentes.lista.length ? (
           <ul className="divide-y divide-line/70" aria-label="Fuentes del período">
             {c.fuentes.lista.map(r => (
-              <Fila key={r.fuente.id} color={r.fuente.color} nombre={r.fuente.nombre}
+              <Fila key={r.fuente.id} look={fuenteLook(r.fuente)} nombre={r.fuente.nombre}
                 detalle={r.fuente.activo ? (r.fuente.medioPago ? `Medio ${r.fuente.medioPago}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
                 apagada={!r.fuente.activo}
                 cols={[['Asignado', money(r.asignado)], ['Gastado', money(r.gastado)], ['Disponible', r.fuente.activo ? money(r.disponible) : '—', r.disponible < 0 && r.fuente.activo ? ESTADO.alerta : undefined]]} />
@@ -40,7 +42,7 @@ export function ResumenCajas({ c, money, onIrCajas }: { c: CajasResumen; money: 
         {c.subcajas.length ? (
           <ul className="divide-y divide-line/70" aria-label="Subcajas del período">
             {c.subcajas.map(s => (
-              <Fila key={s.caja.id} color={s.caja.color} nombre={s.caja.nombre} detalle={`${s.caja.filtroCampo} · ${s.caja.filtroValor}`}
+              <Fila key={s.caja.id} look={cajaLook(s.caja, catalogo)} nombre={s.caja.nombre} detalle={`${s.caja.filtroCampo} · ${s.caja.filtroValor}`}
                 cols={[['Reservado', s.asignado ? money(s.asignado) : '—'], ['Gastado', money(s.gastado)],
                   [s.excedido ? 'Exceso' : 'Disponible', s.asignado ? money(Math.abs(s.disponible)) : '—', s.excedido ? ESTADO.alerta : undefined]]} />
             ))}
@@ -74,14 +76,14 @@ function Acordeon({ icon, color, titulo, resumen, open, onToggle, children }: {
   )
 }
 
-function Fila({ color, nombre, detalle, cols, apagada }: { color: string; nombre: string; detalle: string; cols: [string, string, string?][]; apagada?: boolean }) {
+function Fila({ look, nombre, detalle, cols, apagada }: { look: Look; nombre: string; detalle: string; cols: [string, string, string?][]; apagada?: boolean }) {
   return (
     <li className={`grid grid-cols-[minmax(0,1fr)] gap-x-3 gap-y-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${apagada ? 'opacity-60' : ''}`}>
       <span className="flex min-w-0 items-center gap-2">
-        <i className="size-2.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden />
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: soft(look.color), color: look.color }} aria-hidden><look.Icon className="size-3.5" /></span>
         <span className="min-w-0"><span className="block truncate text-sm font-medium text-ink">{nombre}</span><span className="block truncate text-[11px] text-muted">{detalle}</span></span>
       </span>
-      <dl className="tabular grid grid-cols-3 gap-3 pl-4.5 text-right text-[11px] sm:pl-0">
+      <dl className="tabular grid grid-cols-3 gap-3 pl-9 text-right text-[11px] sm:pl-0">
         {cols.map(([l, v, col]) => <div key={l} className="min-w-0 sm:w-24"><dt className="text-muted">{l}</dt><dd className="truncate text-xs font-semibold" style={{ color: col ?? 'var(--ink)' }}>{v}</dd></div>)}
       </dl>
     </li>

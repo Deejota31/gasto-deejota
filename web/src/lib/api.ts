@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -110,19 +110,22 @@ const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color 
 const optNum = (v: unknown) => (v === '' || v === undefined || v === null || !Number.isFinite(Number(v)) ? null : Number(v))
 // v1.5 agrega "Es compromiso" (booleano) al final.
 const plantillaRowV15 = z.tuple([str, str, str, str, str, str, str]).rest(z.union([str, z.number(), z.boolean()]))
-const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto, moneda, medioPago, orden, comp]: z.infer<typeof plantillaRowV15>): Plantilla =>
+const toPlantilla = ([id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto, moneda, medioPago, orden, comp, tipo, rec]: z.infer<typeof plantillaRowV15>): Plantilla =>
   ({ id, ambito, categoria, subcategoria, descripcion, creadoEn, actualizadoEn, monto: optNum(monto), moneda: String(moneda || 'PEN'), medioPago: String(medioPago ?? ''), orden: optNum(orden),
-    esCompromiso: comp === true || String(comp).toUpperCase() === 'TRUE' })
+    esCompromiso: comp === true || String(comp).toUpperCase() === 'TRUE',
+    // v1.10: tipo de gasto y recurrencia con que se precargan los gastos de la plantilla (hojas anteriores: Variable / no recurrente).
+    tipoGasto: (TIPOS_GASTO as readonly string[]).includes(String(tipo)) ? String(tipo) as TipoGasto : 'Variable',
+    esRecurrente: rec === true || String(rec).toUpperCase() === 'TRUE' })
 
 /** Lo que se envía para crear o editar una plantilla. `afterId`: al clonar, la copia queda justo después de la original. */
-export type PlantillaInput = Pick<Plantilla, 'id' | 'ambito' | 'categoria' | 'subcategoria' | 'descripcion' | 'monto' | 'moneda' | 'medioPago'> & { esCompromiso?: boolean }
+export type PlantillaInput = Pick<Plantilla, 'id' | 'ambito' | 'categoria' | 'subcategoria' | 'descripcion' | 'monto' | 'moneda' | 'medioPago'> & { esCompromiso?: boolean; tipoGasto?: TipoGasto; esRecurrente?: boolean }
 
 const loteSchema = z.object({
   estado: str, loteId: str, solicitados: z.number(), confirmados: z.number(), nuevos: z.number(), yaExistian: z.number().default(0),
   ids: z.array(str), gastos: z.array(gastoRow), mensaje: str,
 })
 
-// [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?] — antes de v1.7 llegan solo 7.
+// [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?, icono?] — antes de v1.7 llegan solo 7; antes de v1.10 sin icono.
 const cajaRow = z.tuple([str, str, z.number(), str, str, str, z.number()]).rest(z.union([str, z.number(), z.boolean()]))
 
 // [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn]
@@ -172,6 +175,7 @@ const toCaja = (r: z.infer<typeof cajaRow>): Caja => ({
   filtroValor: r[4], color: r[5] || '#1e3a8a', orden: r[6],
   activo: r[7] === undefined || r[7] === '' ? true : r[7] === true || String(r[7]).toUpperCase() === 'TRUE',
   descripcion: r[8] === undefined ? '' : String(r[8]),
+  icono: r[9] === undefined ? '' : String(r[9]),
 })
 
 export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'> & {

@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { GastoInput, PlantillaInput } from '../lib/api'
-import type { Plantilla } from '../lib/types'
+import { TIPOS_GASTO, type Plantilla, type TipoGasto } from '../lib/types'
 import { normName } from '../lib/orden'
 import { categoriaLook, medioLook, sortMedios } from '../lib/visual'
 import { formatearDescripcion } from '../lib/texto'
@@ -19,10 +19,10 @@ import { todayIn } from '../lib/dates'
 import { showToast } from '../lib/toast'
 import { autocompletar, ClasificacionPicker, clasificacionVigente, type Clasif } from './Clasificacion'
 import type { GastoPreset } from './GastoModal'
-import { Button, DateField, Empty, ErrorBox, Field, inputCls, Modal, SelectField, Skeleton, Switch, useDismiss } from './ui'
+import { Button, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from './ui'
 
 export interface PlantillaDraft extends Clasif {
-  id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; esCompromiso?: boolean; existente: boolean; afterId?: string
+  id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; esCompromiso?: boolean; tipoGasto?: TipoGasto; esRecurrente?: boolean; existente: boolean; afterId?: string
 }
 type View = { kind: 'list' } | { kind: 'form'; plantilla: Plantilla | null; draft?: PlantillaDraft; cloneOf?: Plantilla } | { kind: 'delete'; plantilla: Plantilla }
 
@@ -160,7 +160,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
       else if (!f.medioPago || !medios.includes(f.medioPago)) errs[p.id] = 'Elige un medio de pago activo'
       gastoIds[p.id] ??= crypto.randomUUID() // fijo por plantilla mientras el lote no se confirme
       gastos.push({ id: gastoIds[p.id], fecha, monto: n, moneda: f.moneda, ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria,
-        descripcion: formatearDescripcion(p.descripcion), medioPago: f.medioPago, tipoGasto: 'Variable', esRecurrente: false, comprobanteUrl: '',
+        descripcion: formatearDescripcion(p.descripcion), medioPago: f.medioPago, tipoGasto: p.tipoGasto, esRecurrente: p.esRecurrente, comprobanteUrl: '',
         plantillaId: p.id }) // vínculo: si la plantilla es un compromiso, este gasto cuenta como su pago
     }
     // Errores en filas ocultas por la búsqueda o el filtro: se quitan los filtros para que se vean.
@@ -323,7 +323,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                           <Button className="h-10 px-4 text-sm md:h-8 md:px-2.5 md:text-xs" disabled={!!rev} aria-label={`Usar plantilla ${p.descripcion}`} title="Abrir Nuevo gasto con estos datos"
                             onClick={() => onUse({ ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria, descripcion: p.descripcion,
                               monto: Number(f.monto.replace(',', '.')) || null, moneda: f.moneda, medioPago: medioOk(f.medioPago) ? f.medioPago : '',
-                              plantillaId: p.id, plantillaNombre: p.descripcion })}>Usar</Button>
+                              tipoGasto: p.tipoGasto, esRecurrente: p.esRecurrente, plantillaId: p.id, plantillaNombre: p.descripcion })}>Usar</Button>
                           <Button variant="outline" className="h-10 px-3 text-sm md:hidden" aria-label={`Editar plantilla ${p.descripcion}`}
                             onClick={() => setView({ kind: 'form', plantilla: p })}><Pencil className="size-4" /><span className="max-[359px]:sr-only">Editar</span></Button>
                           <button type="button" aria-label={`Eliminar plantilla ${p.descripcion}`} onClick={() => setView({ kind: 'delete', plantilla: p })}
@@ -389,6 +389,8 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   const [moneda, setMoneda] = useState(base?.moneda || cfg.moneda || 'PEN')
   const [medioPago, setMedioPago] = useState(base?.medioPago ?? '')
   const [esCompromiso, setEsCompromiso] = useState(base?.esCompromiso ?? false)
+  const [tipoGasto, setTipoGasto] = useState<TipoGasto>(base?.tipoGasto ?? 'Variable')
+  const [esRecurrente, setEsRecurrente] = useState(base?.esRecurrente ?? false)
   // ID generado una sola vez al abrir: si la escritura falla y reintentas, el backend no duplica la plantilla.
   const [id] = useState(() => draft?.id ?? plantilla?.id ?? nuevoId())
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -413,7 +415,7 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
     const m = monto.trim()
     if (m && (!AMOUNT.test(m) || Number(m.replace(',', '.')) < 0)) errs.monto = 'Monto no válido (sin negativos, hasta 2 decimales)'
     const data: PlantillaInput = { id, ambito: v.ambito, categoria: v.categoria, subcategoria: v.subcategoria, descripcion: desc,
-      monto: m ? Math.round(Number(m.replace(',', '.')) * 100) / 100 : null, moneda, medioPago, esCompromiso }
+      monto: m ? Math.round(Number(m.replace(',', '.')) * 100) / 100 : null, moneda, medioPago, esCompromiso, tipoGasto, esRecurrente }
     const key = (x: PlantillaInput) => [x.ambito, x.categoria, x.subcategoria, x.descripcion, x.moneda || 'PEN', x.medioPago].map(normName).join('|') + `|${x.monto === null ? '' : toCents(x.monto)}`
     if (!Object.keys(errs).length && items.some(p => p.id !== id && key(p) === key(data))) errs.descripcion = 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.'
     setErrors(errs)
@@ -469,6 +471,16 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
               </button>
             )
           })}
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className="mb-1.5 text-xs font-medium text-muted">Tipo de gasto</p>
+          <Segmented label="Tipo de gasto" value={tipoGasto} onChange={v => setTipoGasto(v as TipoGasto)} options={TIPOS_GASTO.map(x => ({ value: x, label: x }))} />
+        </div>
+        <div className="rounded-xl border border-line p-3">
+          <Switch checked={esRecurrente} onChange={setEsRecurrente} label="Es recurrente" />
+          <p className="mt-1 text-[11px] text-muted">Los gastos que registres con esta plantilla se marcarán como recurrentes.</p>
         </div>
       </div>
       <div className="rounded-xl border border-line p-3">

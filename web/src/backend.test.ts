@@ -384,7 +384,7 @@ describe('backend Apps Script', () => {
     expect(b.post('plantillas').data).toEqual([])
     expect(b.post('diagnose').ok).toBe(true)
     b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-555555555555', mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Internet', descripcion: 'Internet' })
-    expect(b.ss.getSheetByName('PLANTILLAS_MENSUALES')!.rows[0]).toEqual(['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en', 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso'])
+    expect(b.ss.getSheetByName('PLANTILLAS_MENSUALES')!.rows[0]).toEqual(['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en', 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'])
     expect(b.post('plantillas').data).toHaveLength(1)
   })
 
@@ -393,7 +393,7 @@ describe('backend Apps Script', () => {
     const base = { ambito: 'Familia', categoria: 'Servicios', descripcion: '', moneda: 'PEN', medioPago: 'Yape' }
     const mk = (n: number, sub: string, monto: number | '', extra: Record<string, unknown> = {}) =>
       b.post('savePlantilla', { id: id(n), mode: 'create', ...base, subcategoria: sub, descripcion: sub, monto, ...extra })
-    expect(mk(1, 'Luz', 120).data.slice(7)).toEqual([120, 'PEN', 'Yape', 1, false])
+    expect(mk(1, 'Luz', 120).data.slice(7)).toEqual([120, 'PEN', 'Yape', 1, false, 'Variable', false])
     mk(2, 'Agua', 60); mk(3, 'Internet', 100)
     expect(mk(4, 'Gas', '').data[7]).toBe('')                                     // monto vacío permitido
     expect(b.post('savePlantilla', { id: id(5), mode: 'create', ...base, subcategoria: 'Luz', descripcion: 'Luz', monto: -1 }).error.code).toBe('VALIDATION')
@@ -411,16 +411,16 @@ describe('backend Apps Script', () => {
     expect(nombres()).toEqual(['Internet/Yape', 'Luz/Yape', 'Agua/Yape', 'Agua/Plin', 'Gas/Yape'])
     // editar conserva el orden
     b.post('savePlantilla', { id: id(1), mode: 'update', ...base, subcategoria: 'Luz', descripcion: 'Luz', monto: 130 })
-    expect(b.post('plantillas').data[1].slice(7)).toEqual([130, 'PEN', 'Yape', 2, false])
+    expect(b.post('plantillas').data[1].slice(7)).toEqual([130, 'PEN', 'Yape', 2, false, 'Variable', false])
   })
 
   it('plantillas: una hoja de la versión anterior (7 columnas) se amplía sin perder datos', () => {
     const sh = b.ss.getSheetByName('PLANTILLAS_MENSUALES')!
     sh.rows = [['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en'],
       ['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't']]
-    expect(b.post('plantillas').data[0]).toEqual(['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't', '', 'PEN', '', '', false])
+    expect(b.post('plantillas').data[0]).toEqual(['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't', '', 'PEN', '', '', false, 'Variable', false])
     b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-000000000002', mode: 'create', ambito: 'Personal', categoria: 'Suscripciones', subcategoria: 'Spotify', descripcion: 'Spotify', monto: 25, moneda: 'PEN', medioPago: 'Yape' })
-    expect(sh.rows[0]).toHaveLength(12)
+    expect(sh.rows[0]).toHaveLength(14)
     expect(sh.rows[1].slice(0, 5)).toEqual(['pl-11111111-2222-4333-8444-000000000001', 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT'])
     expect(b.post('plantillas').data.map((r: unknown[]) => r[4])).toEqual(['ChatGPT', 'Spotify'])
   })
@@ -444,7 +444,7 @@ describe('backend Apps Script', () => {
       // antes fallaba con "encabezados distintos"
       const r = b.post('savePlantilla', { id: id(20), mode: 'create', ambito: 'Personal', categoria: 'Compras', subcategoria: 'Ropa', descripcion: 'Ropa', monto: 55, moneda: 'PEN', medioPago: 'Plin' })
       expect(r.ok).toBe(true)
-      expect(sh.rows[0]).toEqual([...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso'])
+      expect(sh.rows[0]).toEqual([...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'])
       expect(b.ss.copies.length - v0).toBe(1)                              // respaldo antes de migrar
       expect(sh.rows.slice(1, 12).map(x => x.slice(0, 7))).toEqual(antes) // IDs, clasificación, descripción y fechas intactos
       expect(sh.rows.slice(1, 12).map(x => x[10])).toEqual(orden)         // el orden existente se reutiliza
@@ -480,7 +480,7 @@ describe('backend Apps Script', () => {
       sh.rows[0] = [...H7, 'Monto predeterminado', 'Moneda predeterminada', 'Medio de pago predeterminado', 'Orden']
       expect(b.post('savePlantilla', { id: id(40), mode: 'create', ambito: 'Personal', categoria: 'Compras', subcategoria: 'Ropa', descripcion: 'Ropa', monto: 10 }).ok).toBe(true)
       expect(sh.rows[0][7]).toBe('Monto predeterminado')                 // no se renombra ni se duplica
-      expect(sh.rows[0]).toHaveLength(12)
+      expect(sh.rows[0]).toHaveLength(14)
       const intentar = () => b.post('savePlantilla', { id: id(41), mode: 'create', ambito: 'Personal', categoria: 'Compras', subcategoria: 'Calzado', descripcion: 'Zapatos' })
       for (const romper of [
         () => { sh.rows[0][7] = 'Notas' },                                 // desconocido
@@ -515,7 +515,7 @@ describe('backend Apps Script', () => {
       expect(sh.rows.slice(1).filter(r => r[0] === id(1))).toHaveLength(1)
       sh.rows[0] = [...H7, 'Monto predeterminado']
       b.g.setup()                                                          // antes: "encabezados distintos" con el alias
-      expect(sh.rows[0]).toEqual([...H7, 'Monto predeterminado', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso'])
+      expect(sh.rows[0]).toEqual([...H7, 'Monto predeterminado', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'])
     })
   })
 
@@ -604,9 +604,9 @@ describe('backend Apps Script', () => {
     const caja = (o: Record<string, unknown>) => b.post('saveCaja', { nombre: 'X', presupuesto: 100, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9, ...o })
     const r = caja({ id: 'caja-salud', nombre: 'Caja Salud', descripcion: 'Médico y farmacia' })
     expect(r.ok).toBe(true)
-    expect(sh.rows[0]).toHaveLength(9)
+    expect(sh.rows[0]).toHaveLength(10)
     expect(sh.rows.slice(1, antes.length + 1).map(x => x.slice(0, 7))).toEqual(antes)   // cajas existentes intactas
-    expect(r.data.slice(7)).toEqual([true, 'Médico y farmacia'])
+    expect(r.data.slice(7)).toEqual([true, 'Médico y farmacia', ''])
     // mismo alcance y valor (otra capitalización) → rechazado; desactivada sí se permite
     expect(caja({ id: 'caja-salud2', filtroValor: ' salud ' }).error.message).toMatch(/ya usa Categoría = /)
     expect(caja({ id: 'caja-salud2', filtroValor: 'salud', activo: false }).ok).toBe(true)
@@ -634,8 +634,36 @@ describe('backend Apps Script', () => {
     expect(JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)).toBe(g0)
     expect(JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)).toBe(p0)
     const d = b.post('data', { fresh: true }).data
-    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-salud2').slice(7)).toEqual([false, ''])
+    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-salud2').slice(7)).toEqual([false, '', ''])
     expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[7]).toBe(true)  // fila antigua sin Activo = activa
+  })
+
+  it('v1.10 icono de caja: se guarda y se lee; vacío = automático; clave inválida se rechaza; cajas existentes intactas', () => {
+    const caja = (o: Record<string, unknown>) => b.post('saveCaja', { nombre: 'Viaje a Ica', presupuesto: 1000, filtroCampo: 'Categoría', filtroValor: 'Viajes', color: '#0B7285', orden: 9, ...o })
+    const antes = JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows.slice(1))
+    expect(caja({ id: 'caja-ica', icono: 'plane' }).data[9]).toBe('plane')
+    expect(caja({ id: 'caja-ica' }).data[9]).toBe('')                      // sin icono = automático (el de su alcance)
+    expect(caja({ id: 'caja-ica', icono: 'Plane!' }).error.code).toBe('VALIDATION')
+    expect(caja({ id: 'caja-ica', icono: 'x'.repeat(31) }).error.code).toBe('VALIDATION')
+    caja({ id: 'caja-ica', icono: 'tree-palm' })
+    const d = b.post('data', { fresh: true }).data
+    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-ica')[9]).toBe('tree-palm')
+    expect(JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows.slice(1, 1 + JSON.parse(antes).length))).toBe(antes)
+    expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[9]).toBe('')   // cajas anteriores: automático
+  })
+
+  it('v1.10 plantillas: tipo de gasto y recurrente se guardan, se conservan al editar sin enviarlos y se validan', () => {
+    const id = 'pl-11111111-2222-4333-8444-0000000000a1'
+    const base = { id, ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', moneda: 'PEN', medioPago: 'Yape' }
+    const r = b.post('savePlantilla', { ...base, mode: 'create', monto: 100, tipoGasto: 'Fijo', esRecurrente: true })
+    expect(r.data.slice(11)).toEqual([false, 'Fijo', true])
+    // editar sin mandar tipo ni recurrente los conserva
+    expect(b.post('savePlantilla', { ...base, mode: 'update', monto: 110 }).data.slice(11)).toEqual([false, 'Fijo', true])
+    // y se pueden cambiar
+    expect(b.post('savePlantilla', { ...base, mode: 'update', monto: 110, tipoGasto: 'Extraordinario', esRecurrente: false }).data.slice(11)).toEqual([false, 'Extraordinario', false])
+    expect(b.post('savePlantilla', { ...base, mode: 'update', tipoGasto: 'Raro' }).error.code).toBe('VALIDATION')
+    expect(b.post('savePlantilla', { ...base, mode: 'update', esRecurrente: 'si' }).error.code).toBe('VALIDATION')
+    expect(b.post('plantillas').data.find((x: unknown[]) => x[0] === id).slice(11)).toEqual([false, 'Extraordinario', false])
   })
 
   describe('v1.8 fuentes de dinero', () => {
