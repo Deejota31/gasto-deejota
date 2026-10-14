@@ -5,7 +5,7 @@ import type { CatalogoItem } from '../lib/types'
 import { ambitoLook, categoriaLook, COLORS, ICONS, subcategoriaLook } from '../lib/visual'
 import { IconPicker } from '../components/IconPicker'
 import { ColorPicker } from '../components/Apariencia'
-import { MediosPago } from '../components/MediosPago'
+import { MediosPago, type MedioEdicion } from '../components/MediosPago'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
@@ -46,6 +46,7 @@ export default function Categorias({ store }: { store: AppStore }) {
   const [q, setQ] = useState('')
   const [target, setTarget] = useState<Target | null>(null)
   const [menu, setMenu] = useState(false)
+  const [medioEd, setMedioEd] = useState<MedioEdicion>(null)
   const menuRef = useDismiss(menu, () => setMenu(false))
   const term = q.trim().toLowerCase()
   const current = tree.find(a => a.name === sel) ?? tree[0]
@@ -85,7 +86,7 @@ export default function Categorias({ store }: { store: AppStore }) {
                   <button key={nivel} role="menuitem" type="button" onClick={() => { setMenu(false); setTarget({ mode: 'create', nivel, ambito: current?.name }) }}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Icon className="size-4 text-muted" />{label}</button>
                 ))}
-                <button role="menuitem" type="button" onClick={() => { setMenu(false); setQ(''); setTimeout(() => { const el = document.getElementById('medio-nuevo'); el?.scrollIntoView?.({ block: 'center' }); el?.focus() }, 0) }}
+                <button role="menuitem" type="button" onClick={() => { setMenu(false); setQ(''); setMedioEd('nuevo') }}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Wallet className="size-4 text-muted" />Nuevo medio de pago</button>
               </div>
             )}
@@ -162,7 +163,7 @@ export default function Categorias({ store }: { store: AppStore }) {
             <span className="grid size-9 place-items-center rounded-xl bg-turquesa/10 text-turquesa"><Wallet className="size-4" /></span>
             <div><h2 className="text-sm font-semibold">Medios de pago</h2><p className="text-xs text-muted">Con qué pagas tus gastos. Cada uno se ve igual en toda la web.</p></div>
           </div>
-          <MediosPago store={store} />
+          <MediosPago store={store} editando={medioEd} setEditando={setMedioEd} />
         </section>
       )}
 

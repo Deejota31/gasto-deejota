@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.11.0';
+var APP_VERSION = '1.12.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -13,7 +13,7 @@ var SHEETS = {
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
     'Creado en', 'Actualizado en'],
   CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'],
-  MEDIOS_PAGO: ['Nombre', 'Activo'],
+  MEDIOS_PAGO: ['Nombre', 'Activo', 'Icono', 'Color'],
   // Activo y Descripción (v1.7): cajas personalizadas. Una caja inactiva no reserva dinero ni toma gastos.
   // Icono (v1.10): vacío = automático (el de su alcance); si lo eliges, manda junto con el Color.
   CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción', 'Icono'],
@@ -346,6 +346,15 @@ var CATALOGO_INICIAL = {
 
 // Orden de presentación de los medios de pago (es el orden de las filas en MEDIOS_PAGO).
 var MEDIOS_INICIALES = ['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo', 'Otros'];
+// Icono y color predeterminados de los medios conocidos (los mismos que usa la web). Otros medios nuevos los eligen al crearlos.
+var MEDIOS_LOOK = {
+  yape: ['smartphone', '#7B3FA0'], plin: ['smartphone', '#0B9EA8'], sodexo: ['ticket', '#D2463C'],
+  transferencia: ['arrow-left-right', '#3B6FD9'], efectivo: ['banknote', '#22A35A'], otros: ['wallet', '#64748B']
+};
+function medioLookDef_(nombre) {
+  var k = norm_(nombre);
+  return MEDIOS_LOOK[k] || (k.indexOf('tarjeta') >= 0 ? ['credit-card', '#475569'] : ['wallet', '#64748B']);
+}
 
 var CAJAS_INICIALES = [
   ['general', 'Caja general', 0, 'Todos', '', '#1e3a8a', 1],
@@ -528,7 +537,7 @@ function seedMedios_(ss) {
   var existing = {};
   readRows_(ss, 'MEDIOS_PAGO').forEach(function (r) { existing[str_(r[0]).toLowerCase()] = true; });
   appendRows_(sh, MEDIOS_INICIALES.filter(function (m) { return !existing[m.toLowerCase()]; })
-    .map(function (m) { return [m, true]; }));
+    .map(function (m) { return [m, true, medioLookDef_(m)[0], medioLookDef_(m)[1]]; }));
 }
 
 function seedIfEmpty_(ss, name, rows) {
@@ -636,7 +645,7 @@ function getData_(fresh) {
     sheetUrl: ss.getUrl(),
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
     catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5]), str_(r[6]) === '' ? '' : num_(r[6])]; }),
-    medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE']; }),
+    medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE', autoVacio_(r[2]), /^#[0-9a-fA-F]{6}$/.test(str_(r[3])) ? str_(r[3]) : '']; }),
     cajas: readRows_(ss, 'CAJAS').map(function (r) { return [str_(r[0]), str_(r[1]), num_(r[2]), str_(r[3]), str_(r[3]) === 'Todos' ? '' : str_(r[4]), str_(r[5]), num_(r[6]), str_(r[7]) === '' ? true : bool_(r[7]), str_(r[8]).replace(/^'/, ''), autoVacio_(r[9])]; }),
     presupuestos: readRows_(ss, 'PRESUPUESTOS').map(function (r) { return [periodo_(r[0], tz), str_(r[1]), num_(r[2])]; }),
     config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {}),
@@ -883,10 +892,19 @@ function saveMedio_(p) {
   var nombre = text_(p.nombre, 'Medio de pago', 40, true);
   if (norm_(nombre) === 'libre') throw appError_('VALIDATION', '“Libre” está reservado para las fuentes sin medio de pago. Usa otro nombre.');
   var activo = p.activo !== false;
-  var sh = openSpreadsheet_(false).getSheetByName('MEDIOS_PAGO');
+  var ss = openSpreadsheet_(false);
+  var sh = ensureSheet_(ss, 'MEDIOS_PAGO', SHEETS.MEDIOS_PAGO); // hoja anterior (2 columnas): agrega Icono y Color
   var row = findRowByValue_(sh, 1, nombre);
-  if (row) sh.getRange(row, 2).setValue(activo); else appendRows_(sh, [[nombre, activo]]);
-  return [nombre, activo];
+  var actual = row ? sh.getRange(row, 1, 1, 4).getValues()[0] : null;
+  var ico = p.icono === undefined ? (actual ? str_(actual[2]) : '') : str_(p.icono).replace(/^'/, '');
+  if (norm_(ico) === 'auto') ico = '';
+  if (ico && !/^[a-z0-9-]{1,30}$/.test(ico)) throw appError_('VALIDATION', 'Icono inválido.');
+  var col = p.color === undefined ? (actual ? str_(actual[3]) : '') : str_(p.color);
+  if (col && !/^#[0-9a-fA-F]{6}$/.test(col)) throw appError_('VALIDATION', 'Color inválido.');
+  var def = medioLookDef_(nombre);
+  var icoSheet = ico || def[0], colSheet = col || def[1];   // la hoja nunca queda con vacíos
+  if (row) sh.getRange(row, 2, 1, 3).setValues([[activo, icoSheet, colSheet]]); else appendRows_(sh, [[nombre, activo, icoSheet, colSheet]]);
+  return [nombre, activo, icoSheet, colSheet];
 }
 
 var CAJA_CAMPOS = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'];
@@ -1017,7 +1035,7 @@ function generarDatosPrueba() {
     var medSh = ss.getSheetByName('MEDIOS_PAGO');
     var medEx = {};
     readRows_(ss, 'MEDIOS_PAGO').forEach(function (r) { medEx[norm_(r[0])] = true; });
-    var nuevosMed = [['Tarjeta de crédito', true], ['BIM', false]].filter(function (m) { return !medEx[norm_(m[0])]; });
+    var nuevosMed = [['Tarjeta de crédito', true, 'credit-card', '#475569'], ['BIM', false, 'wallet', '#64748B']].filter(function (m) { return !medEx[norm_(m[0])]; });
     appendRows_(medSh, nuevosMed);
     reg.medios = nuevosMed.map(function (m) { return m[0]; });
     // ---------- Compromisos de prueba (plantillas marcadas como compromiso) ----------
@@ -1435,7 +1453,7 @@ function migrarGeneralAFuente_() {
 // Escribe por bloques (una escritura por hoja) y es idempotente: repetirla no cambia nada.
 function completarVacios_(p) {
   var ss = openSpreadsheet_(false);
-  var res = { cajas: 0, fuentes: 0, catalogo: 0, config: 0 };
+  var res = { cajas: 0, fuentes: 0, catalogo: 0, config: 0, medios: 0 };
   var vacio = function (v) { return str_(v) === ''; };
 
   var cs = cajasSheet_();
@@ -1501,6 +1519,23 @@ function completarVacios_(p) {
       return o;
     });
     if (res.catalogo) gs.getRange(2, 4, ng, 3).setValues(bg);
+  }
+
+  var ms = ensureSheet_(ss, 'MEDIOS_PAGO', SHEETS.MEDIOS_PAGO);
+  var nm = Math.max(lastDataRow_(ms) - 1, 0);
+  if (nm) {
+    var mr = ms.getRange(2, 1, nm, 4).getValues();
+    var bm = mr.map(function (r) {
+      var o = [r[1], r[2], r[3]], antes = JSON.stringify(o);
+      if (vacio(r[0])) return o;
+      var d = medioLookDef_(r[0]);
+      if (vacio(o[0])) o[0] = true;
+      if (vacio(o[1]) || norm_(o[1]) === 'auto') o[1] = d[0];
+      if (!/^#[0-9a-fA-F]{6}$/.test(str_(o[2]))) o[2] = d[1];
+      if (JSON.stringify(o) !== antes) res.medios++;
+      return o;
+    });
+    if (res.medios) ms.getRange(2, 2, nm, 3).setValues(bm);
   }
 
   var cfg = readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = true; return acc; }, {});

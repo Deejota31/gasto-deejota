@@ -10,7 +10,6 @@ import { fuenteLook, medioLook } from '../lib/visual'
 import type { AppStore } from '../lib/store'
 import type { Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch, useDismiss } from './ui'
-import { AparienciaCampos, useApariencia } from './Apariencia'
 
 /**
  * Fuentes de dinero (v1.8): General, Sodexo, Extra 1… Cada fuente activa suma su importe del mes al presupuesto
@@ -328,8 +327,7 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
   const otras = fuentes.filter(f => f.id !== id)
   // Automático: el del medio de pago asociado (Yape se ve como Yape) y, sin medio (fuente libre), el de la fuente General.
   const auto = medio ? medioLook(medio) : fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }, otras)
-  const ap = useApariencia({ icono: fuente?.icono ?? '', color: fuente?.color || auto.color }, auto)
-  const { Icon, color } = ap.look
+  const { Icon, color } = auto // el aspecto es siempre automático (ya no se elige aquí)
   const mediosOpc = useMemo(() => [...new Set([...(medio ? [medio] : []), ...medios])], [medio, medios])
 
   function save() {
@@ -349,7 +347,7 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
     const n = Math.round(Number(m) * 100) / 100
     const cambiaImporteMes = editar && !!mes && !esMesBase && actualMes !== null && n !== actualMes.monto
     const orden = fuente?.orden ?? Math.max(0, ...fuentes.map(f => f.orden)) + 1
-    const base = { id, nombre: nombre.trim(), monto: editar && !esMesBase ? fuente!.monto : n, moneda, color: ap.color, icono: ap.icono, activo, orden, recurrencia, mes: mesAplic, medioPago: medio }
+    const base = { id, nombre: nombre.trim(), monto: editar && !esMesBase ? fuente!.monto : n, moneda, color, icono: '', activo, orden, recurrencia, mes: mesAplic, medioPago: medio }
     const cambiaConfig = !editar || JSON.stringify({ ...fuente, creadoEn: undefined, actualizadoEn: undefined }) !== JSON.stringify({ ...fuente, ...base, creadoEn: undefined, actualizadoEn: undefined })
     const msgMes = cambiaImporteMes ? (modo === 'desde' ? ` Importe desde ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.` : ` Importe de ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.`) : ''
     const ok = store.track(`fuente:${id}`, editar
@@ -416,7 +414,6 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
             {mediosOpc.map(x => <option key={x} value={x}>{x}</option>)}
           </SelectField>
         </Field>
-        <AparienciaCampos ap={ap} nombre={nombre} contexto={['dinero', medio]} autoTexto={medio ? `como ${medio}` : 'como General'} />
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Fuente activa" />
           <p className="mt-1 text-[11px] text-muted">Inactiva: queda guardada pero no suma al presupuesto.</p>

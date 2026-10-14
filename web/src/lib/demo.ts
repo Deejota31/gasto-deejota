@@ -195,7 +195,10 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       if (!catalogo) throw fail('NOT_FOUND', 'La opción ya no existe en el catálogo.')
       return { catalogo, gastos }
     },
-    saveMedio: p => upsert(db.medios, 1, [p.nombre, p.activo !== false]),
+    saveMedio: p => {
+      const prev = db.medios.find(r => String(r[0]).toLowerCase() === String(p.nombre).toLowerCase())
+      return upsert(db.medios, 1, [p.nombre, p.activo !== false, p.icono === undefined ? prev?.[2] ?? '' : p.icono, p.color === undefined ? prev?.[3] ?? '' : p.color])
+    },
     saveCaja: p => {
       const norm = (v: unknown) => normName(String(v ?? ''))
       if (p.filtroCampo !== 'Todos' && p.activo !== false && db.cajas.some(r => r[0] !== p.id && r[3] === p.filtroCampo && norm(r[4]) === norm(p.filtroValor) && r[7] !== false)) {

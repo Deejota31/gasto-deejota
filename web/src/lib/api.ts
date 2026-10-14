@@ -107,6 +107,12 @@ export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
 
 // [ámbito, categoría, subcategoría, activo, icono?, color?, orden?] — un backend 1.0 envía solo las 4 primeras.
 const catRow = z.tuple([str, str, str, z.boolean()]).rest(z.union([str, z.number()]))
+const toMedio = ([nombre, activo, icono, color]: unknown[]): Medio => ({
+  nombre: String(nombre), activo: activo === true,
+  icono: typeof icono === 'string' && /^[a-z0-9-]{1,30}$/.test(icono) ? icono : '',
+  color: typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color) ? color : '',
+})
+
 const toCatalogo = ([ambito, categoria, subcategoria, activo, icono = '', color = '', orden]: z.infer<typeof catRow>): CatalogoItem => ({
   ambito, categoria, subcategoria, activo, icono: String(icono), color: String(color),
   ...(orden !== '' && orden !== undefined && Number.isFinite(Number(orden)) ? { orden: Number(orden) } : {}),
@@ -151,7 +157,7 @@ const dataSchema = z.object({
   sheetUrl: str,
   gastos: z.array(gastoRow),
   catalogo: z.array(catRow),
-  medios: z.array(z.tuple([str, z.boolean()])),
+  medios: z.array(z.tuple([str, z.boolean()]).rest(z.unknown())),
   cajas: z.array(cajaRow),
   presupuestos: z.array(z.tuple([str, str, z.number()])),
   config: z.record(str, str),
@@ -222,7 +228,7 @@ export function createApi(t: Transport) {
           version: d.version, sheetUrl: d.sheetUrl, config: d.config,
           gastos: marcarIds(d.gastos.map(rowToGasto)),
           catalogo: d.catalogo.map(toCatalogo),
-          medios: d.medios.map(([nombre, activo]): Medio => ({ nombre, activo })),
+          medios: d.medios.map((r): Medio => toMedio(r)),
           cajas: d.cajas.map(toCaja),
           presupuestos: d.presupuestos.map(([periodo, cajaId, monto]): Presupuesto => ({ periodo, cajaId, monto })),
           ordenGastos: d.ordenGastos ?? [],
@@ -248,8 +254,7 @@ export function createApi(t: Transport) {
       return parse(z.object({ catalogo: z.number(), gastos: z.number() }), await t('renameCatalogo', p))
     },
     async saveMedio(m: Medio): Promise<Medio> {
-      const [nombre, activo] = parse(z.tuple([str, z.boolean()]), await t('saveMedio', m))
-      return { nombre, activo }
+      return toMedio(parse(z.tuple([str, z.boolean()]).rest(z.unknown()), await t('saveMedio', m)))
     },
     async saveCaja(c: Caja): Promise<Caja> {
       return toCaja(parse(cajaRow, await t('saveCaja', c)))
