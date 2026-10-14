@@ -100,6 +100,56 @@ describe('fuentes de dinero: presupuesto consolidado', () => {
     expect(c.fuentes.lista.find(x => x.principal)!.fuente.id).toBe('general')
   })
 
+  it('cascada: lo que excede a General pasa a la siguiente fuente libre; nadie queda en negativo mientras el consolidado no lo esté', () => {
+    // Caso real: General 3109.75 + Viaje a Ica 1000. Se gasta más que General por Yape/Plin.
+    const general = fu('general', 3109.75, { orden: 1 })
+    const ica = fu('ica', 1000, { orden: 2, recurrencia: 'unica', mes: '2026-10' })
+    const gastos = [g({ monto: 3000, fecha: '2026-10-02' }), g({ monto: 100, medioPago: 'Plin', fecha: '2026-10-05' }), g({ monto: 63.87, fecha: '2026-10-14' })]
+    const c = aggregate(gastos, oct, ctx([general, ica])).cajas
+    const por = Object.fromEntries(c.fuentes.lista.map(x => [x.fuente.id, [x.gastado, x.disponible]]))
+    expect(por.general).toEqual([310975, 0])
+    expect(por.ica).toEqual([5412, 94588])
+    expect(c.fuentes.lista.reduce((s, x) => s + x.disponible, 0)).toBe(c.disponible)
+    expect(c.fuentes.lista.reduce((s, x) => s + x.gastado, 0)).toBe(c.gastadoPeriodo)
+  })
+
+  it('cascada: un gasto que cruza el tope se reparte entre fuentes y cuenta una sola vez como movimiento', () => {
+    const a = fu('a', 100, { orden: 1 }), b = fu('b', 100, { orden: 2 })
+    const c = aggregate([g({ monto: 80, fecha: '2026-10-01' }), g({ monto: 50, fecha: '2026-10-02' })], oct, ctx([a, b])).cajas
+    const por = Object.fromEntries(c.fuentes.lista.map(x => [x.fuente.id, [x.gastado, x.count]]))
+    expect(por).toEqual({ a: [10000, 2], b: [3000, 0] })
+    expect(c.fuentes.lista.reduce((s, x) => s + x.count, 0)).toBe(2)
+  })
+
+  it('cascada: el exceso de Sodexo también pasa a las libres; solo hay negativo si el consolidado es negativo', () => {
+    const c1 = aggregate([g({ monto: 300, medioPago: 'Sodexo' })], oct, ctx([GENERAL, SODEXO])).cajas
+    const por = Object.fromEntries(c1.fuentes.lista.map(x => [x.fuente.id, x.disponible]))
+    expect(por).toEqual({ general: 350000 - 2000, sodexo: 0 })
+    // consolidado negativo: el sobrante queda en la última fuente libre
+    const c2 = aggregate([g({ monto: 5000 })], oct, ctx([GENERAL, EXTRA1])).cajas
+    expect(c2.disponible).toBe(450000 - 500000)
+    expect(c2.fuentes.lista.map(x => x.disponible)).toEqual([0, 100000 - 150000])
+  })
+
+  it('cascada: sin fuentes libres el sobrante de Sodexo queda en su propia fuente; invariantes con 200 escenarios al azar', () => {
+    const c = aggregate([g({ monto: 400, medioPago: 'Sodexo' })], oct, ctx([SODEXO])).cajas
+    expect(c.fuentes.lista[0].disponible).toBe(28000 - 40000)
+    let seed = 11
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    for (let k = 0; k < 200; k++) {
+      const fs = Array.from({ length: 1 + Math.floor(rnd() * 5) }, (_, i) => fu(`f${i}`, Math.round(rnd() * 100000) / 100, { orden: i, medioPago: i > 0 && rnd() > 0.6 ? ['Sodexo', 'Plin'][i % 2] : '', activo: rnd() > 0.15 }))
+      const gastos = Array.from({ length: Math.floor(rnd() * 30) }, () => g({ monto: Math.round(rnd() * 30000) / 100, medioPago: ['Yape', 'Sodexo', 'Plin'][Math.floor(rnd() * 3)], fecha: `2026-10-${String(1 + Math.floor(rnd() * 28)).padStart(2, '0')}` }))
+      const r = aggregate(gastos, oct, ctx(fs)).cajas.fuentes
+      // todo lo gastado queda atribuido (a una fuente, a una inactiva o sin fuente)
+      expect(r.lista.reduce((s, x) => s + x.gastado, 0) + r.gastadoSinFuente).toBe(gastos.reduce((s, x) => s + Math.round(x.monto * 100), 0))
+      // una fuente libre solo queda en negativo cuando el conjunto de fuentes libres ya no alcanza (el saldo de Sodexo solo cubre pagos con Sodexo)
+      const libres = r.lista.filter(x => x.fuente.activo && !x.fuente.medioPago)
+      const cupoLibres = libres.reduce((s, x) => s + x.aporta, 0), gastoLibres = libres.reduce((s, x) => s + x.gastado, 0)
+      if (gastoLibres <= cupoLibres) for (const x of libres) expect(x.disponible).toBeGreaterThanOrEqual(0)
+      else expect(libres.filter(x => x.disponible < 0)).toHaveLength(1)
+    }
+  })
+
   it('Sodexo inactiva con gastos: no aporta, sus gastos siguen descontando y se informan aparte (no pasan a General)', () => {
     const gastos = [g({ monto: 100, medioPago: 'Sodexo' }), g({ monto: 60 })]
     const c = aggregate(gastos, oct, ctx([GENERAL, { ...SODEXO, activo: false }])).cajas

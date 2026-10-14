@@ -71,7 +71,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             accion={a.cajas.origen !== 'fuentes' && a.cajas.general
               ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
               : undefined} />
-          <ResumenCajas c={a.cajas} money={money} onIrCajas={onIrCajas} />
+          <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : 'Sin definir'}

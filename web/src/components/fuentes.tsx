@@ -1,15 +1,16 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Banknote, BriefcaseBusiness, CalendarDays, CalendarRange, CircleDollarSign, Coins, CreditCard, Gift, HandCoins,
-  Info, LayoutGrid, List, MoreHorizontal, Pencil, PiggyBank, Plus, Receipt, RotateCcw, Search, Sparkles, Star, Utensils, Wallet,
+  AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
+  Info, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Search, Star,
 } from 'lucide-react'
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
-import { COLORS } from '../lib/visual'
+import { COLORS, fuenteLook, medioLook } from '../lib/visual'
 import type { AppStore } from '../lib/store'
 import type { Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch, useDismiss } from './ui'
+import { AparienciaCampos, useApariencia } from './Apariencia'
 
 /**
  * Fuentes de dinero (v1.8): General, Sodexo, Extra 1… Cada fuente activa suma su importe del mes al presupuesto
@@ -17,19 +18,9 @@ import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, Selec
  * y edita, no calcula por su cuenta.
  */
 
-const COLORES = ['#1E3A8A', ...COLORS]
 const TONO = {
   ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
-}
-const ICONOS: [RegExp, typeof Wallet][] = [
-  [/general|sueldo|salario|planilla/, Banknote], [/sodexo|aliment|vale/, Utensils], [/extra|adicional/, Sparkles], [/bono|bonific|aguinaldo|gratific|premio/, Gift],
-  [/reembolso|devoluc/, RotateCcw], [/freelance|independiente|trabajo|comisi/, BriefcaseBusiness], [/ahorro|cts|interes|dividend/, PiggyBank],
-  [/regalo/, HandCoins], [/venta|alquiler/, Receipt], [/tarjeta/, CreditCard],
-]
-export const fuenteIcon = (f: Pick<Fuente, 'nombre' | 'medioPago'>) => {
-  const k = `${f.nombre} ${f.medioPago}`.toLowerCase()
-  return ICONOS.find(([re]) => re.test(k))?.[1] ?? Coins
 }
 const MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 const recurrenciaTxt = (f: Fuente) => f.recurrencia === 'unica' ? `Solo ${f.mes ? monthLabel(f.mes, true) : '—'}` : f.mes ? `Mensual desde ${monthLabel(f.mes, true)}` : 'Todos los meses'
@@ -211,8 +202,7 @@ function Badges({ r }: { r: FuenteResumen }) {
 
 function TarjetaFuente({ r, money, mes, busy, onToggle, acciones }: { r: FuenteResumen; money: (n: number) => string; mes: string | null; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
   const f = r.fuente
-  const Icon = fuenteIcon(f)
-  const color = f.color || '#1E3A8A'
+  const { Icon, color } = fuenteLook(f)
   const pct = r.pct ?? 0
   return (
     <li className={`relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${f.activo ? '' : 'opacity-75'}`} data-testid="fuente">
@@ -254,8 +244,7 @@ function TarjetaFuente({ r, money, mes, busy, onToggle, acciones }: { r: FuenteR
 
 function FilaFuente({ r, money, busy, onToggle, acciones }: { r: FuenteResumen; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
   const f = r.fuente
-  const Icon = fuenteIcon(f)
-  const color = f.color || '#1E3A8A'
+  const { Icon, color } = fuenteLook(f)
   return (
     <li data-testid="fuente" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${f.activo ? '' : 'opacity-70'}`}>
       <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
@@ -323,7 +312,6 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
   const [id] = useState(() => fuente?.id ?? `f-${crypto.randomUUID().slice(0, 12)}`)
   const mesRef = mes ?? hoyMes
   const [nombre, setNombre] = useState(fuente?.nombre ?? '')
-  const [color, setColor] = useState(fuente?.color || COLORES[(fuentes.length + 1) % COLORES.length])
   const [moneda, setMoneda] = useState(fuente?.moneda ?? monedas[0] ?? 'PEN')
   const [recurrencia, setRecurrencia] = useState<Recurrencia>(fuente?.recurrencia ?? 'mensual')
   const [mesAplic, setMesAplic] = useState(fuente ? fuente.mes : mesRef)
@@ -337,7 +325,11 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
   const tieneSolo = !!fuente && !!mes && meses.some(m => m.fuenteId === fuente.id && m.mes === mes && m.modo === 'solo')
   const esMesBase = !!fuente && fuente.recurrencia === 'unica' && recurrencia === 'unica' && mes === mesAplic
   const otras = fuentes.filter(f => f.id !== id)
-  const Icon = fuenteIcon({ nombre: nombre || 'Fuente', medioPago: medio })
+  // Automático: el del medio de pago asociado y, sin medio, uno según el nombre con un color que va rotando.
+  const colorBase = fuente?.color || COLORS[(fuentes.length + 1) % COLORS.length]
+  const auto = medio ? medioLook(medio) : { ...fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }), color: colorBase }
+  const ap = useApariencia({ icono: fuente?.icono ?? '', color: colorBase }, auto)
+  const { Icon, color } = ap.look
   const mediosOpc = useMemo(() => [...new Set([...(medio ? [medio] : []), ...medios])], [medio, medios])
 
   function save() {
@@ -357,7 +349,7 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
     const n = Math.round(Number(m) * 100) / 100
     const cambiaImporteMes = editar && !!mes && !esMesBase && actualMes !== null && n !== actualMes.monto
     const orden = fuente?.orden ?? Math.max(0, ...fuentes.map(f => f.orden)) + 1
-    const base = { id, nombre: nombre.trim(), monto: editar && !esMesBase ? fuente!.monto : n, moneda, color, icono: fuente?.icono ?? '', activo, orden, recurrencia, mes: mesAplic, medioPago: medio }
+    const base = { id, nombre: nombre.trim(), monto: editar && !esMesBase ? fuente!.monto : n, moneda, color: ap.color, icono: ap.icono, activo, orden, recurrencia, mes: mesAplic, medioPago: medio }
     const cambiaConfig = !editar || JSON.stringify({ ...fuente, creadoEn: undefined, actualizadoEn: undefined }) !== JSON.stringify({ ...fuente, ...base, creadoEn: undefined, actualizadoEn: undefined })
     const msgMes = cambiaImporteMes ? (modo === 'desde' ? ` Importe desde ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.` : ` Importe de ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.`) : ''
     const ok = store.track(`fuente:${id}`, editar
@@ -418,21 +410,13 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
             {recurrencia === 'mensual' && mesAplic && <button type="button" className="shrink-0 text-xs text-muted underline" onClick={() => setMesAplic('')}>Todos</button>}
           </span>
         </Field>
-        <div>
-          <p className="mb-1.5 text-xs font-medium text-muted">Color</p>
-          <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Color de la fuente">
-            {COLORES.map(c => (
-              <button key={c} type="button" role="radio" aria-checked={color.toLowerCase() === c.toLowerCase()} aria-label={`Color ${c}`} onClick={() => setColor(c)}
-                className="size-8 rounded-full transition hover:scale-110" style={{ background: c, boxShadow: color.toLowerCase() === c.toLowerCase() ? `0 0 0 2px var(--card), 0 0 0 4px ${c}` : undefined }} />
-            ))}
-          </div>
-        </div>
         <Field label="Medio de pago asociado (opcional)" error={errors.medio} htmlFor="fuente-medio" hint="Ej. Sodexo: los gastos pagados con ese medio se atribuyen a esta fuente. No cambia ningún gasto.">
           <SelectField id="fuente-medio" value={medio} onChange={setMedio}>
             <option value="">Ninguno (fuente libre)</option>
             {mediosOpc.map(x => <option key={x} value={x}>{x}</option>)}
           </SelectField>
         </Field>
+        <AparienciaCampos ap={ap} nombre={nombre} contexto={['dinero', medio]} autoTexto={medio ? `como ${medio}` : 'según el nombre'} />
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Fuente activa" />
           <p className="mt-1 text-[11px] text-muted">Inactiva: queda guardada pero no suma al presupuesto.</p>

@@ -40,6 +40,9 @@ export interface Plantilla {
   orden: number | null
   /** Compromiso mensual (Luz, Internet…): lo decides tú. Solo estas cuentan en "Compromisos". */
   esCompromiso: boolean
+  /** Tipo de gasto y recurrencia con que se precargan los gastos creados desde esta plantilla. */
+  tipoGasto: TipoGasto
+  esRecurrente: boolean
 }
 
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
@@ -56,6 +59,8 @@ export interface Caja {
   /** false = inactiva: no reserva dinero ni toma gastos (queda guardada para reactivarla). Sin valor = activa. */
   activo?: boolean
   descripcion?: string
+  /** Icono elegido (clave de iconos.ts). Vacío = automático: el de su alcance (medio de pago, ámbito, categoría…). */
+  icono?: string
 }
 export interface Presupuesto { periodo: string; cajaId: string; monto: number }
 
