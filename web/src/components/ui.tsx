@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, CalendarDays, ChevronDown, Info, Loader2, X } from 'lucide-react'
 import { formatDate } from '../lib/dates'
 import { useModalLayer } from '../lib/toast'
@@ -18,26 +19,47 @@ export function useDismiss(open: boolean, close: () => void) {
   return ref
 }
 
-/** Icono ⓘ con explicación. Se abre con hover, foco o toque (móvil). */
+/** Icono ⓘ con explicación. Se abre con hover, foco o toque (móvil). El globo se pinta en un portal
+ *  (position: fixed) para que ningún contenedor con overflow o tarjeta vecina lo tape. */
 export function InfoTooltip({ title, children, align = 'right' }: { title: string; children: ReactNode; align?: 'right' | 'left' }) {
   const [open, setOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const id = useId()
+  const btn = useRef<HTMLButtonElement>(null)
+  const tip = useRef<HTMLDivElement>(null)
   const ref = useDismiss(open, () => { setOpen(false); setPinned(false) })
+  useLayoutEffect(() => {
+    if (!open || !btn.current) return
+    const place = () => {
+      const r = btn.current!.getBoundingClientRect()
+      const w = Math.min(288, window.innerWidth * 0.8)
+      let left = align === 'right' ? r.right - w : r.left
+      left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
+      const h = tip.current?.offsetHeight ?? 0
+      // Abajo por defecto; si no cabe y arriba hay más espacio, se abre hacia arriba.
+      const abajo = r.bottom + 6 + h <= window.innerHeight - 8 || r.top < window.innerHeight - r.bottom
+      setPos({ top: abajo ? r.bottom + 6 : Math.max(8, r.top - 6 - h), left })
+    }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place) }
+  }, [open, align])
   return (
     <div ref={ref} className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => !pinned && setOpen(false)}>
-      <button type="button" aria-label={`Información: ${title}`} aria-expanded={open} aria-describedby={open ? id : undefined}
+      <button ref={btn} type="button" aria-label={`Información: ${title}`} aria-expanded={open} aria-describedby={open ? id : undefined}
         onClick={() => { setPinned(!pinned); setOpen(!pinned) }} onFocus={() => setOpen(true)} onBlur={() => !pinned && setOpen(false)}
-        className="grid size-6 place-items-center rounded-full text-muted transition hover:bg-bg hover:text-navy focus-visible:outline-2 focus-visible:outline-navy">
+        className="grid size-6 cursor-help place-items-center rounded-full text-muted transition hover:bg-bg hover:text-navy focus-visible:outline-2 focus-visible:outline-navy">
         <Info className="size-4" />
       </button>
-      {open && (
-        <div id={id} role="tooltip"
-          className={`absolute top-7 z-40 w-72 max-w-[80vw] rounded-xl border border-line bg-card p-3 text-left text-xs leading-relaxed font-normal text-ink shadow-lg ${align === 'right' ? 'right-0' : 'left-0'}`}>
+      {open && createPortal(
+        <div ref={tip} id={id} role="tooltip" style={{ top: pos?.top ?? -9999, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+          onMouseEnter={() => setOpen(true)} onMouseLeave={() => !pinned && setOpen(false)}
+          className="fixed z-[200] w-72 max-w-[80vw] rounded-xl border border-line bg-card p-3 text-left text-xs leading-relaxed font-normal text-ink shadow-lg">
           <p className="mb-1 text-sm font-semibold">{title}</p>
           <div className="space-y-1.5 text-muted">{children}</div>
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   )
 }

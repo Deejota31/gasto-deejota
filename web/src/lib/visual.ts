@@ -145,10 +145,25 @@ export function subcategoriaLook(sub: string, categoria: string, catalogo: Catal
   return { Icon: (key && ICONS[key]) || cat.Icon, color: cat.color }
 }
 
-export function medioLook(name: string): Look {
+/** Icono/color elegidos por el usuario para cada medio (vienen de la hoja MEDIOS_PAGO); mandan sobre los predeterminados. */
+const mediosElegidos = new Map<string, { icono: string; color: string }>()
+export function registrarMedios(medios: { nombre: string; icono?: string; color?: string }[]) {
+  mediosElegidos.clear()
+  for (const m of medios) mediosElegidos.set(m.nombre.trim().toLowerCase(), { icono: m.icono ?? '', color: m.color ?? '' })
+}
+
+/** Aspecto predeterminado de un medio (sin lo elegido por el usuario). */
+export function medioLookBase(name: string): Look {
   const key = name.trim().toLowerCase()
   const m = MEDIOS[key] ?? (key.includes('tarjeta') ? { icon: CreditCard, color: '#475569' } : MEDIOS.otros)
   return { Icon: m.icon, color: m.color }
+}
+
+export function medioLook(name: string): Look {
+  const base = medioLookBase(name)
+  const e = mediosElegidos.get(name.trim().toLowerCase())
+  if (!e) return base
+  return { Icon: (e.icono && ICONS[e.icono]) || base.Icon, color: /^#[0-9a-fA-F]{6}$/.test(e.color) ? e.color : base.color }
 }
 
 /** Fondo pastel a partir del color (alfa en hexadecimal). */

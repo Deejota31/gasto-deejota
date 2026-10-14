@@ -779,7 +779,7 @@ describe('backend Apps Script', () => {
       // idempotente: la segunda vez no cambia nada
       const w = [cajas.writes, cat.writes, b.ss.getSheetByName('FUENTES')!.writes]
       const r2 = b.post('completarVacios', { catalogo: [{ ambito: 'Personal', categoria: '', subcategoria: '', icono: 'star', color: '#000000' }] })
-      expect(r2.data).toEqual({ cajas: 0, fuentes: 0, catalogo: 0, config: 0 })
+      expect(r2.data).toEqual({ cajas: 0, fuentes: 0, catalogo: 0, config: 0, medios: 0 })
       expect([cajas.writes, cat.writes, b.ss.getSheetByName('FUENTES')!.writes]).toEqual(w)
       expect(personal[4]).toBe('user')                                                       // no pisó lo ya relleno
     })
@@ -1173,5 +1173,44 @@ describe('backend Apps Script', () => {
     expect(d.cajas.find((c: unknown[]) => c[0] === 'auto')[2]).toBe(500)
     expect(d.presupuestos).toEqual([['2026-10', 'auto', 350]])
     expect(d.config.tipo_cambio_USD).toBe('3.75')
+  })
+
+  describe('v1.12 medios de pago con icono y color', () => {
+    it('la hoja nace con Icono y Color y los medios iniciales traen su aspecto', () => {
+      const sh = b.ss.getSheetByName('MEDIOS_PAGO')!
+      expect(sh.rows[0]).toEqual(['Nombre', 'Activo', 'Icono', 'Color'])
+      expect(sh.rows[1]).toEqual(['Yape', true, 'smartphone', '#7B3FA0'])
+      const d = b.post('data', { fresh: true }).data
+      expect(d.medios[2]).toEqual(['Sodexo', true, 'ticket', '#D2463C'])
+    })
+
+    it('saveMedio guarda icono y color, valida y conserva lo guardado al solo activar/desactivar', () => {
+      const r = b.post('saveMedio', { nombre: 'Lemon', activo: true, icono: 'rocket', color: '#112233' })
+      expect(r.data).toEqual(['Lemon', true, 'rocket', '#112233'])
+      expect(b.ss.getSheetByName('MEDIOS_PAGO')!.rows.find(x => x[0] === 'Lemon')).toEqual(['Lemon', true, 'rocket', '#112233'])
+      expect(b.post('saveMedio', { nombre: 'Lemon', activo: false }).data).toEqual(['Lemon', false, 'rocket', '#112233'])
+      expect(b.post('saveMedio', { nombre: 'Lemon', activo: true, color: 'rojo' }).error.code).toBe('VALIDATION')
+      expect(b.post('saveMedio', { nombre: 'Lemon', activo: true, icono: 'Cohete!' }).error.code).toBe('VALIDATION')
+      // sin icono ni color la hoja no queda vacía: usa el predeterminado
+      expect(b.post('saveMedio', { nombre: 'Tarjeta BCP' }).data).toEqual(['Tarjeta BCP', true, 'credit-card', '#475569'])
+      expect(b.post('saveMedio', { nombre: 'Yape', color: '#000000' }).data).toEqual(['Yape', true, 'smartphone', '#000000'])
+      expect(b.post('data', { fresh: true }).data.medios.find((m: unknown[]) => m[0] === 'Lemon')).toEqual(['Lemon', false, 'rocket', '#112233'])
+    })
+
+    it('hoja anterior de 2 columnas: se amplía al guardar y completarVacios rellena los vacíos sin pisar', () => {
+      const sh = b.ss.getSheetByName('MEDIOS_PAGO')!
+      sh.rows = [['Nombre', 'Activo'], ['Yape', true], ['Plin', true], ['Mi banco', true], ['Otros', true]]
+      const d0 = b.post('data', { fresh: true }).data
+      expect(d0.medios.map((m: unknown[]) => [m[0], m[2], m[3]])).toEqual([['Yape', '', ''], ['Plin', '', ''], ['Mi banco', '', ''], ['Otros', '', '']])
+      b.post('saveMedio', { nombre: 'Plin', activo: true, icono: 'star', color: '#123456' })
+      expect(sh.rows[0]).toEqual(['Nombre', 'Activo', 'Icono', 'Color'])
+      const r = b.post('completarVacios', {}).data
+      expect(r.medios).toBeGreaterThan(0)
+      const filas = Object.fromEntries(sh.rows.slice(1).map(x => [x[0], [x[2], x[3]]]))
+      expect(filas['Plin']).toEqual(['star', '#123456'])
+      expect(filas['Yape']).toEqual(['smartphone', '#7B3FA0'])
+      expect(filas['Mi banco']).toEqual(['wallet', '#64748B'])
+      expect(b.post('completarVacios', {}).data.medios).toBe(0)
+    })
   })
 })

@@ -28,6 +28,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.12.0
+
+- **Globos de información corregidos:** el ⓘ (p. ej. "Caja mensual" o "Presupuesto consolidado") siempre se muestra por encima de las tarjetas vecinas y no se recorta; abre con el mouse, con el toque y con el teclado.
+- **Nueva fuente y Nueva caja sin selector de icono/color:** el aspecto es siempre automático (fuente con medio = el de ese medio; fuente libre = General; caja = el de su alcance); la vista previa lo muestra.
+- **Medios de pago personalizables:** al crear un medio eliges su icono y color (y puedes cambiarlos después con el lápiz). Se ven igual en gastos, filtros, fuentes y cajas, y **se guardan en la hoja `MEDIOS_PAGO`** (nuevas columnas `Icono` y `Color`).
+
+### Despliegue de v1.12.0
+
+1. Copia `apps-script/Code.gs` a tu proyecto de Apps Script y publica una **nueva versión** de la implementación.
+2. Abre la web: la hoja `MEDIOS_PAGO` gana las columnas Icono y Color y se rellenan solas (o usa Configuración → Completar vacíos).
+
 ## Novedades v1.11.0
 
 - **Aspecto automático coherente:** una fuente con medio de pago se ve exactamente como ese medio (Yape = Yape); una fuente libre se ve como **General**. Las cajas toman el icono y color de su alcance (ámbito, categoría, subcategoría o medio de pago).

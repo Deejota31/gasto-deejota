@@ -13,7 +13,6 @@ import { normName, otrosAlFinal } from '../lib/orden'
 import { cajaLook, COLORS, sortMedios } from '../lib/visual'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
-import { AparienciaCampos, useApariencia } from '../components/Apariencia'
 import { FuentesSeccion } from '../components/fuentes'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from '../components/ui'
@@ -420,9 +419,8 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
   // Automático: el de su alcance (medio de pago, ámbito, categoría o subcategoría). Elegir un icono o un color lo fija.
   const colorBase = caja?.color || COLORS[cajas.length % COLORS.length]
   const auto = valor ? cajaLook({ filtroCampo: campo, filtroValor: valor, color: colorBase, icono: '' }, catalogo) : { ...cajaLook({ filtroCampo: 'Todos', filtroValor: '', color: colorBase, icono: '' }), color: colorBase }
-  const ap = useApariencia({ icono: caja?.icono ?? '', color: colorBase }, auto)
-  const { Icon: IconoCaja, color } = ap.look
-  const borrador: Caja = { id, nombre: nombre.trim() || 'Nueva caja', presupuesto: Number(monto) || 0, filtroCampo: campo, filtroValor: valor, color, icono: ap.icono, orden: caja?.orden ?? 0, activo, descripcion }
+  const { Icon: IconoCaja, color } = auto // el aspecto es siempre automático (según el alcance)
+  const borrador: Caja = { id, nombre: nombre.trim() || 'Nueva caja', presupuesto: Number(monto) || 0, filtroCampo: campo, filtroValor: valor, color, icono: '', orden: caja?.orden ?? 0, activo, descripcion }
   const solapes = valor && activo ? calcularSolapes([borrador, ...otras.filter(cajaActiva)], catalogo, medios).get(id) ?? [] : []
   const gana = (otro: string) => {
     const o = otras.find(x => x.nombre === otro)!
@@ -490,7 +488,6 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
             })()}
           </div>
         )}
-        <AparienciaCampos ap={ap} nombre={nombre} contexto={[campo, valor.split(' › ').at(-1) ?? '']} autoTexto={valor ? `como ${valor.split(' › ').at(-1)}` : 'según el alcance'} />
         <Field label="Descripción (opcional)" htmlFor="caja-desc">
           <input id="caja-desc" className={inputCls} maxLength={200} placeholder="Ej. Médico, farmacia y exámenes" value={descripcion} onChange={e => setDescripcion(e.target.value)} />
         </Field>

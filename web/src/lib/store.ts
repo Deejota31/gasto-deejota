@@ -4,7 +4,7 @@ import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { sortCatalogo } from './orden'
-import { ambitoLook, categoriaLook, claveDeIcono, subcategoriaLook } from './visual'
+import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
 /** El catálogo siempre se entrega ordenado ("Otros" al final de cada grupo), venga de la hoja o de un cambio local. */
@@ -73,6 +73,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const [data, setData] = useState<AppData | null>(() => { const s = readSnapshot(conn); return s && normalize(s) })
   const dataRef = useRef(data)
   dataRef.current = data
+  registrarMedios(data?.medios ?? []) // antes de pintar a los hijos: medioLook usa lo elegido por el usuario
   const [ordenGastos, setOrdenGastos] = useState<Map<string, number>>(() => ordenMap(readSnapshot(conn)))
   // Sube con cada reordenamiento local y con cada respuesta de reordenamiento: una lectura iniciada antes no lo pisa.
   const ordenVersion = useRef(0)

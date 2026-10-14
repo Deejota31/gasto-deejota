@@ -46,7 +46,8 @@ export interface Plantilla {
 }
 
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
-export interface Medio { nombre: string; activo: boolean }
+/** icono/color vacíos = el predeterminado del medio. */
+export interface Medio { nombre: string; activo: boolean; icono?: string; color?: string }
 export type FiltroCampo = 'Todos' | 'Ámbito' | 'Categoría' | 'Subcategoría' | 'Medio de pago'
 export interface Caja {
   id: string
