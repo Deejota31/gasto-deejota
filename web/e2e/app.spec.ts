@@ -1742,4 +1742,31 @@ test.describe('v1.12', () => {
     await page.keyboard.press('Escape')
     await expect(tip).toHaveCount(0)
   })
+
+  test('Configuración: funciones del backend se ejecutan desde la web y muestran su respuesta; las peligrosas piden confirmar', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Configuración')
+    const panel = page.getByTestId('funciones-backend')
+    await expect(panel).toBeVisible()
+    for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'borrarDatosPrueba'])
+      await expect(page.getByRole('button', { name: `Ejecutar ${f}`, exact: true })).toBeVisible()
+    // respuesta simple en el área de resultado
+    await page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true }).click()
+    const res = page.getByTestId('funcion-resultado')
+    await expect(res).toContainText('urlApi')
+    await expect(res).toContainText('misArchivos()')
+    // un token se muestra y se puede copiar con un clic
+    await page.getByRole('button', { name: 'Ejecutar setup', exact: true }).click()
+    await expect(res.getByRole('button', { name: /demo-token-no-real/ })).toBeVisible()
+    // confirmación previa en las que cambian o borran
+    await page.getByRole('button', { name: 'Ejecutar borrarDatosPrueba', exact: true }).click()
+    await expect(panel).toContainText('Se borrarán los datos de prueba marcados')
+    await page.getByRole('button', { name: 'Cancelar' }).click()
+    await expect(panel).not.toContainText('Se borrarán los datos de prueba marcados')
+    await page.getByRole('button', { name: 'Ejecutar crearTokenAtajo', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirmar' }).click()
+    await expect(res).toContainText('atj_demo_no_real')
+    // la administración diaria sigue en su sección
+    await expect(page.getByRole('button', { name: /Completar vacíos/ }).first()).toBeVisible()
+  })
 })

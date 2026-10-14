@@ -351,6 +351,18 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       })
       return { ok: true }
     },
+    // Funciones de mantenimiento (en demostración devuelven una respuesta de ejemplo y no cambian nada).
+    setup: () => ({ spreadsheet: 'https://docs.google.com/spreadsheets/', apiToken: 'demo-token-no-real', hojas: 12 }),
+    misArchivos: () => ({ proyecto: 'https://script.google.com/', spreadsheetId: 'demo', hoja: 'https://docs.google.com/spreadsheets/', urlApi: 'https://script.google.com/macros/s/demo/exec', respaldos: 'Busca "Gasto Deejota - Respaldo" en Google Drive' }),
+    crearTokenAtajo: () => ({ token: 'atj_demo_no_real' }),
+    revocarTokenAtajo: () => ({ revocado: true }),
+    autorizarRespaldos: () => ({ carpeta: carpeta.nombre, url: carpeta.url }),
+    generarDatosPrueba: () => ({ plantillas: [], catalogo: [], medios: [], respaldo: 'https://docs.google.com/spreadsheets/', demo: true }),
+    borrarDatosPrueba: () => ({ gastos: 0, vinculos: 0, compromisos: 0, catalogo: 0, medios: 0, fuentes: 0, respaldo: 'https://docs.google.com/spreadsheets/', demo: true }),
+    migrarPlantillas: () => ({ cambios: 0, detalle: [] }),
+    actualizarCatalogo: () => ({ sinCambios: db.catalogo.length }),
+    repararIds: () => [],
+    repararHojas: () => ({ url: 'https://docs.google.com/spreadsheets/', demo: true }),
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
     backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/', carpeta: carpeta.nombre, carpetaUrl: carpeta.url }),
     carpetaRespaldo: () => ({ ...carpeta }),

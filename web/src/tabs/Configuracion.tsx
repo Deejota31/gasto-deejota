@@ -6,6 +6,7 @@ import {
 import type { AppStore } from '../lib/store'
 import { saveConnection, validarConexion, type CarpetaRespaldo, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select, Switch } from '../components/ui'
+import { FuncionesBackend } from '../components/FuncionesBackend'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
@@ -26,7 +27,6 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
   const [error, setError] = useState('')
   const [connError, setConnError] = useState('')
   const [busy, setBusy] = useState('')
-  const [diag, setDiag] = useState<string>('')
 
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) {
     setBusy(key)
@@ -93,7 +93,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
         </Card>
 
         {/* B. Preferencias */}
-        <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />}>
+        <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />} className="lg:self-start">
           <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2">
             <Field label={<Label icon={<Coins />}>Moneda principal</Label>} htmlFor="cfg-moneda">
               <Select id="cfg-moneda" label="Moneda principal" value={cfg.moneda || 'PEN'} onChange={v => saveCfg('moneda', v)} options={monedas} />
@@ -137,11 +137,12 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
           <p className="mt-2 text-[11px] text-muted">Solo USD tiene tipo de cambio configurable. Los errores siempre se notifican.</p>
         </Card>
 
+        {/* D2. Funciones del backend: ocupa la columna libre junto a Preferencias */}
+        <FuncionesBackend store={store} className="lg:row-span-2" />
+
         {/* E. Datos */}
-        <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />} className="lg:col-span-2">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-            <Action icon={<Activity />} title="Diagnóstico" desc="Filas por hoja y estado" loading={busy === 'diag'}
-              onClick={() => run('diag', async () => setDiag(JSON.stringify(await store.actions.diagnose(), null, 2)))} />
+        <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />} className="lg:self-start">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu carpeta Backup" loading={busy === 'backup'}
               onClick={() => run('backup', async () => {
                 const r = await store.actions.backup()
@@ -164,7 +165,6 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
               : <Action icon={<ExternalLink />} title="Abrir hoja" desc="Disponible al conectar" disabled onClick={() => {}} />}
           </div>
           <CarpetaRespaldos store={store} />
-          {diag && <pre className="mt-3 max-h-60 overflow-auto rounded-xl bg-bg p-3 text-xs">{diag}</pre>}
         </Card>
 
         {/* F. Acerca de */}

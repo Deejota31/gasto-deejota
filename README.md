@@ -33,6 +33,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 - **Globos de información corregidos:** el ⓘ (p. ej. "Caja mensual" o "Presupuesto consolidado") siempre se muestra por encima de las tarjetas vecinas y no se recorta; abre con el mouse, con el toque y con el teclado.
 - **Nueva fuente y Nueva caja sin selector de icono/color:** el aspecto es siempre automático (fuente con medio = el de ese medio; fuente libre = General; caja = el de su alcance); la vista previa lo muestra.
 - **Medios de pago personalizables:** al crear un medio eliges su icono y color (y puedes cambiarlos después con el lápiz). Se ven igual en gastos, filtros, fuentes y cajas, y **se guardan en la hoja `MEDIOS_PAGO`** (nuevas columnas `Icono` y `Color`).
+- **Funciones del backend desde la web** (Configuración): ejecuta con un clic las funciones de `Code.gs` que antes corrías en el editor (`setup`, `misArchivos`, `crearTokenAtajo`, `revocarTokenAtajo`, `autorizarRespaldos`, `migrarPlantillas`, `actualizarCatalogo`, `repararIds`, `repararHojas`, `generarDatosPrueba`, `borrarDatosPrueba`, diagnóstico y completar vacíos) y ve su respuesta (tokens, URLs, conteos) en un área de resultado con botón de copiar. Las que cambian o borran piden confirmación. Requiere volver a desplegar `Code.gs`.
 
 ### Despliegue de v1.12.0
 
