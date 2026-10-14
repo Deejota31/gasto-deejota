@@ -33,6 +33,7 @@ export function ColorPicker({ value, onChange, label = 'Color' }: { value: strin
       <div role="radiogroup" aria-label={label} className="flex flex-wrap items-center gap-2">
         {COLORES_RAPIDOS.map(c => <Punto key={c} c={c} activo={on(c)} onChange={onChange} />)}
         {!rapido && /^#[0-9a-fA-F]{6}$/.test(value) && <Punto c={value.toUpperCase()} activo onChange={onChange} titulo={`Elegido ${value.toUpperCase()}`} />}
+        <span className="sr-only" aria-live="polite">Color elegido {value.toUpperCase()}</span>
         <button type="button" aria-expanded={mas} onClick={() => setMas(m => !m)}
           className="ml-auto inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold text-muted transition hover:bg-bg outline-none focus-visible:ring-2 focus-visible:ring-navy/40">
           {mas ? 'Menos colores' : 'Más colores'} <ChevronDown className={`size-3 transition ${mas ? 'rotate-180' : ''}`} />

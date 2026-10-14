@@ -1,12 +1,14 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, FilterX, Layers, Search, Shapes, Tag, X } from 'lucide-react'
 import { monthLabel, monthEnd, presetRange, rangeLabel, shiftMonth, singleMonth } from '../lib/dates'
 import { subKey } from '../lib/engine'
-import { ambitoLook, categoriaLook, medioLook, sortMedios, type Look } from '../lib/visual'
+import { ambitoLook, categoriaLook, medioLook, sortMedios, subcategoriaLook, type Look } from '../lib/visual'
 import type { CatalogoItem, Filters, PeriodPreset } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { TIPOS_GASTO } from '../lib/types'
-import { inputCls, useDismiss } from './ui'
+import { Checkbox, inputCls, useDismiss } from './ui'
+import { usePopover } from './Combobox'
 
 export function emptyFilters(today: string): Filters {
   return { preset: 'mes', ...presetRange('mes', today), ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
@@ -53,73 +55,103 @@ export function historicos(catalogo: CatalogoItem[], gastos: { ambito: string; c
   return [...out.values()]
 }
 
-export interface Option { value: string; label: string; group?: string; look?: Look }
+export interface Option { value: string; label: string; group?: string; groupLook?: Look; look?: Look }
 
-/** Selector múltiple con búsqueda, iconos y casillas. Sin selección = todas. */
+/**
+ * Selector múltiple con búsqueda, iconos y colores del catálogo, y casillas. Sin selección = todas.
+ * El panel se pinta fuera del contenedor (nunca se corta ni se sale de la pantalla) y se maneja con teclado.
+ */
 export function MultiSelect({ label, icon, options, value, onChange, allLabel }: {
   label: string; icon: ReactNode; options: Option[]; value: string[]; onChange: (v: string[]) => void; allLabel: string
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
-  const close = useCallback(() => { setOpen(false); setQ('') }, [])
-  const ref = useDismiss(open, close)
+  const btn = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const { pos, host } = usePopover(open, btn, { minWidth: 288, maxWidth: 400, maxHeight: 440 })
+  const close = useCallback((foco = true) => { setOpen(false); setQ(''); if (foco) btn.current?.focus() }, [])
+  useEffect(() => {
+    if (!open) return
+    const fuera = (e: PointerEvent) => { const n = e.target as Node; if (!panel.current?.contains(n) && !btn.current?.contains(n)) close(false) }
+    document.addEventListener('pointerdown', fuera)
+    return () => document.removeEventListener('pointerdown', fuera)
+  }, [open, close])
   const term = q.trim().toLowerCase()
   const shown = options.filter(o => !term || `${o.label} ${o.group ?? ''}`.toLowerCase().includes(term))
   const groups = [...new Set(shown.map(o => o.group ?? ''))]
   const toggle = (v: string) => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v])
-  const summary = !value.length ? allLabel : value.length === 1 ? (options.find(o => o.value === value[0])?.label ?? value[0]) : `${value.length} seleccionadas`
+  const first = value[0] ? options.find(o => o.value === value[0]) : undefined
+  const summary = !value.length ? allLabel : value.length === 1 ? (first?.label ?? value[0]) : `${value.length} seleccionadas`
+  const SummaryIcon = value.length === 1 ? first?.look?.Icon : undefined
+  // ↑ ↓ mueven el foco entre las casillas del panel.
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const xs = [...(panel.current?.querySelectorAll<HTMLElement>('input.cb, input[type=search], input[data-buscar]') ?? [])]
+    const i = xs.indexOf(document.activeElement as HTMLElement)
+    if (!xs.length) return
+    e.preventDefault()
+    xs[Math.max(0, Math.min(xs.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus()
+  }
 
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen(!open)}
+    <div className="relative">
+      <button ref={btn} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => (open ? close(false) : setOpen(true))}
         className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition ${value.length ? 'border-navy/40 bg-primary-soft text-navy' : 'border-line bg-card text-ink hover:border-navy/30'}`}>
-        <span className="shrink-0 text-muted [&>svg]:size-4">{icon}</span>
+        <span className="shrink-0 text-muted [&>svg]:size-4">{SummaryIcon ? <SummaryIcon style={{ color: first?.look?.color }} /> : icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block text-[10px] leading-none font-medium tracking-wide text-muted uppercase">{label}</span>
-          <span className="block truncate text-[13px] leading-tight font-medium">{summary}</span>
+          <span className="block truncate text-[13px] leading-tight font-medium" title={summary}>{summary}</span>
         </span>
         <ChevronDown className={`size-4 shrink-0 text-muted transition ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-        <div className="absolute top-11 left-0 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-line bg-card p-2 shadow-xl">
+      {open && pos && createPortal(
+        <div ref={panel} onKeyDown={onKey}
+          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
+          className="fade-in z-[300] flex flex-col rounded-2xl border border-line bg-card p-2 text-ink shadow-xl ring-1 ring-black/5">
           <div className="flex items-center justify-between px-2 pt-1 pb-2">
             <p className="text-sm font-semibold">{label}</p>
-            <span className="text-[11px] text-muted">Selecciona varias</span>
+            <span className="text-[11px] text-muted">{value.length ? `${value.length} seleccionada${value.length === 1 ? '' : 's'}` : 'Selecciona varias'}</span>
           </div>
           {options.length > 8 && (
             <label className="relative mb-2 block">
               <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted" aria-hidden />
-              <input autoFocus aria-label={`Buscar ${label.toLowerCase()}`} className={`${inputCls} pl-8`} placeholder="Buscar…" value={q} onChange={e => setQ(e.target.value)} />
+              <input autoFocus data-buscar aria-label={`Buscar ${label.toLowerCase()}`} className={`${inputCls} pl-8`} placeholder="Buscar…" value={q} onChange={e => setQ(e.target.value)} />
             </label>
           )}
-          <label className={`mb-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium ${!value.length ? 'bg-primary-soft text-navy' : 'hover:bg-bg'}`}>
-            <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={!value.length} onChange={() => onChange([])} />
+          <label className={`mb-1 flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition ${!value.length ? 'bg-primary-soft text-navy' : 'hover:bg-bg'}`}>
+            <Checkbox label={allLabel} checked={!value.length} onChange={() => onChange([])} />
             {allLabel}
           </label>
-          <div role="listbox" aria-multiselectable="true" aria-label={label} className="max-h-72 overflow-y-auto">
+          <div role="listbox" aria-multiselectable="true" aria-label={label} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {!shown.length && <p className="px-2 py-4 text-center text-xs text-muted">Sin resultados.</p>}
-            {groups.map(gname => (
-              <div key={gname || 'all'}>
-                {gname && <p className="px-2 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-muted uppercase">{gname}</p>}
-                <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
-                  {shown.filter(o => (o.group ?? '') === gname).map(o => {
-                    const on = value.includes(o.value)
-                    return (
-                      <label key={o.value} role="option" aria-selected={on}
-                        className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] transition ${on ? 'bg-primary-soft text-navy' : 'text-ink hover:bg-bg'}`}>
-                        <input type="checkbox" className="size-4 shrink-0 accent-[var(--primary)]" checked={on} onChange={() => toggle(o.value)} />
-                        {o.look && <o.look.Icon className="size-3.5 shrink-0" style={{ color: o.look.color }} />}
-                        <span className="truncate">{o.label}</span>
-                      </label>
-                    )
-                  })}
+            {groups.map(gname => {
+              const g = shown.find(o => (o.group ?? '') === gname)
+              return (
+                <div key={gname || 'all'}>
+                  {gname && <p className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[10px] font-semibold tracking-wide uppercase" style={{ color: g?.groupLook?.color ?? 'var(--muted)' }}>
+                    {g?.groupLook && <g.groupLook.Icon className="size-3" />}{gname}</p>}
+                  <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
+                    {shown.filter(o => (o.group ?? '') === gname).map(o => {
+                      const on = value.includes(o.value)
+                      const c = o.look?.color
+                      return (
+                        <label key={o.value} role="option" aria-selected={on} aria-label={o.label} title={o.label}
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] transition ${on ? 'font-semibold' : 'text-ink hover:bg-bg'}`}
+                          style={on ? { background: c ? `${c}1A` : 'var(--primary-soft)', color: c ?? 'var(--primary)' } : undefined}>
+                          <Checkbox label={o.label} checked={on} onChange={() => toggle(o.value)} color={c} />
+                          {o.look && <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: `${o.look.color}1F`, color: o.look.color }}><o.look.Icon className="size-3.5" /></span>}
+                          <span className="truncate">{o.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
           <p className="px-2 pt-2 text-[11px] text-muted">Sin selección se muestran todas.</p>
-        </div>
-      )}
+        </div>, host())}
     </div>
   )
 }
@@ -206,7 +238,7 @@ export function FilterBar({ filters, setFilters, catalogo, medios, today, extra,
   const chips: { key: string; label: string; look?: Look; remove: () => void }[] = [
     ...filters.ambitos.map(v => ({ key: `a${v}`, label: v, look: ambitoLook(v, catalogo), remove: () => apply({ ...filters, ambitos: filters.ambitos.filter(x => x !== v) }) })),
     ...filters.categorias.map(v => ({ key: `c${v}`, label: v, look: categoriaLook(v, catalogo), remove: () => apply({ ...filters, categorias: filters.categorias.filter(x => x !== v) }) })),
-    ...filters.subcategorias.map(v => ({ key: `s${v}`, label: v, remove: () => setFilters({ ...filters, subcategorias: filters.subcategorias.filter(x => x !== v) }) })),
+    ...filters.subcategorias.map(v => { const o = opts.subcategorias.find(x => x.key === v); return { key: `s${v}`, label: o?.subcategoria ?? v, look: o ? subcategoriaLook(o.subcategoria, o.categoria, catalogo) : undefined, remove: () => setFilters({ ...filters, subcategorias: filters.subcategorias.filter(x => x !== v) }) } }),
     ...filters.medios.map(v => ({ key: `m${v}`, label: v, look: medioLook(v), remove: () => setFilters({ ...filters, medios: filters.medios.filter(x => x !== v) }) })),
     ...filters.tipos.map(v => ({ key: `t${v}`, label: v, remove: () => setFilters({ ...filters, tipos: filters.tipos.filter(x => x !== v) }) })),
   ]
@@ -223,7 +255,8 @@ export function FilterBar({ filters, setFilters, catalogo, medios, today, extra,
           options={opts.categorias.map(c => ({ value: c, label: c, look: categoriaLook(c, catalogo) }))}
           onChange={categorias => apply({ ...filters, categorias })} />
         <MultiSelect label="Subcategoría" icon={<Tag />} allLabel="Todas las subcategorías" value={filters.subcategorias}
-          options={opts.subcategorias.map(s => ({ value: s.key, label: histSubs.has(s.key) ? `${s.subcategoria} (histórica)` : s.subcategoria, group: s.categoria }))}
+          options={opts.subcategorias.map(s => ({ value: s.key, label: histSubs.has(s.key) ? `${s.subcategoria} (histórica)` : s.subcategoria, group: s.categoria,
+            groupLook: categoriaLook(s.categoria, catalogo), look: subcategoriaLook(s.subcategoria, s.categoria, catalogo) }))}
           onChange={subcategorias => setFilters({ ...filters, subcategorias })} />
         <MultiSelect label="Medio de pago" icon={<CreditCard />} allLabel="Todos los medios" value={filters.medios}
           options={sortMedios(medios).map(m => ({ value: m, label: m, look: medioLook(m) }))}

@@ -128,7 +128,7 @@ export const inputCls = 'w-full rounded-xl border border-line bg-card px-3 py-2 
  * Controles con la misma caja en todos los navegadores (incluido Safari/iPhone): altura táctil de 44 px, mismo borde,
  * radio, relleno y alineación. Sin estilos nativos de iOS (appearance: none); el icono va dibujado aparte.
  */
-const controlCls = `${inputCls} control-box h-11 leading-tight`
+export const controlCls = `${inputCls} control-box h-11 leading-tight`
 
 /**
  * Fecha: el selector nativo sigue abriéndose (al tocar cualquier parte del campo) y el valor real es AAAA-MM-DD;
@@ -170,14 +170,28 @@ export function Select({ value, onChange, options, placeholder, label, id }: { v
   )
 }
 
-export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+/**
+ * Casilla de selección múltiple (no es un interruptor: los interruptores activan/desactivan, las casillas seleccionan).
+ * Un solo diseño para listas, filtros y plantillas; `color` tiñe el estado marcado con el color del catálogo.
+ */
+export function Checkbox({ checked, onChange, label, indeterminate, disabled, color, className = '', id }: {
+  checked: boolean; onChange: (v: boolean) => void; label: string; indeterminate?: boolean; disabled?: boolean; color?: string; className?: string; id?: string
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate && !checked }, [indeterminate, checked])
+  return <input ref={ref} id={id} type="checkbox" className={`cb ${className}`} style={color ? { ['--cb-color' as string]: color } : undefined}
+    aria-label={label} checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
+}
+
+export function Switch({ checked, onChange, label, compact, disabled, title }: { checked: boolean; onChange: (v: boolean) => void; label: string; compact?: boolean; disabled?: boolean; title?: string }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
-      className="inline-flex items-center gap-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-navy">
-      <span className={`relative h-5 w-9 rounded-full transition ${checked ? 'bg-navy' : 'bg-line'}`}>
+    <button type="button" role="switch" aria-checked={checked} aria-label={compact ? label : undefined} title={title ?? (compact ? label : undefined)} disabled={disabled}
+      onClick={e => { e.stopPropagation(); onChange(!checked) }}
+      className="inline-flex shrink-0 items-center gap-2 rounded-full text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy disabled:cursor-wait disabled:opacity-60">
+      <span className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? 'bg-navy' : 'bg-line'}`}>
         <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${checked ? 'left-[18px]' : 'left-0.5'}`} />
       </span>
-      {label}
+      {!compact && label}
     </button>
   )
 }

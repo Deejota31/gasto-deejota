@@ -91,3 +91,16 @@ dialog::backdrop { background: rgb(15 23 42 / 0.45); backdrop-filter: blur(2px);
   linear-gradient(to left, var(--card) 30%, transparent) right / 24px 100% no-repeat local,
   radial-gradient(farthest-side at 0 50%, rgb(15 23 42 / .12), transparent) left / 10px 100% no-repeat scroll,
   radial-gradient(farthest-side at 100% 50%, rgb(15 23 42 / .12), transparent) right / 10px 100% no-repeat scroll; }
+
+/* Casilla de verificación propia (selección múltiple): misma apariencia en todos los navegadores, con foco y estado mixto. */
+input.cb { -webkit-appearance: none; appearance: none; display: inline-grid; place-content: center; flex-shrink: 0; width: 1.125rem; height: 1.125rem; margin: 0;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, transparent); border-radius: 0.375rem; background: var(--card); cursor: pointer;
+  transition: background-color .15s, border-color .15s, box-shadow .15s; }
+input.cb::after { content: ''; width: 0.7rem; height: 0.7rem; background: var(--card); transform: scale(0); transition: transform .12s ease-out;
+  clip-path: polygon(14% 44%, 0 59%, 40% 100%, 100% 22%, 85% 8%, 40% 70%); }
+input.cb:hover:not(:disabled) { border-color: var(--cb-color, var(--primary)); }
+input.cb:checked, input.cb:indeterminate { background: var(--cb-color, var(--primary)); border-color: var(--cb-color, var(--primary)); }
+input.cb:checked::after { transform: scale(1); }
+input.cb:indeterminate::after { transform: scale(1); clip-path: polygon(0 40%, 100% 40%, 100% 62%, 0 62%); }
+input.cb:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+input.cb:disabled { opacity: .45; cursor: not-allowed; }

@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.14.0';
+var APP_VERSION = '1.15.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -769,6 +769,8 @@ var ACTIONS = {
   setEstado: setEstado_,
   saveCatalogo: saveCatalogo_,
   renameCatalogo: renameCatalogo_,
+  reorderCategorias: reorderCategorias_,
+  deleteCategoria: deleteCategoria_,
   saveMedio: saveMedio_,
   saveCaja: saveCaja_,
   deleteCaja: deleteCaja_,
@@ -907,9 +909,112 @@ function saveCatalogo_(p) {
       }
     }
   }
-  var nuevo = [ambito, categoria, sub, activo, icono || '', color || '', nextOrden_(rows, ambito, categoria, sub)];
+  // La fila "cabecera" de un ámbito/categoría que ya tiene filas (p. ej. al desactivarla) hereda su Orden mínimo:
+  // así no se va al final ni cambia la posición que el usuario le dio.
+  var orden = nextOrden_(rows, ambito, categoria, sub);
+  if (!sub) {
+    var propios = rows.filter(function (r) { return norm_(r[0]) === norm_(ambito) && (!categoria || norm_(r[1]) === norm_(categoria)) && str_(r[6]) !== '' && isFinite(Number(r[6])); });
+    if (propios.length) orden = Math.min.apply(null, propios.map(function (r) { return Number(r[6]); }));
+  }
+  var nuevo = [ambito, categoria, sub, activo, icono || '', color || '', orden];
   appendRows_(sh, [nuevo]);
   return nuevo;
+}
+
+// ---- Categorías: orden manual y eliminación segura (v1.15) ----
+// El orden de una categoría vive en la columna Orden de CATALOGO (ámbito×10000 + categoría×100 + subcategoría):
+// reordenar solo reescribe esa columna de las filas del ámbito. Nunca toca GASTOS, IDs ni relaciones.
+function filasDeAmbito_(rows, ambito) { return rows.filter(function (r) { return norm_(r[0]) === norm_(ambito); }); }
+
+function reorderCategorias_(p) {
+  var ambito = text_(p.ambito, 'Ámbito', 40, true);
+  var nombres = Array.isArray(p.categorias) ? p.categorias.map(str_).filter(Boolean) : [];
+  if (!nombres.length || nombres.length > 200) throw appError_('VALIDATION', 'Orden de categorías inválido.');
+  var sh = openSpreadsheet_(false).getSheetByName('CATALOGO');
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  if (!n) throw appError_('NOT_FOUND', 'El catálogo está vacío.');
+  var rows = sh.getRange(2, 1, n, 7).getValues();
+  var delAmbito = [];
+  rows.forEach(function (r, i) { if (norm_(r[0]) === norm_(ambito) && str_(r[0]) !== '') delAmbito.push(i); });
+  if (!delAmbito.length) throw appError_('NOT_FOUND', 'El ámbito ya no existe. Actualiza los datos.');
+  // Base del ámbito: múltiplo de 10000 de su menor Orden; si ninguna fila tiene Orden, el siguiente libre.
+  var numeros = delAmbito.map(function (i) { return str_(rows[i][6]) === '' ? null : Number(rows[i][6]); }).filter(function (v) { return v !== null && isFinite(v); });
+  var base;
+  if (numeros.length) base = Math.floor(Math.min.apply(null, numeros) / 10000) * 10000;
+  else {
+    var todos = rows.map(function (r) { return Number(r[6]); }).filter(function (v) { return str_(v) !== '' && isFinite(v); });
+    base = (todos.length ? Math.floor(Math.max.apply(null, todos) / 10000) + 1 : 1) * 10000;
+  }
+  // Categorías del ámbito en su orden actual (por Orden y luego por posición) y luego en el orden pedido.
+  var actual = [], vistos = {};
+  delAmbito.slice().sort(function (a, b) {
+    var oa = str_(rows[a][6]) === '' ? Infinity : Number(rows[a][6]), ob = str_(rows[b][6]) === '' ? Infinity : Number(rows[b][6]);
+    return (oa - ob) || (a - b);
+  }).forEach(function (i) {
+    var c = norm_(rows[i][1]);
+    if (c && !vistos[c]) { vistos[c] = true; actual.push(c); }
+  });
+  var pedido = [], usados = {};
+  nombres.forEach(function (c) { var k = norm_(c); if (vistos[k] && !usados[k]) { usados[k] = true; pedido.push(k); } });
+  actual.forEach(function (k) { if (!usados[k]) { usados[k] = true; pedido.push(k); } });
+  var orden = rows.map(function (r) { return [r[6]]; });
+  var cambios = 0;
+  pedido.forEach(function (k, j) {
+    var bloque = base + (j + 1) * 100;
+    var filas = delAmbito.filter(function (i) { return norm_(rows[i][1]) === k; });
+    var cabeza = filas.filter(function (i) { return str_(rows[i][2]) === ''; });
+    var subs = filas.filter(function (i) { return str_(rows[i][2]) !== ''; }).sort(function (a, b) {
+      var oa = str_(rows[a][6]) === '' ? Infinity : Number(rows[a][6]), ob = str_(rows[b][6]) === '' ? Infinity : Number(rows[b][6]);
+      return (oa - ob) || (a - b);
+    });
+    cabeza.forEach(function (i) { if (orden[i][0] !== bloque) cambios++; orden[i][0] = bloque; });
+    subs.forEach(function (i, m) { if (orden[i][0] !== bloque + m + 1) cambios++; orden[i][0] = bloque + m + 1; });
+  });
+  if (cambios) sh.getRange(2, 7, n, 1).setValues(orden);
+  return { ambito: ambito, categorias: pedido.length, cambios: cambios };
+}
+
+function dependenciasCategoria_(ss, ambito, categoria, subs) {
+  var amb = norm_(ambito), cat = norm_(categoria);
+  var gastos = readRows_(ss, 'GASTOS').filter(function (r) { return norm_(r[G.AMBITO]) === amb && norm_(r[G.CAT]) === cat; }).length;
+  var plSh = ss.getSheetByName('PLANTILLAS_MENSUALES');
+  var pl = plSh ? readRows_(ss, 'PLANTILLAS_MENSUALES').filter(function (r) { return norm_(r[1]) === amb && norm_(r[2]) === cat; }) : [];
+  var compromisos = pl.filter(function (r) { return bool_(r[11]); }).length;
+  // Una subcaja por categoría/subcategoría solo se queda sin gastos si esa opción no existe en otro ámbito.
+  var catalogo = readRows_(ss, 'CATALOGO');
+  var existeEnOtro = catalogo.some(function (r) { return norm_(r[0]) !== amb && norm_(r[1]) === cat; });
+  var nombresSubs = subs.map(norm_);
+  var subEnOtro = function (sn) { return catalogo.some(function (r) { return norm_(r[0]) !== amb && norm_(r[2]) === sn; }); };
+  var cajas = readRows_(ss, 'CAJAS').filter(function (r) {
+    var campo = str_(r[3]), valor = norm_(r[4]);
+    if (campo === 'Categoría') return valor === cat && !existeEnOtro;
+    if (campo === 'Subcategoría') return nombresSubs.indexOf(valor) >= 0 && !subEnOtro(valor);
+    return false;
+  }).length;
+  return { gastos: gastos, plantillas: pl.length, compromisos: compromisos, cajas: cajas };
+}
+
+// Elimina una categoría SOLO si nada la usa. Si tiene subcategorías, hace falta `cascada: true` (autorización expresa).
+// Gastos, plantillas, compromisos y subcajas que la usan bloquean la eliminación: en ese caso se desactiva.
+function deleteCategoria_(p) {
+  var ambito = text_(p.ambito, 'Ámbito', 40, true);
+  var categoria = text_(p.categoria, 'Categoría', 60, true);
+  var ss = openSpreadsheet_(false);
+  var sh = ss.getSheetByName('CATALOGO');
+  var filas = readRows_(ss, 'CATALOGO').filter(function (r) { return norm_(r[0]) === norm_(ambito) && norm_(r[1]) === norm_(categoria); });
+  if (!filas.length) return { ambito: ambito, categoria: categoria, eliminada: false, subcategorias: 0 };
+  var subs = filas.filter(function (r) { return str_(r[2]) !== ''; }).map(function (r) { return str_(r[2]); });
+  var deps = dependenciasCategoria_(ss, ambito, categoria, subs);
+  if (deps.gastos || deps.plantillas || deps.cajas) {
+    var partes = [];
+    if (deps.gastos) partes.push(deps.gastos + ' gasto(s)');
+    if (deps.plantillas) partes.push(deps.plantillas + ' plantilla(s)' + (deps.compromisos ? ' (' + deps.compromisos + ' compromiso(s))' : ''));
+    if (deps.cajas) partes.push(deps.cajas + ' subcaja(s)');
+    throw appError_('IN_USE', 'No se puede eliminar “' + categoria + '”: la usan ' + partes.join(', ') + '. Desactívala para conservar el historial.');
+  }
+  if (subs.length && p.cascada !== true) throw appError_('IN_USE', '“' + categoria + '” tiene ' + subs.length + ' subcategoría(s). Confirma la eliminación en cascada o desactívala.');
+  var n = borrarFilasSi_(sh, SHEETS.CATALOGO.length, function (r) { return norm_(r[0]) === norm_(ambito) && norm_(r[1]) === norm_(categoria); });
+  return { ambito: ambito, categoria: categoria, eliminada: true, subcategorias: subs.length, filas: n };
 }
 
 function saveMedio_(p) {

@@ -12,14 +12,15 @@ import type { AppStore } from '../lib/store'
 import type { GastoInput, PlantillaInput } from '../lib/api'
 import { TIPOS_GASTO, type Plantilla, type TipoGasto } from '../lib/types'
 import { normName } from '../lib/orden'
-import { categoriaLook, medioLook, sortMedios } from '../lib/visual'
+import { ambitoLook, categoriaLook, medioLook, sortMedios } from '../lib/visual'
 import { formatearDescripcion } from '../lib/texto'
 import { formatMoney, toCents } from '../lib/money'
 import { todayIn } from '../lib/dates'
 import { showToast } from '../lib/toast'
-import { autocompletar, ClasificacionPicker, clasificacionVigente, type Clasif } from './Clasificacion'
+import { ClasificacionPicker, clasificacionVigente, ConfirmarDescripcion, useDescripcionSub, type Clasif } from './Clasificacion'
+import { Combobox, type Opcion } from './Combobox'
 import type { GastoPreset } from './GastoModal'
-import { Button, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from './ui'
+import { Button, Checkbox, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, Skeleton, Switch, useDismiss } from './ui'
 
 export interface PlantillaDraft extends Clasif {
   id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; esCompromiso?: boolean; tipoGasto?: TipoGasto; esRecurrente?: boolean; existente: boolean; afterId?: string
@@ -29,6 +30,12 @@ type View = { kind: 'list' } | { kind: 'form'; plantilla: Plantilla | null; draf
 const nuevoId = () => `pl-${crypto.randomUUID()}`
 const AMOUNT = /^\d{1,9}([.,]\d{1,2})?$/
 const simbolo = (m: string) => (m === 'PEN' ? 'S/' : m === 'USD' ? 'US$' : m)
+/** Opciones de los desplegables: monedas permitidas (más la actual si ya no lo es) y medios con su icono y color. */
+const opcionesMoneda = (monedas: string[], actual: string): Opcion[] => [...new Set([...monedas, actual].filter(Boolean))].map(m => ({ value: m, label: m, hint: simbolo(m) }))
+const opcionesMedio = (medios: string[], actual: string, vacio?: string): Opcion[] => [
+  ...(vacio ? [{ value: '', label: vacio }] : []),
+  ...[...new Set([...medios, ...(actual ? [actual] : [])])].map(m => { const l = medioLook(m); return { value: m, label: m, Icon: l.Icon, color: l.color } }),
+]
 const montoTxt = (n: number | null) => (n === null ? '' : n.toFixed(2))
 
 export default function PlantillasModal({ store, onClose, onUse, draft, onReopen }: {
@@ -240,10 +247,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" />
             <input aria-label="Buscar plantilla" className={`${inputCls} pl-9`} placeholder="Buscar por nombre, ámbito, categoría o subcategoría…" value={q} onChange={e => setQ(e.target.value)} />
           </label>
-          <select aria-label="Filtrar por ámbito" className={inputCls} value={ambito} onChange={e => setAmbito(e.target.value)}>
-            <option value="">Todos los ámbitos</option>
-            {ambitos.map(a => <option key={a}>{a}</option>)}
-          </select>
+          <Combobox label="Filtrar por ámbito" value={ambito} onChange={setAmbito} options={[{ value: '', label: 'Todos los ámbitos' }, ...ambitos.map(a => { const l = ambitoLook(a, catalogo); return { value: a, label: a, Icon: l.Icon, color: l.color } })]} />
         </div>
         {/* Selección */}
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -288,8 +292,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                         className="grid h-7 cursor-grab place-items-center rounded text-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-30">
                         <GripVertical className="size-4" />
                       </button>
-                      <input type="checkbox" aria-label={`Seleccionar ${p.descripcion}`} checked={on} onChange={() => toggle(p.id)} disabled={!!rev && !on}
-                        className="size-4 accent-[var(--color-navy)]" />
+                      <Checkbox label={`Seleccionar ${p.descripcion}`} checked={on} onChange={() => toggle(p.id)} disabled={!!rev && !on} color={l.color} />
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: `${l.color}1F`, color: l.color }}><l.Icon className="size-3.5" /></span>
                         <div className="min-w-0">
@@ -307,15 +310,8 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                           <input aria-label={`Monto de ${p.descripcion}`} inputMode="decimal" value={f.monto} placeholder="0.00" onChange={e => setValor(p.id, { monto: e.target.value.replace(/[^\d.,]/g, '') })}
                             className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
                         </label>
-                        <select aria-label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={e => setValor(p.id, { moneda: e.target.value })}
-                          className="h-10 rounded-lg border border-line bg-card px-1.5 text-base outline-none focus:border-navy md:h-8 md:text-xs">
-                          {[...new Set([...monedas, f.moneda])].map(m => <option key={m}>{m}</option>)}
-                        </select>
-                        <select aria-label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={e => setValor(p.id, { medioPago: e.target.value })}
-                          className="h-10 min-w-0 rounded-lg border border-line bg-card px-1.5 text-base outline-none focus:border-navy md:h-8 md:text-xs" style={f.medioPago ? { color: medioLook(f.medioPago).color } : undefined}>
-                          <option value="">Medio…</option>
-                          {[...new Set([...medios, ...(f.medioPago ? [f.medioPago] : [])])].map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
+                        <Combobox compact label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={v => setValor(p.id, { moneda: v })} options={opcionesMoneda(monedas, f.moneda)} />
+                        <Combobox compact label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={v => setValor(p.id, { medioPago: v })} placeholder="Medio…" options={opcionesMedio(medios, f.medioPago)} />
                       </div>
                       {/* Acciones: en móvil, grupo centrado en su propia fila; en escritorio, compactas a la derecha. */}
                       <div className="col-span-3 flex items-center justify-center gap-2 md:col-span-1 md:justify-end md:gap-1" data-testid="acciones-plantilla">
@@ -383,8 +379,8 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   const existente = draft ? draft.existente : !!plantilla
   const afterId = draft?.afterId ?? cloneOf?.id
   const [v, setV] = useState<Clasif>(() => base ? { ambito: base.ambito, categoria: base.categoria, subcategoria: base.subcategoria } : { ambito: 'Personal', categoria: '', subcategoria: '' })
-  const [descripcion, setDescripcion] = useState(base?.descripcion ?? '')
-  const [descAuto, setDescAuto] = useState<string | null>(base ? null : '')
+  // La descripción sigue a la subcategoría (editar/clonar conservan la del registro al abrir).
+  const desc = useDescripcionSub(base?.descripcion ?? '', base?.subcategoria ?? '')
   const [monto, setMonto] = useState(montoTxt(base?.monto ?? null))
   const [moneda, setMoneda] = useState(base?.moneda || cfg.moneda || 'PEN')
   const [medioPago, setMedioPago] = useState(base?.medioPago ?? '')
@@ -396,25 +392,21 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   function change(next: Clasif) {
-    if (next.subcategoria && next.subcategoria !== v.subcategoria) {
-      const r = autocompletar(descripcion, descAuto, next.subcategoria)
-      setDescripcion(r.descripcion)
-      setDescAuto(r.auto)
-    }
+    if (next.subcategoria !== v.subcategoria) desc.alCambiarSub(next.subcategoria)
     setV(next)
   }
 
   function save() {
-    const desc = formatearDescripcion(descripcion)
+    const descFinal = formatearDescripcion(desc.descripcion)
     const errs: Record<string, string> = {}
     if (!v.ambito) errs.ambito = 'Elige un ámbito'
     if (!v.categoria) errs.categoria = 'Elige una categoría'
     if (!v.subcategoria) errs.subcategoria = 'Elige una subcategoría'
-    if (!desc) errs.descripcion = 'Escribe una descripción'
+    if (!descFinal) errs.descripcion = 'Escribe una descripción'
     if (!errs.subcategoria && !clasificacionVigente(catalogo, v)) errs.subcategoria = 'Esa clasificación ya no está disponible: elige una vigente'
     const m = monto.trim()
     if (m && (!AMOUNT.test(m) || Number(m.replace(',', '.')) < 0)) errs.monto = 'Monto no válido (sin negativos, hasta 2 decimales)'
-    const data: PlantillaInput = { id, ambito: v.ambito, categoria: v.categoria, subcategoria: v.subcategoria, descripcion: desc,
+    const data: PlantillaInput = { id, ambito: v.ambito, categoria: v.categoria, subcategoria: v.subcategoria, descripcion: descFinal,
       monto: m ? Math.round(Number(m.replace(',', '.')) * 100) / 100 : null, moneda, medioPago, esCompromiso, tipoGasto, esRecurrente }
     const key = (x: PlantillaInput) => [x.ambito, x.categoria, x.subcategoria, x.descripcion, x.moneda || 'PEN', x.medioPago].map(normName).join('|') + `|${x.monto === null ? '' : toCents(x.monto)}`
     if (!Object.keys(errs).length && items.some(p => p.id !== id && key(p) === key(data))) errs.descripcion = 'La plantilla ya existe. Modifica al menos uno de sus valores para guardar una copia.'
@@ -441,12 +433,14 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
       {cloneOf && <p className="rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy">Estás creando una <b>plantilla nueva</b> (copia de “{cloneOf.descripcion}”). Cambia al menos un valor; se ubicará justo después de la original.</p>}
       {/* En escritorio, dos columnas: a la izquierda la clasificación y a la derecha el resto, para verlo todo sin desplazarse. */}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
-        <ClasificacionPicker catalogo={catalogo} value={v} onChange={change} errors={errors} keepCurrent={!!base} />
-        <div className="space-y-3">
-          <Field label="Descripción" error={errors.descripcion} htmlFor="plantilla-desc" hint="Se completa con la subcategoría; puedes cambiarla.">
-            <input id="plantilla-desc" className={inputCls} maxLength={200} value={descripcion} placeholder="Ej. ChatGPT Plus"
-              onChange={e => setDescripcion(e.target.value)} onBlur={() => { const f = formatearDescripcion(descripcion); if (descripcion === descAuto) setDescAuto(f); setDescripcion(f) }} />
+        <ClasificacionPicker catalogo={catalogo} value={v} onChange={change} errors={errors} keepCurrent={!!base}>
+          <Field label="Descripción" error={errors.descripcion} htmlFor="plantilla-desc">
+            <input id="plantilla-desc" className={inputCls} maxLength={200} value={desc.descripcion} placeholder="Se completa con la subcategoría; puedes cambiarla"
+              onChange={e => desc.escribir(e.target.value)} onBlur={desc.alSalir} />
+            <ConfirmarDescripcion d={desc} />
           </Field>
+        </ClasificacionPicker>
+        <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
             <Field label="Monto predeterminado" error={errors.monto} htmlFor="plantilla-monto" hint="Opcional. Podrás cambiarlo cada mes al registrar.">
               <span className="relative block">
@@ -455,9 +449,7 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
               </span>
             </Field>
             <Field label="Moneda" htmlFor="plantilla-moneda">
-              <SelectField id="plantilla-moneda" value={moneda} onChange={setMoneda}>
-                {[...new Set([...monedas, moneda])].map(x => <option key={x}>{x}</option>)}
-              </SelectField>
+              <Combobox id="plantilla-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={opcionesMoneda(monedas, moneda)} />
             </Field>
           </div>
           <div>

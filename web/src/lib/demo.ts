@@ -1,7 +1,7 @@
 import { shiftMonth } from './dates'
 import type { Transport } from './api'
 import { CATALOGO_INICIAL } from './catalogo'
-import { nextOrden, normName, ordenCanonico } from './orden'
+import { nextOrden, normName, ordenCanonico, ordenTrasReordenarCategorias } from './orden'
 
 /** Modo demostración: backend en memoria con datos sintéticos. Se usa sin URL configurada, en pruebas E2E y en mediciones. */
 
@@ -179,8 +179,12 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       }
       const existente = db.catalogo.find(r => hermana(r) && (r[4] || r[5]))
       if (existente) { icono = String(existente[4] || icono); color = String(existente[5] || color) }
-      const orden = nextOrden(db.catalogo.map(r => ({ ambito: String(r[0]), categoria: String(r[1]), orden: typeof r[6] === 'number' ? r[6] : undefined })),
-        String(p.ambito), String(p.categoria ?? ''), String(p.subcategoria ?? ''))
+      const filas = db.catalogo.map(r => ({ ambito: String(r[0]), categoria: String(r[1]), orden: typeof r[6] === 'number' ? r[6] : undefined }))
+      let orden = nextOrden(filas, String(p.ambito), String(p.categoria ?? ''), String(p.subcategoria ?? ''))
+      if (!sub) {   // cabecera de un ámbito/categoría existente: hereda su Orden mínimo (no cambia de posición)
+        const propios = filas.filter(r => normName(r.ambito) === normName(String(p.ambito)) && (!cat || normName(r.categoria) === normName(cat)) && r.orden !== undefined).map(r => r.orden!)
+        if (propios.length) orden = Math.min(...propios)
+      }
       const row = [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false, icono, color, orden ?? '']
       db.catalogo.push(row)
       return [...row]
@@ -194,6 +198,27 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       for (const r of db.gastos) if (match(r[8], r[3], r[4])) { r[gcol] = p.nuevo; gastos++ }
       if (!catalogo) throw fail('NOT_FOUND', 'La opción ya no existe en el catálogo.')
       return { catalogo, gastos }
+    },
+    reorderCategorias: p => {
+      const nombres = Array.isArray(p.categorias) ? p.categorias.map(String) : []
+      const o = ordenTrasReordenarCategorias(db.catalogo.map(r => ({ ambito: String(r[0]), categoria: String(r[1]), subcategoria: String(r[2]), orden: typeof r[6] === 'number' ? r[6] : undefined })), String(p.ambito), nombres)
+      let cambios = 0
+      db.catalogo.forEach((r, i) => { if (o[i] !== undefined && r[6] !== o[i]) { r[6] = o[i]; cambios++ } })
+      return { ambito: p.ambito, categorias: nombres.length, cambios }
+    },
+    deleteCategoria: p => {
+      const n = (v: unknown) => normName(String(v ?? ''))
+      const filas = db.catalogo.filter(r => n(r[0]) === n(p.ambito) && n(r[1]) === n(p.categoria))
+      if (!filas.length) return { eliminada: false, subcategorias: 0 }
+      const subs = filas.filter(r => String(r[2]) !== '').map(r => n(r[2]))
+      const gastos = db.gastos.filter(r => n(r[8]) === n(p.ambito) && n(r[3]) === n(p.categoria)).length
+      const pl = db.plantillas.filter(r => n(r[1]) === n(p.ambito) && n(r[2]) === n(p.categoria)).length
+      const otro = db.catalogo.some(r => n(r[0]) !== n(p.ambito) && n(r[1]) === n(p.categoria))
+      const cajas = db.cajas.filter(r => (r[3] === 'Categoría' && n(r[4]) === n(p.categoria) && !otro) || (r[3] === 'Subcategoría' && subs.includes(n(r[4])))).length
+      if (gastos || pl || cajas) throw fail('IN_USE', `No se puede eliminar “${p.categoria}”: la usan ${[gastos && `${gastos} gasto(s)`, pl && `${pl} plantilla(s)`, cajas && `${cajas} subcaja(s)`].filter(Boolean).join(', ')}. Desactívala para conservar el historial.`)
+      if (subs.length && p.cascada !== true) throw fail('IN_USE', `“${p.categoria}” tiene ${subs.length} subcategoría(s). Confirma la eliminación en cascada o desactívala.`)
+      db.catalogo = db.catalogo.filter(r => !(n(r[0]) === n(p.ambito) && n(r[1]) === n(p.categoria)))
+      return { eliminada: true, subcategorias: subs.length }
     },
     saveMedio: p => {
       const prev = db.medios.find(r => String(r[0]).toLowerCase() === String(p.nombre).toLowerCase())

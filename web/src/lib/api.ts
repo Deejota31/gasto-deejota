@@ -253,6 +253,14 @@ export function createApi(t: Transport) {
     async renameCatalogo(p: { nivel: 'ambito' | 'categoria' | 'subcategoria'; ambito: string; categoria?: string; subcategoria?: string; nuevo: string }) {
       return parse(z.object({ catalogo: z.number(), gastos: z.number() }), await t('renameCatalogo', p))
     },
+    /** Orden manual de las categorías de un ámbito (columna Orden de CATALOGO). */
+    async reorderCategorias(ambito: string, categorias: string[]): Promise<void> {
+      await t('reorderCategorias', { ambito, categorias })
+    },
+    /** Elimina una categoría solo si nada la usa (el backend lo comprueba otra vez). `cascada` autoriza borrar sus subcategorías. */
+    async deleteCategoria(ambito: string, categoria: string, cascada = false) {
+      return parse(z.object({ eliminada: z.boolean(), subcategorias: z.number() }).passthrough(), await t('deleteCategoria', { ambito, categoria, cascada }))
+    },
     async saveMedio(m: Medio): Promise<Medio> {
       return toMedio(parse(z.tuple([str, z.boolean()]).rest(z.unknown()), await t('saveMedio', m)))
     },

@@ -7,8 +7,9 @@ import { TIPOS_GASTO, type Gasto, type TipoGasto } from '../lib/types'
 import { todayIn } from '../lib/dates'
 import { medioLook, sortMedios } from '../lib/visual'
 import { formatearDescripcion } from '../lib/texto'
-import { autocompletar, ClasificacionPicker, opcionesClasif, type Clasif } from './Clasificacion'
-import { Button, DateField, Field, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
+import { ClasificacionPicker, ConfirmarDescripcion, opcionesClasif, useDescripcionSub, type Clasif } from './Clasificacion'
+import { Button, DateField, Field, inputCls, Modal, Segmented, Switch } from './ui'
+import { Combobox } from './Combobox'
 
 export type ModalMode = 'create' | 'edit' | 'clone'
 
@@ -76,13 +77,8 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
   onSubmit: (input: GastoInput, mode: ModalMode, draft: GastoDraft) => boolean
 }) {
   const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft, preset))
-  // Última descripción que se completó sola. En editar/clonar la descripción es la del registro: no se reemplaza
-  // (null nunca coincide con un texto, así que solo se autocompleta si la vacías).
-  const [descAuto, setDescAuto] = useState<string | null>(() => {
-    if (mode !== 'create') return null
-    const f = draft ?? preset
-    return f ? (autocompletar('', null, f.subcategoria).descripcion === f.descripcion ? f.descripcion : null) : ''
-  })
+  // La descripción sigue a la subcategoría (ver useDescripcionSub): editar/clonar conservan la del registro al abrir.
+  const desc = useDescripcionSub(form.descripcion, form.subcategoria)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const set = (p: Partial<Form>) => setForm(f => ({ ...f, ...p }))
   const catalogo = store.data?.catalogo ?? []
@@ -93,19 +89,8 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
   const withCurrent = (xs: string[], v: string) => sortMedios(v && !xs.includes(v) ? [...xs, v] : xs)
 
   function setClasif(next: Clasif) {
-    const subCambio = next.subcategoria !== form.subcategoria
-    if (subCambio && next.subcategoria) {
-      const r = autocompletar(form.descripcion, descAuto, next.subcategoria)
-      setDescAuto(r.auto)
-      set({ ...next, descripcion: r.descripcion })
-    } else set(next)
-  }
-  // Formato al salir del campo (no en cada tecla: así no salta el cursor).
-  function onDescBlur() {
-    const f = formatearDescripcion(form.descripcion)
-    if (f === form.descripcion) return
-    if (form.descripcion === descAuto) setDescAuto(f)
-    set({ descripcion: f })
+    if (next.subcategoria !== form.subcategoria) desc.alCambiarSub(next.subcategoria)
+    set(next)
   }
   const t = TITLES[mode]
   const symbol = form.moneda === 'PEN' ? 'S/' : form.moneda === 'USD' ? 'US$' : form.moneda
@@ -117,7 +102,7 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
     const monto = Number(montoTxt.replace(',', '.'))
     if (!montoTxt) errs.monto = 'Ingresa un monto'
     else if (!AMOUNT.test(montoTxt) || !(monto > 0)) errs.monto = 'Monto mayor a 0, con hasta 2 decimales'
-    const descripcion = formatearDescripcion(form.descripcion) // normalización final antes de guardar
+    const descripcion = formatearDescripcion(desc.descripcion) // normalización final antes de guardar
     const parsed = schema.safeParse({ ...form, descripcion })
     if (!parsed.success) parsed.error.issues.forEach(i => { errs[String(i.path[0])] ??= i.message })
     if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
@@ -137,7 +122,13 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
         <Button type="submit" form="gasto-form">{mode === 'create' && <Plus className="size-4" />}{t.cta}</Button>
       </>}>
       <form id="gasto-form" onSubmit={submit} noValidate className="grid gap-5 md:grid-cols-2">
-        <ClasificacionPicker catalogo={catalogo} value={form} onChange={setClasif} errors={errors} keepCurrent={mode !== 'create' || !!draft} />
+        <ClasificacionPicker catalogo={catalogo} value={form} onChange={setClasif} errors={errors} keepCurrent={mode !== 'create' || !!draft}>
+          {/* Descripción pegada a la subcategoría de la que depende. */}
+          <Field label="Descripción" error={errors.descripcion} hint="Se completa con la subcategoría; puedes cambiarla." htmlFor="gasto-desc">
+            <input id="gasto-desc" className={inputCls} maxLength={200} placeholder="Ej. almuerzo con el equipo" value={desc.descripcion} onChange={e => desc.escribir(e.target.value)} onBlur={desc.alSalir} />
+            <ConfirmarDescripcion d={desc} />
+          </Field>
+        </ClasificacionPicker>
 
         <div className="space-y-4">
           <div className="rounded-2xl border border-line bg-bg/50 p-3">
@@ -161,9 +152,7 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
               <DateField id="gasto-fecha" value={form.fecha} onChange={fecha => set({ fecha })} format={store.data?.config.formato_fecha} invalid={!!errors.fecha} />
             </Field>
             <Field label="Tipo de gasto" htmlFor="gasto-tipo">
-              <SelectField id="gasto-tipo" value={form.tipoGasto} onChange={v => set({ tipoGasto: v as TipoGasto })}>
-                {TIPOS_GASTO.map(x => <option key={x}>{x}</option>)}
-              </SelectField>
+              <Combobox id="gasto-tipo" label="Tipo de gasto" value={form.tipoGasto} onChange={v => set({ tipoGasto: v as TipoGasto })} options={TIPOS_GASTO.map(x => ({ value: x, label: x }))} />
             </Field>
           </div>
           {mode === 'create' && form.plantillaId && (
@@ -188,9 +177,6 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
             </div>
             {errors.medioPago && <span className="text-xs text-[#D2463C]">{errors.medioPago}</span>}
           </div>
-          <Field label="Descripción" error={errors.descripcion} hint="Opcional" htmlFor="gasto-desc">
-            <input id="gasto-desc" className={inputCls} maxLength={200} placeholder="Ej. almuerzo con el equipo" value={form.descripcion} onChange={e => set({ descripcion: e.target.value })} onBlur={onDescBlur} />
-          </Field>
           <Switch checked={form.esRecurrente} onChange={v => set({ esRecurrente: v })} label="Es recurrente" />
         </div>
         <button type="submit" hidden aria-hidden tabIndex={-1} />

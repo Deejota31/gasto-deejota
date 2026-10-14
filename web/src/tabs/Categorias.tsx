@@ -1,13 +1,16 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag, Wallet } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag, Trash2, Wallet } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
 import { ambitoLook, categoriaLook, COLORS, ICONS, subcategoriaLook } from '../lib/visual'
 import { IconPicker } from '../components/IconPicker'
 import { ColorPicker } from '../components/Apariencia'
 import { MediosPago, type MedioEdicion } from '../components/MediosPago'
-import { normName, otrosAlFinal } from '../lib/orden'
-import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
+import { isOtros, normName, otrosAlFinal } from '../lib/orden'
+import { dependenciasCategoria } from '../lib/dependencias'
+import { MenuAcciones } from '../components/MenuAcciones'
+import { Combobox } from '../components/Combobox'
+import { Button, Checkbox, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
 type Nivel = 'ambito' | 'categoria' | 'subcategoria'
 interface Target { mode: 'create' | 'edit'; nivel: Nivel; ambito?: string; categoria?: string; subcategoria?: string }
@@ -47,6 +50,7 @@ export default function Categorias({ store }: { store: AppStore }) {
   const [target, setTarget] = useState<Target | null>(null)
   const [menu, setMenu] = useState(false)
   const [medioEd, setMedioEd] = useState<MedioEdicion>(null)
+  const [borrar, setBorrar] = useState<{ ambito: string; cat: CatNode } | null>(null)
   const menuRef = useDismiss(menu, () => setMenu(false))
   const term = q.trim().toLowerCase()
   const current = tree.find(a => a.name === sel) ?? tree[0]
@@ -58,6 +62,24 @@ export default function Categorias({ store }: { store: AppStore }) {
     { label: 'Subcategorías', n: activos.filter(c => c.subcategoria).length, Icon: Tag, cls: 'bg-verde-soft text-verde' },
     { label: 'Medios de pago', n: (store.data?.medios ?? []).filter(m => m.activo && m.nombre.trim()).length, Icon: Wallet, cls: 'bg-turquesa/10 text-turquesa' },
   ]
+
+  /** ON/OFF de un ámbito o categoría: solo cambia su Activo; las subcategorías conservan su estado individual. */
+  const alternar = (ambito: string, categoria: string, activo: boolean) => {
+    const que = categoria ? 'categoría' : 'ámbito', nombre = categoria || ambito
+    store.track(`act:${ambito}|${categoria}`,
+      { pending: `${activo ? 'Activando' : 'Desactivando'} ${que}…`, ok: `${que === 'ámbito' ? 'Ámbito' : 'Categoría'} “${nombre}” ${activo ? 'activ' : 'desactiv'}${que === 'ámbito' ? 'ado' : 'ada'}.`, error: `No se pudo cambiar “${nombre}”.` },
+      () => store.actions.saveCatalogo({ ambito, categoria, subcategoria: '', activo }))
+  }
+  /** Sube o baja una categoría dentro de su ámbito ("Otros" siempre queda al final). */
+  const mover = (a: AmbNode, nombre: string, d: -1 | 1) => {
+    const nombres = a.cats.map(c => c.name)
+    const fijas = nombres.filter(n => !isOtros(n)), i = fijas.indexOf(nombre), j = i + d
+    if (i < 0 || j < 0 || j >= fijas.length) return
+    ;[fijas[i], fijas[j]] = [fijas[j], fijas[i]]
+    const nuevo = [...fijas, ...nombres.filter(isOtros)]
+    store.track(`orden:${a.name}`, { pending: 'Guardando el orden…', ok: `“${nombre}” ${d < 0 ? 'subió' : 'bajó'} de posición.`, error: 'No se pudo guardar el orden. Se restauró el anterior.' },
+      () => store.actions.reorderCategorias(a.name, nuevo))
+  }
 
   const results = term ? tree.map(a => ({
     ...a,
@@ -109,7 +131,8 @@ export default function Categorias({ store }: { store: AppStore }) {
             <div key={a.name} className="rounded-2xl border border-line bg-card p-4">
               <AmbHeader a={a} catalogo={catalogo} q={term} />
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {a.cats.map(c => <CatCard key={c.name} a={a.name} c={c} catalogo={catalogo} q={term} onEdit={setTarget} />)}
+                {a.cats.map(c => <CatCard key={c.name} a={a.name} ambActivo={a.activo} c={c} catalogo={catalogo} q={term} onEdit={setTarget} reorder={false} busy={store.pending.has(`act:${a.name}|${c.name}`)}
+                  onToggle={v => alternar(a.name, c.name, v)} onDelete={() => setBorrar({ ambito: a.name, cat: c })} />)}
               </div>
             </div>
           ))}
@@ -122,18 +145,23 @@ export default function Categorias({ store }: { store: AppStore }) {
               const on = current?.name === a.name
               const subs = a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)
               return (
-                <button key={a.name} role="tab" aria-selected={on} type="button" onClick={() => setSel(a.name)}
-                  className={`relative rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 ${on ? 'shadow-md' : 'border-line bg-card hover:shadow-sm'} ${a.activo ? '' : 'opacity-60'}`}
-                  style={on ? { borderColor: l.color, background: `linear-gradient(135deg, ${l.color}14, ${l.color}26)` } : undefined}>
-                  <div className="flex items-center gap-2.5">
-                    <IconTile color={l.color} Icon={l.Icon} />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{a.name}</p>
-                      <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} sub.</p>
+                <div key={a.name} className="relative">
+                  <button role="tab" aria-selected={on} type="button" onClick={() => setSel(a.name)}
+                    className={`block w-full rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 ${on ? 'shadow-md' : 'border-line bg-card hover:shadow-sm'} ${a.activo ? '' : 'opacity-60'}`}
+                    style={on ? { borderColor: l.color, background: `linear-gradient(135deg, ${l.color}14, ${l.color}26)` } : undefined}>
+                    <div className="flex items-center gap-2.5">
+                      <IconTile color={l.color} Icon={l.Icon} />
+                      <div className="min-w-0 pr-10">
+                        <p className="truncate text-sm font-semibold" title={a.name}>{a.name}</p>
+                        <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} sub.{!a.activo && ' · inactivo'}</p>
+                      </div>
                     </div>
-                  </div>
-                  {!a.activo && <span className="absolute top-2 right-2 rounded-full bg-bg px-1.5 text-[10px] text-muted">Inactivo</span>}
-                </button>
+                  </button>
+                  <span className="absolute top-2.5 right-2.5">
+                    <Switch compact checked={a.activo} disabled={store.pending.has(`act:${a.name}|`)} label={`Ámbito ${a.name} activo`}
+                      title={a.activo ? 'Activo: toca para desactivar (sus categorías y subcategorías dejan de ofrecerse)' : 'Inactivo: toca para reactivar'} onChange={v => alternar(a.name, '', v)} />
+                  </span>
+                </div>
               )
             })}
           </div>
@@ -149,7 +177,12 @@ export default function Categorias({ store }: { store: AppStore }) {
               </div>
               {!current.cats.length ? <Empty icon={<Shapes className="size-5" />} title="Sin categorías">Agrega la primera categoría de este ámbito.</Empty> : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {current.cats.map(c => <CatCard key={c.name} a={current.name} c={c} catalogo={catalogo} q="" onEdit={setTarget} />)}
+                  {current.cats.map(c => {
+                    const fijas = current.cats.filter(x => !isOtros(x.name)), i = fijas.findIndex(x => x.name === c.name)
+                    return <CatCard key={c.name} a={current.name} ambActivo={current.activo} c={c} catalogo={catalogo} q="" onEdit={setTarget} reorder
+                      puedeSubir={i > 0} puedeBajar={i >= 0 && i < fijas.length - 1} onMove={d => mover(current, c.name, d)}
+                      busy={store.pending.has(`act:${current.name}|${c.name}`)} onToggle={v => alternar(current.name, c.name, v)} onDelete={() => setBorrar({ ambito: current.name, cat: c })} />
+                  })}
                 </div>
               )}
             </section>
@@ -167,6 +200,8 @@ export default function Categorias({ store }: { store: AppStore }) {
         </section>
       )}
 
+      {borrar && <BorrarCategoria store={store} ambito={borrar.ambito} cat={borrar.cat} onClose={() => setBorrar(null)}
+        onDesactivar={() => { const b = borrar; setBorrar(null); if (b.cat.activo) alternar(b.ambito, b.cat.name, false) }} />}
       {target && <CatalogModal key={JSON.stringify(target)} store={store} target={target} tree={tree} onClose={() => setTarget(null)} />}
     </div>
   )
@@ -185,18 +220,30 @@ function AmbHeader({ a, catalogo, q }: { a: AmbNode; catalogo: CatalogoItem[]; q
   )
 }
 
-function CatCard({ a, c, catalogo, q, onEdit }: { a: string; c: CatNode; catalogo: CatalogoItem[]; q: string; onEdit: (t: Target) => void }) {
+function CatCard({ a, ambActivo, c, catalogo, q, onEdit, reorder, puedeSubir, puedeBajar, onMove, busy, onToggle, onDelete }: {
+  a: string; ambActivo: boolean; c: CatNode; catalogo: CatalogoItem[]; q: string; onEdit: (t: Target) => void; reorder: boolean
+  puedeSubir?: boolean; puedeBajar?: boolean; onMove?: (d: -1 | 1) => void; busy: boolean; onToggle: (v: boolean) => void; onDelete: () => void
+}) {
   const l = categoriaLook(c.name, catalogo, a)
+  const efectiva = c.activo && ambActivo
+  const sinOrden = !reorder ? 'Quita la búsqueda para reordenar' : isOtros(c.name) ? '“Otros” siempre va al final' : undefined
   return (
-    <article className={`rounded-2xl border border-line p-3 transition hover:shadow-sm ${c.activo ? '' : 'opacity-60'}`} style={{ background: `linear-gradient(160deg, ${l.color}0D, transparent 60%)` }}>
-      <div className="flex items-center gap-2.5">
+    <article className={`rounded-2xl border border-line p-3 transition hover:shadow-sm ${efectiva ? '' : 'opacity-60'}`} style={{ background: `linear-gradient(160deg, ${l.color}0D, transparent 60%)` }} data-testid="cat-card" data-cat={c.name}>
+      <div className="flex items-center gap-2">
         <IconTile color={l.color} Icon={l.Icon} />
         <div className="min-w-0 flex-1">
-          <p className={`truncate text-sm font-semibold ${c.activo ? '' : 'line-through'}`}><Hl text={c.name} q={q} /></p>
-          <p className="text-[11px] text-muted">{c.subs.filter(s => s.activo).length} subcategorías{!c.activo && ' · inactiva'}</p>
+          <p className={`truncate text-sm font-semibold ${c.activo ? '' : 'line-through'}`} title={c.name}><Hl text={c.name} q={q} /></p>
+          <p className="text-[11px] text-muted">{c.subs.filter(s => s.activo).length} subcategorías{!c.activo ? ' · inactiva' : !ambActivo ? ' · ámbito inactivo' : ''}</p>
         </div>
+        <Switch compact checked={c.activo} disabled={busy} label={`Categoría ${c.name} activa`}
+          title={c.activo ? 'Activa: toca para desactivar (sus subcategorías conservan su estado)' : 'Inactiva: toca para reactivar'} onChange={onToggle} />
         <IconButton label={`Agregar subcategoría a ${c.name}`} tone="primary" onClick={() => onEdit({ mode: 'create', nivel: 'subcategoria', ambito: a, categoria: c.name })}><Plus className="size-4" /></IconButton>
-        <IconButton label={`Editar ${c.name}`} onClick={() => onEdit({ mode: 'edit', nivel: 'categoria', ambito: a, categoria: c.name })}><Pencil className="size-4" /></IconButton>
+        <MenuAcciones label={`Acciones de ${c.name}`} acciones={[
+          { key: 'edit', label: 'Editar', icon: <Pencil className="size-3.5" />, onClick: () => onEdit({ mode: 'edit', nivel: 'categoria', ambito: a, categoria: c.name }) },
+          { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: () => onMove?.(-1), disabled: !reorder || !puedeSubir, title: sinOrden ?? (puedeSubir ? undefined : 'Ya es la primera') },
+          { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: () => onMove?.(1), disabled: !reorder || !puedeBajar, title: sinOrden ?? (puedeBajar ? undefined : 'Ya es la última') },
+          { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-3.5" />, onClick: onDelete, danger: true },
+        ]} />
       </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {c.subs.map(s => { const SI = subcategoriaLook(s.subcategoria, c.name, catalogo, a).Icon; return (
@@ -289,16 +336,13 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         {nivel !== 'ambito' && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Ámbito" htmlFor="cm-amb">
-              <select id="cm-amb" className={inputCls} disabled={mode === 'edit'} value={ambito} onChange={e => { setAmbito(e.target.value); setCategoria('') }}>
-                {tree.map(a => <option key={a.name}>{a.name}</option>)}
-              </select>
+              <Combobox id="cm-amb" label="Ámbito" disabled={mode === 'edit'} value={ambito} onChange={v => { setAmbito(v); setCategoria('') }}
+                options={tree.map(a => { const l = ambitoLook(a.name, catalogo); return { value: a.name, label: a.name, Icon: l.Icon, color: l.color } })} />
             </Field>
             {nivel === 'subcategoria' && (
               <Field label="Categoría" htmlFor="cm-cat">
-                <select id="cm-cat" className={inputCls} disabled={mode === 'edit'} value={categoria} onChange={e => setCategoria(e.target.value)}>
-                  <option value="">Elige…</option>
-                  {cats.map(c => <option key={c}>{c}</option>)}
-                </select>
+                <Combobox id="cm-cat" label="Categoría" disabled={mode === 'edit'} value={categoria} onChange={setCategoria} placeholder="Elige…"
+                  options={cats.map(c => { const l = categoriaLook(c, catalogo, ambito); return { value: c, label: c, Icon: l.Icon, color: l.color } })} />
               </Field>
             )}
           </div>
@@ -334,4 +378,52 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
 
 function Picker({ label, children }: { label: string; children: ReactNode }) {
   return <div><p className="mb-1.5 text-xs font-medium text-muted">{label}</p>{children}</div>
+}
+
+/** Eliminar categoría: revisa gastos, plantillas, compromisos y subcajas. Con uso NO se elimina (se ofrece desactivar); nunca borra gastos. */
+function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store: AppStore; ambito: string; cat: CatNode; onClose: () => void; onDesactivar: () => void }) {
+  const { loadPlantillas } = store
+  useEffect(() => { void loadPlantillas() }, [loadPlantillas])
+  const [cascada, setCascada] = useState(false)
+  const listo = store.plantillas.loaded && !store.plantillas.loading
+  const deps = useMemo(() => store.data ? dependenciasCategoria(ambito, cat.name, store.data, store.plantillas.items) : null, [store.data, store.plantillas.items, ambito, cat.name])
+  const uso = deps ? [
+    deps.gastos && `${deps.gastos} gasto(s)`,
+    deps.plantillas && `${deps.plantillas} plantilla(s)${deps.compromisos ? ` (${deps.compromisos} compromiso(s))` : ''}`,
+    deps.cajas && `${deps.cajas} subcaja(s)`,
+  ].filter(Boolean) as string[] : []
+  const bloqueada = uso.length > 0
+  const key = `cat-del:${ambito}|${cat.name}`
+  const eliminar = () => {
+    const ok = store.track(key, { pending: `Eliminando ${cat.name}…`, ok: `Categoría “${cat.name}” eliminada. No se borró ningún gasto.`, error: `No se pudo eliminar “${cat.name}”.` },
+      () => store.actions.deleteCategoria(ambito, cat.name, cat.subs.length > 0))
+    if (ok) onClose()
+  }
+  return (
+    <Modal open onClose={onClose} size="sm" title={bloqueada ? `No se puede eliminar ${cat.name}` : `Eliminar ${cat.name}`} icon={bloqueada ? <AlertTriangle className="size-5" /> : <Trash2 className="size-5" />}
+      footer={bloqueada
+        ? <><Button variant="outline" onClick={onClose}>Cerrar</Button>{cat.activo && <Button onClick={onDesactivar}>Desactivar en su lugar</Button>}</>
+        : <><Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={!listo || !deps || (cat.subs.length > 0 && !cascada) || store.pending.has(key)} onClick={eliminar}><Trash2 className="size-4" /> Eliminar</Button></>}>
+      <div className="space-y-3 text-sm" data-testid="eliminar-categoria">
+        <p className="font-semibold">“{cat.name}” · {ambito}</p>
+        {!listo || !deps ? <p className="text-xs text-muted" role="status">Revisando dónde se usa…</p> : bloqueada ? (
+          <p className="rounded-xl bg-[#FFF6DB] px-3 py-2 text-xs text-[#B7791F]" data-testid="categoria-en-uso">
+            Esta categoría está en uso: {uso.join(', ')}. Para conservar el historial no se elimina.
+            {cat.activo ? ' Puedes desactivarla: deja de ofrecerse en formularios y filtros, y puedes reactivarla cuando quieras.' : ' Ya está inactiva: se conserva sin ofrecerse.'}
+          </p>
+        ) : (
+          <>
+            <p className="text-muted">Nada la usa: ningún gasto, plantilla, compromiso ni subcaja. Se quitará del catálogo; ningún gasto se borra.</p>
+            {cat.subs.length > 0 && (
+              <label className="flex items-start gap-2 rounded-xl bg-bg px-3 py-2 text-xs">
+                <Checkbox checked={cascada} onChange={setCascada} label={`Confirmo eliminar también sus ${cat.subs.length} subcategoría(s)`} />
+                <span>Confirmo que también se eliminarán sus <b>{cat.subs.length}</b> subcategoría(s): {cat.subs.map(x => x.subcategoria).join(', ')}.</span>
+              </label>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  )
 }

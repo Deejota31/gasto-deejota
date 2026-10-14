@@ -1331,4 +1331,135 @@ describe('backend Apps Script', () => {
       expect(d.cajas.map((c: unknown[]) => c[0])).not.toContain('c-auto')
     })
   })
+
+  describe('v1.15 categorías: orden manual y eliminación segura', () => {
+    const cat = () => (b.post('data', { fresh: true }).data.catalogo as unknown[][])
+    // Las categorías del catálogo inicial no tienen fila propia: su posición es la del menor Orden de sus filas.
+    const ordenDe = (a: string) => {
+      const min = new Map<string, number>()
+      for (const r of cat()) if (r[0] === a && r[1]) min.set(r[1] as string, Math.min(min.get(r[1] as string) ?? Infinity, Number(r[6])))
+      return [...min.entries()].sort((x, y) => x[1] - y[1]).map(x => x[0])
+    }
+    const nuevas = ['Servicios', 'Bebé', 'Hogar']
+
+    it('reorderCategorias reescribe solo la columna Orden del ámbito: IDs, activos, íconos y otros ámbitos no cambian', () => {
+      const antes = cat()
+      const familiaAntes = ordenDe('Familia')
+      expect(familiaAntes.slice(0, 3)).toEqual(['Alimentación', 'Bebé', 'Hogar'])
+      const r = b.post('reorderCategorias', { ambito: 'Familia', categorias: ['Hogar', 'Bebé', ...familiaAntes.filter(c => !['Hogar', 'Bebé'].includes(c))] })
+      expect(r.error).toBeUndefined()
+      expect(ordenDe('Familia').slice(0, 3)).toEqual(['Hogar', 'Bebé', 'Alimentación'])
+      const despues = cat()
+      expect(despues).toHaveLength(antes.length)
+      // Nada distinto de Orden cambió, y los demás ámbitos quedaron idénticos.
+      expect(despues.map(r => r.slice(0, 6))).toEqual(antes.map(r => r.slice(0, 6)))
+      expect(despues.filter(r => r[0] !== 'Familia')).toEqual(antes.filter(r => r[0] !== 'Familia'))
+      // Las subcategorías conservan su orden relativo dentro de su categoría.
+      const subs = despues.filter(r => r[0] === 'Familia' && r[1] === 'Bebé' && r[2]).sort((x, y) => Number(x[6]) - Number(y[6])).map(r => r[2])
+      expect(subs).toEqual(CATALOGO_INICIAL.Familia['Bebé'])
+      // Es idempotente: repetir el mismo orden no cambia nada.
+      expect(b.post('reorderCategorias', { ambito: 'Familia', categorias: ordenDe('Familia') }).data.cambios).toBe(0)
+    })
+
+    it('desactivar una categoría sin fila propia crea su fila sin cambiarla de posición', () => {
+      const antes = ordenDe('Personal')
+      const medio = antes[1]
+      expect(b.post('saveCatalogo', { ambito: 'Personal', categoria: medio, subcategoria: '', activo: false }).error).toBeUndefined()
+      expect(ordenDe('Personal')).toEqual(antes)
+      const fila = cat().find(r => r[0] === 'Personal' && r[1] === medio && r[2] === '')!
+      expect(fila[3]).toBe(false)
+      // Reactivar tampoco la mueve.
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: medio, subcategoria: '', activo: true })
+      expect(ordenDe('Personal')).toEqual(antes)
+    })
+
+    it('el orden persiste tras releer y una categoría nueva se agrega al final de su ámbito', () => {
+      b.post('reorderCategorias', { ambito: 'Personal', categorias: ['Salud', 'Auto'] })
+      expect(ordenDe('Personal').slice(0, 2)).toEqual(['Salud', 'Auto'])
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Mascotas', subcategoria: '', activo: true })
+      const o = ordenDe('Personal')
+      expect(o.at(-1)).toBe('Mascotas')
+      expect(o.slice(0, 2)).toEqual(['Salud', 'Auto'])
+    })
+
+    it('valida entradas y reporta ámbitos inexistentes', () => {
+      expect(b.post('reorderCategorias', { ambito: 'Personal', categorias: [] }).error.code).toBe('VALIDATION')
+      expect(b.post('reorderCategorias', { ambito: 'Nada', categorias: ['x'] }).error.code).toBe('NOT_FOUND')
+      expect(b.post('reorderCategorias', { ambito: 'Personal', categorias: ['Salud'] }, 'malo').error.code).toBe('UNAUTHORIZED')
+    })
+
+    it('coincide con la versión del navegador (ordenTrasReordenarCategorias) para el mismo catálogo', async () => {
+      const { ordenTrasReordenarCategorias } = await import('./lib/orden')
+      const filas = cat().map(r => ({ ambito: r[0] as string, categoria: r[1] as string, subcategoria: r[2] as string, orden: r[6] === '' ? undefined : Number(r[6]) }))
+      const pedido = ['Hogar', 'Servicios', 'Bebé']
+      const esperado = ordenTrasReordenarCategorias(filas, 'Familia', pedido)
+      b.post('reorderCategorias', { ambito: 'Familia', categorias: pedido })
+      expect(cat().map(r => (r[6] === '' ? undefined : Number(r[6])))).toEqual(esperado)
+    })
+
+    it('deleteCategoria: sin dependencias y sin subcategorías se elimina de verdad; con subcategorías exige cascada autorizada', () => {
+      b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Prueba', subcategoria: '', activo: true })
+      expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Prueba' }).data).toMatchObject({ eliminada: true, subcategorias: 0 })
+      expect(cat().some(r => r[0] === 'Personal' && r[1] === 'Prueba')).toBe(false)
+      const e = b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Salud' })
+      expect(e.error.code).toBe('IN_USE')
+      expect(e.error.message).toMatch(/subcategoría/)
+      expect(cat().some(r => r[0] === 'Personal' && r[1] === 'Salud')).toBe(true)
+      const ok = b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Salud', cascada: true })
+      expect(ok.data).toMatchObject({ eliminada: true, subcategorias: 5 })
+      expect(cat().some(r => r[0] === 'Personal' && r[1] === 'Salud')).toBe(false)
+      expect(cat().some(r => r[0] === 'Familia' && r[1] === 'Salud Familiar')).toBe(true)    // otros ámbitos intactos
+      expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Salud', cascada: true }).data.eliminada).toBe(false)   // idempotente
+      // "Auto" tiene la subcaja inicial "Caja Auto": no se puede eliminar aunque se pida la cascada.
+      expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Auto', cascada: true }).error.message).toMatch(/1 subcaja/)
+    })
+
+    it('deleteCategoria se niega si hay gastos, plantillas (o compromisos) o subcajas, aunque se pida la cascada; los datos no cambian', () => {
+      const total = () => b.ss.getSheetByName('CATALOGO')!.rows.length
+      const n0 = total()
+      b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz' }))
+      let e = b.post('deleteCategoria', { ambito: 'Familia', categoria: 'Servicios', cascada: true })
+      expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 gasto/)
+      b.post('deleteGasto', { id: gasto().id }); b.post('saveGasto', gasto({ estado: 'Anulado', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz' }))
+      b.post('savePlantilla', { id: 'pl-00000000-0000-4000-8000-000000000001', mode: 'create', ambito: 'Familia', categoria: 'Hogar', subcategoria: 'Limpieza', descripcion: 'Limpieza', monto: 10, moneda: 'PEN', medioPago: 'Yape', esCompromiso: true })
+      e = b.post('deleteCategoria', { ambito: 'Familia', categoria: 'Hogar', cascada: true })
+      expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 plantilla\(s\) \(1 compromiso/)
+      b.post('saveCaja', { id: 'c-edu', nombre: 'Caja Salud Familiar', presupuesto: 50, filtroCampo: 'Categoría', filtroValor: 'Salud Familiar', color: '#64748b', orden: 2 })
+      e = b.post('deleteCategoria', { ambito: 'Familia', categoria: 'Salud Familiar', cascada: true })
+      expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 subcaja/)
+      expect(total()).toBe(n0)
+      expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)                    // ningún gasto se tocó
+    })
+
+    it('una categoría que existe también en otro ámbito se puede eliminar de uno aunque exista una subcaja por Categoría (sigue funcionando en el otro)', () => {
+      b.post('saveCaja', { id: 'c-alim', nombre: 'Caja Alimentación', presupuesto: 50, filtroCampo: 'Categoría', filtroValor: 'Alimentación', color: '#64748b', orden: 2 })
+      const r = b.post('deleteCategoria', { ambito: 'Amigos', categoria: 'Alimentación', cascada: true })
+      expect(r.error).toBeUndefined()
+      expect(r.data.eliminada).toBe(true)
+      expect(cat().some(x => x[0] === 'Personal' && x[1] === 'Alimentación')).toBe(true)
+    })
+
+    it('desactivar una categoría o un ámbito solo cambia su fila: las subcategorías conservan su estado y reactivar lo restablece', () => {
+      b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Hogar', subcategoria: 'Limpieza', activo: false })
+      b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Hogar', subcategoria: '', activo: false })
+      let c = cat().filter(r => r[0] === 'Familia' && r[1] === 'Hogar')
+      expect(c.find(r => !r[2])![3]).toBe(false)
+      expect(c.find(r => r[2] === 'Limpieza')![3]).toBe(false)
+      expect(c.find(r => r[2] === 'Supermercado')![3]).toBe(true)
+      b.post('saveCatalogo', { ambito: 'Familia', categoria: 'Hogar', subcategoria: '', activo: true })
+      c = cat().filter(r => r[0] === 'Familia' && r[1] === 'Hogar')
+      expect(c.find(r => !r[2])![3]).toBe(true)
+      expect(c.find(r => r[2] === 'Limpieza')![3]).toBe(false)     // respeta el estado individual anterior
+      b.post('saveCatalogo', { ambito: 'Amigos', categoria: '', subcategoria: '', activo: false })
+      expect(cat().filter(r => r[0] === 'Amigos' && r[1]).every(r => r[3] === true)).toBe(true)
+    })
+
+    it('desactivar un medio de pago no toca los gastos que lo usan', () => {
+      b.post('saveGasto', gasto({ medioPago: 'Plin' }))
+      b.post('saveMedio', { nombre: 'Plin', activo: false })
+      const d = b.post('data', { fresh: true }).data
+      expect(d.medios.find((m: unknown[]) => m[0] === 'Plin')[1]).toBe(false)
+      expect(d.gastos[0][6]).toBe('Plin')
+    })
+  })
 })

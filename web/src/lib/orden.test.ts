@@ -93,3 +93,22 @@ describe('opciones de formularios y filtros', () => {
     expect(catalogOptions(c2, ['Pareja'], [], h).categorias).toContain('Salidas')
   })
 })
+
+import { ordenTrasReordenarCategorias } from './orden'
+
+describe('ordenTrasReordenarCategorias (v1.15)', () => {
+  const f = (ambito: string, categoria: string, subcategoria: string, orden?: number) => ({ ambito, categoria, subcategoria, orden })
+  const rows = [f('A', 'X', 's1', 10101), f('A', 'X', 's2', 10102), f('A', 'Y', 's1', 10201), f('B', 'Z', 's1', 20101)]
+  it('reordena solo las filas del ámbito y conserva el orden relativo de las subcategorías', () => {
+    const o = ordenTrasReordenarCategorias(rows, 'A', ['Y', 'X'])
+    expect(o[3]).toBe(20101)                    // otro ámbito: intacto
+    expect(o[2]).toBeLessThan(o[0]!)            // Y ahora antes que X
+    expect(o[0]).toBeLessThan(o[1]!)
+  })
+  it('es idempotente y completa las categorías no mencionadas al final', () => {
+    const una = ordenTrasReordenarCategorias(rows, 'A', ['Y'])
+    expect(una[2]).toBeLessThan(una[0]!)
+    const rows2 = rows.map((r, i) => ({ ...r, orden: una[i] }))
+    expect(ordenTrasReordenarCategorias(rows2, 'A', ['Y', 'X'])).toEqual(una)
+  })
+})
