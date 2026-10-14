@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.13.0';
+var APP_VERSION = '1.14.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {

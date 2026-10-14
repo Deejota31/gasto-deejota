@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Activity, Bell, FolderOpen, Pencil, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
-  Info, KeyRound, Link2, Loader2, Palette, RefreshCw, Settings, ShieldCheck, Tags, Unplug,
+  Eye, EyeOff, Info, KeyRound, Link2, Loader2, Palette, RefreshCw, Settings, ShieldCheck, Tags, Unplug,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import { saveConnection, validarConexion, type CarpetaRespaldo, type Connection } from '../lib/api'
@@ -11,7 +11,7 @@ import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
 
-export const APP_VERSION = '1.13.0'
+export const APP_VERSION = '1.14.0'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -27,6 +27,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
   const [error, setError] = useState('')
   const [connError, setConnError] = useState('')
   const [busy, setBusy] = useState('')
+  const [verToken, setVerToken] = useState(false)
 
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) {
     setBusy(key)
@@ -65,15 +66,19 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
 
       {error && <ErrorBox message={error} />}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-4">
         {/* A. Conexión */}
-        <Card title="Conexión con Google Sheets" icon={<Database className="size-4 text-turquesa" />} className="lg:col-span-2">
+        <Card title="Conexión con Google Sheets" icon={<Database className="size-4 text-turquesa" />}>
           <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] md:items-end">
             <Field label="URL de Apps Script (/exec)" htmlFor="cfg-url">
               <input id="cfg-url" className={inputCls} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec" autoComplete="off" />
             </Field>
             <Field label="Token" htmlFor="cfg-token">
-              <input id="cfg-token" className={inputCls} type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} placeholder="••••••••" />
+              <div className="relative">
+                <input id="cfg-token" className={`${inputCls} pr-10`} type={verToken ? 'text' : 'password'} autoComplete="off" value={token} onChange={e => setToken(e.target.value)} placeholder="••••••••" />
+                <button type="button" aria-label={verToken ? 'Ocultar token' : 'Mostrar token'} aria-pressed={verToken} onClick={() => setVerToken(v => !v)}
+                  className="absolute inset-y-0 right-1 grid w-8 place-items-center rounded-lg text-muted hover:text-navy">{verToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button>
+              </div>
             </Field>
             <div className="flex gap-2">
               <Button onClick={connect}><Link2 className="size-4" /> Conectar</Button>
@@ -92,57 +97,64 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
           </p>
         </Card>
 
-        {/* B. Preferencias */}
-        <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />} className="lg:self-start">
-          <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2">
-            <Field label={<Label icon={<Coins />}>Moneda principal</Label>} htmlFor="cfg-moneda">
-              <Select id="cfg-moneda" label="Moneda principal" value={cfg.moneda || 'PEN'} onChange={v => saveCfg('moneda', v)} options={monedas} />
-            </Field>
-            <Field label={<Label icon={<Coins />}>Monedas permitidas</Label>} htmlFor="cfg-monedas" hint="Códigos ISO separados por coma">
-              <input id="cfg-monedas" className={inputCls} defaultValue={cfg.monedas || 'PEN,USD'} onBlur={e => {
-                const v = e.target.value.toUpperCase().split(',').map(s => s.trim()).filter(s => /^[A-Z]{3}$/.test(s)).join(',')
-                if (v && v !== cfg.monedas) void saveCfg('monedas', v)
-              }} />
-            </Field>
-            {monedas.filter(m => m !== (cfg.moneda || 'PEN')).filter(m => m === 'USD').map(m => (
-              <Field key={m} label={<Label icon={<Coins />}>{`Tipo de cambio ${m} → ${cfg.moneda || 'PEN'}`}</Label>} htmlFor={`cfg-tc-${m}`}>
-                <input id={`cfg-tc-${m}`} className={`${inputCls} tabular`} type="number" step="0.0001" min="0" defaultValue={cfg[`tipo_cambio_${m}`] ?? ''}
-                  onBlur={e => e.target.value !== (cfg[`tipo_cambio_${m}`] ?? '') && saveCfg(`tipo_cambio_${m}`, e.target.value)} />
+        {/* B. Preferencias: tres grupos lógicos en una cuadrícula adaptable */}
+        <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3">
+              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Moneda y finanzas</legend>
+              <Field label={<Label icon={<Coins />}>Moneda principal</Label>} htmlFor="cfg-moneda">
+                <Select id="cfg-moneda" label="Moneda principal" value={cfg.moneda || 'PEN'} onChange={v => saveCfg('moneda', v)} options={monedas} />
               </Field>
-            ))}
-            <Field label={<Label icon={<Globe2 />}>Zona horaria</Label>} htmlFor="cfg-tz">
-              <input id="cfg-tz" className={inputCls} defaultValue={cfg.zona_horaria || 'America/Lima'} onBlur={e => {
-                const v = e.target.value.trim()
-                try { new Intl.DateTimeFormat('es', { timeZone: v }) } catch { return setError('Zona horaria inválida (ej. America/Lima).') }
-                if (v !== cfg.zona_horaria) void saveCfg('zona_horaria', v)
-              }} />
-            </Field>
-            <Field label={<Label icon={<CalendarDays />}>Formato de fecha</Label>} htmlFor="cfg-fecha">
-              <Select id="cfg-fecha" label="Formato de fecha" value={cfg.formato_fecha || 'dd/MM/yyyy'} onChange={v => saveCfg('formato_fecha', v)} options={['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd']} />
-            </Field>
-            <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
-              <select id="cfg-refresco" aria-label="Actualizar datos automáticamente" className={inputCls} value={String(refrescoSegundos(cfg.refresco_segundos))}
-                onChange={e => saveCfg('refresco_segundos', e.target.value)}>
-                {REFRESCO_OPCIONES.map(o => <option key={o.segundos} value={o.segundos}>{o.label}</option>)}
-              </select>
-            </Field>
-            <Field label={<Label icon={<Palette />}>Tema visual</Label>} htmlFor="cfg-tema">
-              <Select id="cfg-tema" label="Tema visual" value={cfg.tema || 'claro'} onChange={v => saveCfg('tema', v)} options={['claro', 'oscuro']} />
-            </Field>
+              <Field label={<Label icon={<Coins />}>Monedas permitidas</Label>} htmlFor="cfg-monedas" hint="Códigos ISO separados por coma">
+                <input id="cfg-monedas" className={inputCls} defaultValue={cfg.monedas || 'PEN,USD'} onBlur={e => {
+                  const v = e.target.value.toUpperCase().split(',').map(s => s.trim()).filter(s => /^[A-Z]{3}$/.test(s)).join(',')
+                  if (v && v !== cfg.monedas) void saveCfg('monedas', v)
+                }} />
+              </Field>
+              {monedas.filter(m => m !== (cfg.moneda || 'PEN')).filter(m => m === 'USD').map(m => (
+                <Field key={m} label={<Label icon={<Coins />}>{`Tipo de cambio ${m} → ${cfg.moneda || 'PEN'}`}</Label>} htmlFor={`cfg-tc-${m}`} hint="Solo USD tiene tipo de cambio configurable.">
+                  <input id={`cfg-tc-${m}`} className={`${inputCls} tabular`} type="number" step="0.0001" min="0" defaultValue={cfg[`tipo_cambio_${m}`] ?? ''}
+                    onBlur={e => e.target.value !== (cfg[`tipo_cambio_${m}`] ?? '') && saveCfg(`tipo_cambio_${m}`, e.target.value)} />
+                </Field>
+              ))}
+            </fieldset>
+            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3">
+              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Regionalización</legend>
+              <Field label={<Label icon={<Globe2 />}>Zona horaria</Label>} htmlFor="cfg-tz">
+                <input id="cfg-tz" className={inputCls} defaultValue={cfg.zona_horaria || 'America/Lima'} onBlur={e => {
+                  const v = e.target.value.trim()
+                  try { new Intl.DateTimeFormat('es', { timeZone: v }) } catch { return setError('Zona horaria inválida (ej. America/Lima).') }
+                  if (v !== cfg.zona_horaria) void saveCfg('zona_horaria', v)
+                }} />
+              </Field>
+              <Field label={<Label icon={<CalendarDays />}>Formato de fecha</Label>} htmlFor="cfg-fecha">
+                <Select id="cfg-fecha" label="Formato de fecha" value={cfg.formato_fecha || 'dd/MM/yyyy'} onChange={v => saveCfg('formato_fecha', v)} options={['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd']} />
+              </Field>
+            </fieldset>
+            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3 md:col-span-2 xl:col-span-1">
+              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Interfaz y experiencia</legend>
+              <Field label={<Label icon={<Palette />}>Tema visual</Label>} htmlFor="cfg-tema">
+                <Select id="cfg-tema" label="Tema visual" value={cfg.tema || 'claro'} onChange={v => saveCfg('tema', v)} options={['claro', 'oscuro']} />
+              </Field>
+              <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
+                <select id="cfg-refresco" aria-label="Actualizar datos automáticamente" className={inputCls} value={String(refrescoSegundos(cfg.refresco_segundos))}
+                  onChange={e => saveCfg('refresco_segundos', e.target.value)}>
+                  {REFRESCO_OPCIONES.map(o => <option key={o.segundos} value={o.segundos}>{o.label}</option>)}
+                </select>
+              </Field>
+              <div className="flex items-center gap-2 rounded-xl bg-bg/60 px-3 py-2.5">
+                <Bell className="size-4 shrink-0 text-muted" />
+                <Switch checked={cfg.notificaciones !== 'false'} onChange={v => saveCfg('notificaciones', String(v))} label="Mostrar notificaciones al guardar" />
+              </div>
+              <p className="text-[11px] text-muted">Los errores siempre se notifican.</p>
+            </fieldset>
           </div>
-          <div className="mt-4 flex items-center gap-2 rounded-xl bg-bg/60 px-3 py-2.5">
-            <Bell className="size-4 shrink-0 text-muted" />
-            <Switch checked={cfg.notificaciones !== 'false'} onChange={v => saveCfg('notificaciones', String(v))} label="Mostrar notificaciones al guardar" />
-          </div>
-          <p className="mt-2 text-[11px] text-muted">Solo USD tiene tipo de cambio configurable. Los errores siempre se notifican.</p>
         </Card>
 
-        {/* D2. Funciones del backend: ocupa la columna libre junto a Preferencias */}
-        <FuncionesBackend store={store} className="lg:row-span-2" />
-
+        {/* D. Administración de datos */}
         {/* E. Datos */}
-        <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />} className="lg:self-start">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />}>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu carpeta Backup" loading={busy === 'backup'}
               onClick={() => run('backup', async () => {
                 const r = await store.actions.backup()
@@ -154,11 +166,6 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
               const blob = new Blob([toCsv(store.data!.gastos)], { type: 'text/csv;charset=utf-8' })
               const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'gastos-completo.csv'; a.click(); URL.revokeObjectURL(a.href)
             }} />
-            <Action icon={<CheckCircle2 />} title="Completar vacíos" desc="Rellena celdas vacías de la hoja" loading={busy === 'vacios'} disabled={!store.data}
-              onClick={() => run('vacios', async () => {
-                const r = await store.actions.completarVacios()
-                showToast('success', r.total ? `Hoja completada: ${r.total} fila(s) con valores que estaban vacíos.` : 'La hoja ya no tiene celdas vacías por completar.')
-              })} />
             <Action icon={<Tags />} title="Administrar catálogo" desc="Ámbitos, categorías, subcategorías y medios de pago" onClick={goCatalogo} />
             {store.data?.sheetUrl
               ? <a href={store.data.sheetUrl} target="_blank" rel="noopener noreferrer" className={ACTION_CLS}><ActionBody icon={<ExternalLink />} title="Abrir hoja" desc="Google Sheets" /></a>
@@ -167,8 +174,11 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
           <CarpetaRespaldos store={store} />
         </Card>
 
+        {/* G. Herramientas del backend */}
+        <FuncionesBackend store={store} />
+
         {/* F. Acerca de */}
-        <Card title="Acerca de" icon={<Info className="size-4 text-muted" />} className="lg:col-span-2">
+        <Card title="Acerca de" icon={<Info className="size-4 text-muted" />}>
           <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
             <div><dt className="text-muted">Aplicación</dt><dd className="font-medium">Gasto Deejota</dd></div>
             <div><dt className="text-muted">Versión web</dt><dd className="tabular font-medium">v{APP_VERSION}</dd></div>

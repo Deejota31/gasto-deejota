@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, Copy, KeyRound, Loader2, Play, Terminal } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, Copy, KeyRound, Loader2, Maximize2, Minimize2, Play, Terminal } from 'lucide-react'
+import { showToast } from '../lib/toast'
 import type { AppStore } from '../lib/store'
 import { Button, Card } from './ui'
 
@@ -41,11 +42,22 @@ function secretos(v: unknown): string[] {
   return Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => (/token/i.test(k) && typeof x === 'string' ? [x] : []))
 }
 
+const GRUPO_DESC: Record<(typeof GRUPOS)[number], string> = {
+  'Conexión y archivos': 'Dónde está tu proyecto y permisos',
+  'Mantenimiento de la hoja': 'Diagnóstico, reparaciones y catálogo',
+  'Atajo de iPhone': 'Token de tu atajo',
+  'Datos de prueba': 'Ejemplos que se pueden borrar',
+}
+
 export function FuncionesBackend({ store, className = '' }: { store: AppStore; className?: string }) {
   const [busy, setBusy] = useState('')
   const [pide, setPide] = useState('')
   const [res, setRes] = useState<Resultado | null>(null)
   const [copiado, setCopiado] = useState('')
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set(['Mantenimiento de la hoja']))
+  const [ancho, setAncho] = useState(false)       // consola expandida
+
+  const alternar = (g: string) => setAbiertos(a => { const n = new Set(a); if (!n.delete(g)) n.add(g); return n })
 
   async function ejecutar(f: Funcion) {
     setPide(''); setBusy(f.nombre)
@@ -53,8 +65,13 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
     try {
       const r = f.nombre === 'completarVacios' ? await store.actions.completarVacios() : await store.actions.ejecutarFuncion(f.nombre, !!f.cambiaHoja)
       setRes({ nombre: f.nombre, ok: true, texto: JSON.stringify(r ?? { ok: true }, null, 2), ms: Math.round(performance.now() - t0), secretos: secretos(r) })
+      if (f.nombre === 'completarVacios') {
+        const total = (r as { total?: number } | undefined)?.total ?? 0
+        showToast('success', total ? `Hoja completada: ${total} fila(s) con valores que estaban vacíos.` : 'La hoja ya no tiene celdas vacías por completar.')
+      } else showToast('success', `${f.titulo}: ejecutada correctamente.`)
     } catch (e) {
       setRes({ nombre: f.nombre, ok: false, texto: (e as Error).message, ms: Math.round(performance.now() - t0), secretos: [] })
+      showToast('error', `${f.titulo}: ${(e as Error).message}`)
     } finally { setBusy('') }
   }
   async function copiar(texto: string, clave: string) {
@@ -63,51 +80,73 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
 
   return (
     <Card title="Funciones del backend" icon={<Terminal className="size-4 text-turquesa" />} className={className}
-      info={{ title: 'Funciones del backend', body: <p>Son las funciones de tu Code.gs que antes ejecutabas desde el editor de Apps Script. Aquí las llamas con un clic y ves su respuesta (tokens, URLs, conteos…) debajo.</p> }}>
-      <div className="space-y-4" data-testid="funciones-backend">
-        {GRUPOS.map(g => (
-          <section key={g} aria-label={g}>
-            <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-muted uppercase">{g}</p>
-            <ul className="space-y-1.5">
-              {FUNCIONES.filter(f => f.grupo === g).map(f => (
-                <li key={f.nombre} className="flex items-center gap-2 rounded-xl border border-line px-2.5 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-bg px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code></p>
-                    <p className="text-[11px] text-muted">{pide === f.nombre ? <span className="font-medium text-[#B7791F]"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
-                  </div>
-                  {pide === f.nombre ? (
-                    <span className="flex shrink-0 gap-1">
-                      <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setPide('')}>Cancelar</Button>
-                      <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => void ejecutar(f)}>Confirmar</Button>
-                    </span>
-                  ) : (
-                    <Button variant="soft" className="shrink-0 !px-2.5 !py-1.5 text-xs" aria-label={`Ejecutar ${f.nombre}`} disabled={!!busy || !store.data}
-                      onClick={() => f.confirmar ? setPide(f.nombre) : void ejecutar(f)}>
-                      {busy === f.nombre ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Ejecutar
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-        <div aria-live="polite" data-testid="funcion-resultado">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold tracking-wide text-muted uppercase">Resultado</p>
-            {res && <span className="flex items-center gap-2 text-[11px] text-muted">
-              <code>{res.nombre}()</code> · {res.ms} ms · <span className={res.ok ? 'font-semibold text-[#0F8A6B]' : 'font-semibold text-[#C0362C]'}>{res.ok ? 'OK' : 'Error'}</span>
-              <button type="button" aria-label="Copiar resultado" onClick={() => void copiar(res.texto, 'todo')} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-bg">
+      info={{ title: 'Funciones del backend', body: <p>Son las funciones de tu Code.gs que antes ejecutabas desde el editor de Apps Script. Aquí las llamas con un clic y ves su respuesta (tokens, URLs, conteos…) en la consola de resultados.</p> }}>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start" data-testid="funciones-backend">
+        <div className="min-w-0 space-y-2">
+          {GRUPOS.map(g => {
+            const fs = FUNCIONES.filter(f => f.grupo === g)
+            const abierto = abiertos.has(g)
+            return (
+              <section key={g} aria-label={g} className="rounded-xl border border-line">
+                <button type="button" aria-expanded={abierto} onClick={() => alternar(g)}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-bg">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-ink">{g} <span className="ml-1 rounded-full bg-bg px-1.5 py-0.5 text-[10px] font-semibold text-muted">{fs.length}</span></span>
+                    <span className="block text-[11px] text-muted">{GRUPO_DESC[g]}</span>
+                  </span>
+                  <ChevronDown className={`size-4 shrink-0 text-muted transition ${abierto ? 'rotate-180' : ''}`} />
+                </button>
+                {abierto && (
+                  <ul className="space-y-1.5 border-t border-line p-2">
+                    {fs.map(f => (
+                      <li key={f.nombre} className="flex items-center gap-2 rounded-lg bg-bg/50 px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-card px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code></p>
+                          <p className="text-[11px] text-muted">{pide === f.nombre ? <span className="font-medium text-[#B7791F]"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
+                        </div>
+                        {pide === f.nombre ? (
+                          <span className="flex shrink-0 gap-1">
+                            <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setPide('')}>Cancelar</Button>
+                            <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => void ejecutar(f)}>Confirmar</Button>
+                          </span>
+                        ) : (
+                          <Button variant="soft" className="shrink-0 !px-2.5 !py-1.5 text-xs" aria-label={`Ejecutar ${f.nombre}`} disabled={!!busy || !store.data}
+                            onClick={() => f.confirmar ? setPide(f.nombre) : void ejecutar(f)}>
+                            {busy === f.nombre ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Ejecutar
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )
+          })}
+        </div>
+        {/* Consola de resultados: altura acotada con desplazamiento interno */}
+        <div aria-live="polite" data-testid="funcion-resultado" className="rounded-xl border border-line p-3 lg:sticky lg:top-20">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold tracking-wide text-muted uppercase">Consola de resultados</p>
+            <span className="flex items-center gap-1 text-[11px] text-muted">
+              {res && <button type="button" aria-label="Copiar resultado" onClick={() => void copiar(res.texto, 'todo')} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-bg">
                 {copiado === 'todo' ? <Check className="size-3" /> : <Copy className="size-3" />} Copiar
+              </button>}
+              <button type="button" aria-pressed={ancho} aria-label={ancho ? 'Contraer resultado' : 'Expandir resultado'} onClick={() => setAncho(v => !v)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-bg">
+                {ancho ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />} {ancho ? 'Contraer' : 'Expandir'}
               </button>
-            </span>}
+            </span>
           </div>
+          {res && <p className="mb-2 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+            <code className="rounded bg-bg px-1 py-0.5">{res.nombre}()</code><span>{res.ms} ms</span>
+            <span className={res.ok ? 'font-semibold text-[#0F8A6B]' : 'font-semibold text-[#C0362C]'}>{res.ok ? 'OK' : 'Error'}</span>
+          </p>}
           {res?.secretos.map((s, i) => (
             <button key={i} type="button" onClick={() => void copiar(s, `s${i}`)}
               className="mb-1.5 flex w-full items-center gap-2 rounded-xl bg-primary-soft px-3 py-2 text-left text-xs font-medium text-navy">
               <KeyRound className="size-3.5 shrink-0" /><span className="min-w-0 flex-1 truncate font-mono">{s}</span>{copiado === `s${i}` ? 'Copiado' : 'Copiar token'}
             </button>
           ))}
-          <pre className={`max-h-64 min-h-16 overflow-auto rounded-xl p-3 text-xs break-words whitespace-pre-wrap ${res && !res.ok ? 'bg-[#FDECEC] text-[#C0362C]' : 'bg-bg text-ink'}`}>{res ? res.texto : 'Ejecuta una función y su respuesta aparecerá aquí.'}</pre>
+          <pre className={`${ancho ? 'max-h-[70vh]' : 'max-h-56'} min-h-16 overflow-auto rounded-xl p-3 text-xs break-words whitespace-pre-wrap ${res && !res.ok ? 'bg-[#FDECEC] text-[#C0362C]' : 'bg-bg text-ink'}`}>{res ? res.texto : 'Ejecuta una función y su respuesta aparecerá aquí.'}</pre>
         </div>
       </div>
     </Card>
