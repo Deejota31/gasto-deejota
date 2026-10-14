@@ -54,7 +54,11 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
     const title = view.cloneOf ? 'Clonar plantilla' : (view.plantilla || view.draft?.existente) ? 'Editar plantilla' : 'Nueva plantilla'
     return (
       <Modal open onClose={onClose} size="xl" title={title} icon={<CalendarDays className="size-5" />}
-        subtitle={view.cloneOf ? `Se creará una plantilla nueva a partir de “${view.cloneOf.descripcion}”. La original no cambia.` : 'Plantilla de gasto frecuente'}>
+        subtitle={view.cloneOf ? `Se creará una plantilla nueva a partir de “${view.cloneOf.descripcion}”. La original no cambia.` : 'Plantilla de gasto frecuente'}
+        footer={<>
+          <Button type="button" variant="outline" onClick={() => setView({ kind: 'list' })}><ArrowLeft className="size-4" /> Volver</Button>
+          <Button type="submit" form="plantilla-form"><Save className="size-4" /> {(view.plantilla || view.draft?.existente) ? 'Guardar cambios' : view.cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
+        </>}>
         <PlantillaForm store={store} plantilla={view.plantilla} draft={view.draft} cloneOf={view.cloneOf} items={items}
           onDone={() => setView({ kind: 'list' })} onReopen={onReopen} />
       </Modal>
@@ -429,7 +433,7 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
   }
 
   return (
-    <form className="space-y-3" noValidate onSubmit={e => { e.preventDefault(); save() }}>
+    <form id="plantilla-form" className="space-y-3" noValidate onSubmit={e => { e.preventDefault(); save() }}>
       {cloneOf && <p className="rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy">Estás creando una <b>plantilla nueva</b> (copia de “{cloneOf.descripcion}”). Cambia al menos un valor; se ubicará justo después de la original.</p>}
       {/* En escritorio, dos columnas: a la izquierda la clasificación y a la derecha el resto, para verlo todo sin desplazarse. */}
       <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
@@ -468,26 +472,21 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
               })}
             </div>
           </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">Tipo de gasto</p>
+            <Segmented label="Tipo de gasto" value={tipoGasto} onChange={v => setTipoGasto(v as TipoGasto)} options={TIPOS_GASTO.map(x => ({ value: x, label: x }))} />
+          </div>
+          <div className="divide-y divide-line rounded-xl border border-line">
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <span className="min-w-0"><span className="block text-sm font-medium">Es recurrente</span><span className="block text-[11px] text-muted">Sus gastos se marcarán como recurrentes.</span></span>
+              <Switch compact checked={esRecurrente} onChange={setEsRecurrente} label="Es recurrente" />
+            </div>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5" title="Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.">
+              <span className="min-w-0"><span className="block text-sm font-medium">Es compromiso mensual</span><span className="block text-[11px] text-muted">Pagos de cada mes (luz, internet…): se reservan en Salud financiera.</span></span>
+              <Switch compact checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
+            </div>
+          </div>
         </div>
-      </div>
-      {/* Tipo de gasto, recurrente y compromiso: una sola fila (en el móvil se apilan). */}
-      <div className="grid gap-2 sm:grid-cols-3">
-        <div className="rounded-xl border border-line p-2.5">
-          <p className="mb-1.5 text-xs font-medium text-muted">Tipo de gasto</p>
-          <Segmented label="Tipo de gasto" value={tipoGasto} onChange={v => setTipoGasto(v as TipoGasto)} options={TIPOS_GASTO.map(x => ({ value: x, label: x }))} />
-        </div>
-        <div className="rounded-xl border border-line p-2.5">
-          <Switch checked={esRecurrente} onChange={setEsRecurrente} label="Es recurrente" />
-          <p className="mt-1 text-[11px] text-muted">Sus gastos se marcarán como recurrentes.</p>
-        </div>
-        <div className="rounded-xl border border-line p-2.5" title="Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.">
-          <Switch checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
-          <p className="mt-1 text-[11px] text-muted">Pagos de cada mes (luz, internet…): se reservan en Salud financiera.</p>
-        </div>
-      </div>
-      <div className="flex justify-between gap-2 border-t border-line pt-3">
-        <Button type="button" variant="outline" onClick={onDone}><ArrowLeft className="size-4" /> Volver</Button>
-        <Button type="submit"><Save className="size-4" /> {existente ? 'Guardar cambios' : cloneOf ? 'Guardar copia' : 'Guardar plantilla'}</Button>
       </div>
     </form>
   )

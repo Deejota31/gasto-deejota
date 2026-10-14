@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, CalendarDays, ChevronDown, Info, Loader2, X } from 'lucide-react'
-import { formatDate } from '../lib/dates'
+import { AlertTriangle, ChevronDown, Info, Loader2, X } from 'lucide-react'
+import { DatePicker } from './DatePicker'
 import { useModalLayer } from '../lib/toast'
 import Toaster from './Toaster'
 
@@ -131,22 +131,13 @@ export const inputCls = 'w-full rounded-xl border border-line bg-card px-3 py-2 
 export const controlCls = `${inputCls} control-box h-11 leading-tight`
 
 /**
- * Fecha: el selector nativo sigue abriéndose (al tocar cualquier parte del campo) y el valor real es AAAA-MM-DD;
- * lo que se ve usa el formato de Configuración. Sin conversiones de zona horaria: es solo texto.
+ * Fecha: usa el calendario propio de la app (DatePicker). El valor real es AAAA-MM-DD; lo que se ve usa el formato de
+ * Configuración. Sin conversiones de zona horaria: es solo texto.
  */
-export function DateField({ id, value, onChange, format, min, max, invalid, label }: {
-  id?: string; value: string; onChange: (v: string) => void; format?: string; min?: string; max?: string; invalid?: boolean; label?: string
+export function DateField(props: {
+  id?: string; value: string; onChange: (v: string) => void; format?: string; min?: string; max?: string; invalid?: boolean; label?: string; today?: string
 }) {
-  return (
-    <div className="relative">
-      <input id={id} type="date" aria-label={label} value={value} min={min} max={max} onChange={e => onChange(e.target.value)} aria-invalid={invalid || undefined}
-        className={`${controlCls} date-native pr-10 text-transparent ${invalid ? 'border-[#D2463C]' : ''}`} />
-      <span aria-hidden className="tabular pointer-events-none absolute inset-y-0 left-3 flex items-center text-base text-ink sm:text-sm">
-        {value ? formatDate(value, format) : <span className="text-muted/70">{(format || 'dd/MM/yyyy').toLowerCase()}</span>}
-      </span>
-      <CalendarDays aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
-    </div>
-  )
+  return <DatePicker {...props} />
 }
 
 export function SelectField({ id, value, onChange, children, label, invalid }: {

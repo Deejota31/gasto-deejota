@@ -1,4 +1,5 @@
 import { shiftMonth } from './dates'
+import { mediosDeFuente } from './fuenteMedios'
 import type { Transport } from './api'
 import { CATALOGO_INICIAL } from './catalogo'
 import { nextOrden, normName, ordenCanonico, ordenTrasReordenarCategorias } from './orden'
@@ -161,6 +162,18 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       row[15] = new Date().toISOString()
       return { id: p.id, estado: p.estado, actualizadoEn: row[15] }
     },
+    setEstadoLote: p => {
+      const ids = Array.isArray(p.ids) ? (p.ids as string[]) : []
+      if (p.estado !== 'Activo' && p.estado !== 'Anulado') throw fail('VALIDATION', 'Estado inválido.')
+      if (!ids.length || ids.length > 200) throw fail('VALIDATION', 'Elige entre 1 y 200 gastos.')
+      if (new Set(ids.map(x => x.toLowerCase())).size !== ids.length) throw fail('VALIDATION', 'Hay IDs repetidos en la selección.')
+      const rows = ids.map(id => db.gastos.filter(r => String(r[13]).toLowerCase() === id.toLowerCase()))
+      if (rows.some(r => r.length === 0)) throw fail('NOT_FOUND', 'Algún gasto ya no existe en la hoja. Actualiza los datos y vuelve a elegir.')
+      if (rows.some(r => r.length > 1)) throw fail('VALIDATION', 'Un gasto tiene el ID repetido en la hoja. Ejecuta repararIds primero.')
+      const now = new Date().toISOString()
+      rows.forEach(([r]) => { r[10] = p.estado; r[15] = now })
+      return { ids, estado: p.estado, actualizadoEn: now }
+    },
     saveCatalogo: p => {
       const k = (r: unknown[]) => r.slice(0, 3).map(x => normName(String(x ?? ''))).join('|')
       const key = k([p.ambito, p.categoria ?? '', p.subcategoria ?? ''])
@@ -221,6 +234,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       return { eliminada: true, subcategorias: subs.length }
     },
     saveMedio: p => {
+      if (String(p.nombre ?? '').includes('|')) throw fail('VALIDATION', 'El nombre del medio no puede contener “|” (se usa para separar varios medios en una fuente).')
       const prev = db.medios.find(r => String(r[0]).toLowerCase() === String(p.nombre).toLowerCase())
       return upsert(db.medios, 1, [p.nombre, p.activo !== false, p.icono === undefined ? prev?.[2] ?? '' : p.icono, p.color === undefined ? prev?.[3] ?? '' : p.color])
     },
@@ -251,7 +265,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
     // Mismas validaciones que saveFuente_ en Code.gs (upsert por ID: un doble clic no duplica).
     saveFuente: p => {
-      const nombre = String(p.nombre ?? '').trim(), mes = String(p.mes ?? ''), medio = String(p.medioPago ?? '').trim()
+      const nombre = String(p.nombre ?? '').trim(), mes = String(p.mes ?? ''), medio = mediosDeFuente(String(p.medioPago ?? '')).join('|')
       const monedas = [db.config.moneda, ...String(db.config.monedas ?? '').split(',')].map(x => x.trim()).filter(Boolean)
       if (!nombre) throw fail('VALIDATION', 'Nombre de la fuente es obligatorio.')
       if (!(Number(p.monto) >= 0) || Number(p.monto) > 1e9) throw fail('VALIDATION', 'Monto inválido.')
@@ -262,7 +276,6 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       for (const r of db.fuentes) {
         if (r[0] === p.id) continue
         if (normName(String(r[1])) === normName(nombre)) throw fail('VALIDATION', `Ya existe una fuente llamada “${r[1]}”.`)
-        if (medio && activo && r[6] !== false && normName(String(r[10])) === normName(medio)) throw fail('VALIDATION', `La fuente “${r[1]}” ya está asociada a ${medio}. Desactívala o quita su medio primero.`)
       }
       const now = new Date().toISOString()
       const prev = db.fuentes.find(r => r[0] === p.id)

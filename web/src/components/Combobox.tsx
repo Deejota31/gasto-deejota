@@ -40,6 +40,8 @@ export interface Opcion {
   color?: string
   group?: string
   hint?: string
+  /** Descripción secundaria bajo el nombre (en la lista y, con `descEnTrigger`, también en el campo). */
+  desc?: string
   disabled?: boolean
 }
 
@@ -49,9 +51,9 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
  * Selector desplegable único de la aplicación (monedas, medios de pago, ámbitos, categorías…): muestra icono y color de cada
  * opción, busca cuando hay muchas, se maneja con teclado (↑ ↓ Inicio Fin Enter Esc, o escribir para saltar) y marca la elegida.
  */
-export function Combobox({ id, value, onChange, options, label, placeholder = 'Elige…', invalid, disabled, searchable, className = '', compact, vacio, triggerClass }: {
+export function Combobox({ id, value, onChange, options, label, placeholder = 'Elige…', invalid, disabled, searchable, className = '', compact, vacio, triggerClass, descEnTrigger, maxHeight }: {
   id?: string; value: string; onChange: (v: string) => void; options: Opcion[]; label: string; placeholder?: string; invalid?: boolean; disabled?: boolean
-  searchable?: boolean; className?: string; compact?: boolean; vacio?: ReactNode; triggerClass?: string
+  searchable?: boolean; className?: string; compact?: boolean; vacio?: ReactNode; triggerClass?: string; descEnTrigger?: boolean; maxHeight?: number
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -61,7 +63,7 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
   const lista = useRef<HTMLDivElement>(null)
   const buscador = useRef<HTMLInputElement>(null)
   const uid = useId()
-  const { pos, host } = usePopover(open, btn, { minWidth: compact ? 176 : 224 })
+  const { pos, host } = usePopover(open, btn, { minWidth: compact ? 176 : 224, maxHeight })
   const conBusqueda = searchable ?? options.length > 8
   const term = sinTildes(q.trim())
   const shown = useMemo(() => options.filter(o => !term || sinTildes(`${o.label} ${o.group ?? ''}`).includes(term)), [options, term])
@@ -127,7 +129,9 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
         {sel
           ? <>
             {Icon && <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: sel.color ? `${sel.color}1F` : undefined, color: sel.color }}><Icon className="size-3.5" /></span>}
-            <span className="min-w-0 flex-1 truncate" title={sel.label}>{sel.label}</span>
+            {descEnTrigger && sel.desc
+              ? <span className="min-w-0 flex-1 leading-tight"><span className="block truncate" title={sel.label}>{sel.label}</span><span className="block truncate text-[10px] font-normal text-muted">{sel.desc}</span></span>
+              : <span className="min-w-0 flex-1 truncate" title={sel.label}>{sel.label}</span>}
           </>
           : <span className="min-w-0 flex-1 truncate text-muted/80">{placeholder}</span>}
         <ChevronDown aria-hidden className={`pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted transition ${open ? 'rotate-180 text-navy' : ''}`} />
@@ -155,7 +159,9 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
                     className={`flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-sm transition ${o.disabled ? 'cursor-not-allowed opacity-45' : ''} ${i === activo ? 'bg-bg' : ''} ${o.value === value ? 'font-semibold' : ''}`}
                     style={o.value === value ? { background: o.color ? `${o.color}1A` : 'var(--primary-soft)', color: o.color } : undefined}>
                     {o.Icon && <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: o.color ? `${o.color}1F` : undefined, color: o.color }}><o.Icon className="size-4" /></span>}
-                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                    {o.desc
+                      ? <span className="min-w-0 flex-1 leading-tight"><span className="block truncate">{o.label}</span><span className="block truncate text-[11px] font-normal text-muted">{o.desc}</span></span>
+                      : <span className="min-w-0 flex-1 truncate">{o.label}</span>}
                     {o.hint && <span className="shrink-0 text-[11px] font-normal text-muted">{o.hint}</span>}
                     {o.value === value && <Check className="size-4 shrink-0" aria-hidden />}
                   </div>

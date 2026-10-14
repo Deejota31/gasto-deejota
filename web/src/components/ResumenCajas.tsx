@@ -1,3 +1,4 @@
+import { mediosDeFuente } from '../lib/fuenteMedios'
 import { useId, useState, type ReactNode } from 'react'
 import { Boxes, ChevronDown, ChevronRight, CircleDollarSign } from 'lucide-react'
 import type { CajasResumen } from '../lib/engine'
@@ -28,7 +29,7 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
           <ul className="divide-y divide-line/70" aria-label="Fuentes del período">
             {c.fuentes.lista.map(r => (
               <Fila key={r.fuente.id} look={fuenteLook(r.fuente, c.fuentes.lista.map(x => x.fuente))} nombre={r.fuente.nombre}
-                detalle={r.fuente.activo ? (r.fuente.medioPago ? `Medio ${r.fuente.medioPago}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
+                detalle={r.fuente.activo ? (mediosDeFuente(r.fuente.medioPago).length ? `${mediosDeFuente(r.fuente.medioPago).length > 1 ? 'Medios' : 'Medio'} ${mediosDeFuente(r.fuente.medioPago).join(', ')}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
                 apagada={!r.fuente.activo}
                 cols={[['Asignado', money(r.asignado)], ['Gastado', money(r.gastado)], ['Disponible', r.fuente.activo ? money(r.disponible) : '—', r.disponible < 0 && r.fuente.activo ? ESTADO.alerta : undefined]]} />
             ))}

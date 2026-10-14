@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowLeft, CalendarDays, ChevronDown, ChevronUp, GripVertical, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, ArrowDown, ArrowLeft, CalendarDays, ChevronDown, ChevronUp, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
 import { formatMoney, toCents } from '../lib/money'
-import { hasDimFilters, matchesDims } from '../lib/engine'
+import { matchesDims } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook } from '../lib/visual'
 import type { ModalMode } from '../components/GastoModal'
 import { Pagination, SwipeRow } from '../components/table'
-import { Button, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
+import { Button, Checkbox, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
+import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
 import { FilterBar } from '../components/shared'
 
 const ID_AVISO = {
@@ -69,21 +70,21 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   const isBusy = (g: Gasto) => store.pending.has(`gasto:${g.id}`) || store.pending.has(`estado:${g.id}`)
   const medios = (store.data?.medios ?? []).map(m => m.nombre)
 
+  // Orden personalizado: los que tienen posición guardada, por esa posición; los nuevos (sin posición) arriba,
+  // del más reciente al más antiguo. Así un gasto nuevo nunca reordena los anteriores.
+  const cmpPersonal = useCallback((a: Gasto, b: Gasto) => {
+    const pos = (g: Gasto) => store.ordenGastos.get(g.id.toLowerCase())
+    const pa = pos(a), pb = pos(b)
+    if (pa === undefined || pb === undefined) return (pa === undefined ? 0 : 1) - (pb === undefined ? 0 : 1) || b.creadoEn.localeCompare(a.creadoEn) || a.id.localeCompare(b.id)
+    return pa - pb || b.creadoEn.localeCompare(a.creadoEn)
+  }, [store.ordenGastos])
+
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase()
     const list = (store.data?.gastos ?? []).filter(g =>
       g.fecha >= filters.desde && g.fecha <= filters.hasta && (estado === 'todos' || g.estado === estado) && matchesDims(g, filters) &&
       (!term || `${g.descripcion} ${g.categoria} ${g.subcategoria} ${g.medioPago} ${g.ambito} ${g.monto}`.toLowerCase().includes(term)))
-    if (sort.key === 'personalizado') {
-      // Orden personalizado: los que tienen posición guardada, por esa posición; los nuevos (sin posición) arriba,
-      // del más reciente al más antiguo. Así un gasto nuevo nunca reordena los anteriores.
-      const pos = (g: Gasto) => store.ordenGastos.get(g.id.toLowerCase())
-      return list.sort((a, b) => {
-        const pa = pos(a), pb = pos(b)
-        if (pa === undefined || pb === undefined) return (pa === undefined ? 0 : 1) - (pb === undefined ? 0 : 1) || b.creadoEn.localeCompare(a.creadoEn) || a.id.localeCompare(b.id)
-        return pa - pb || b.creadoEn.localeCompare(a.creadoEn)
-      })
-    }
+    if (sort.key === 'personalizado') return list.sort(cmpPersonal)
     const key = sort.key
     const val = (g: Gasto) => key === 'monto' ? toCents(g.monto) : key === 'categoria' ? `${g.categoria} ${g.subcategoria}` : g[key]
     // Orden estable: a igualdad, el registro más reciente primero.
@@ -91,7 +92,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
       const x = val(a), y = val(b)
       return (x < y ? -1 : x > y ? 1 : 0) * sort.dir || b.creadoEn.localeCompare(a.creadoEn) || a.id.localeCompare(b.id)
     })
-  }, [store.data, store.ordenGastos, filters, q, estado, sort])
+  }, [store.data, cmpPersonal, filters, q, estado, sort])
 
   // Al cambiar filtros, búsqueda, orden o tamaño, volver a la primera página.
   useEffect(() => { setPage(0) }, [filters, q, estado, sort, pageSize])
@@ -109,22 +110,63 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   const visible = rows.slice(current * pageSize, current * pageSize + pageSize)
   const totalCents = rows.reduce((s, g) => s + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0)
 
-  // Reordenar solo con el conjunto completo a la vista: orden personalizado, sin búsqueda ni filtros de
-  // clasificación/medio, solo activos y todo en una página. Así nunca se mueve algo que no estás viendo.
+  // Orden personalizado GLOBAL: el orden se guarda sobre todos los gastos (no solo los visibles). Arrastrar dentro de la página
+  // reubica esos gastos en los mismos huecos del orden global; los que no se ven (otras páginas o filtros) no se mueven.
+  // Funciona con filtros, búsqueda y paginación. Solo se bloquea si hay movimientos con ID repetido/inválido a la vista.
   const personal = sort.key === 'personalizado'
-  const bloqueo = !personal ? '' : q.trim() || hasDimFilters(filters) ? 'Quita la búsqueda y los filtros de ámbito, categoría o medio para reordenar.'
-    : estado !== 'Activo' ? 'Muestra solo “Activos” para reordenar.' : rows.length > pageSize ? `Muestra ${rows.length > 50 ? 'menos movimientos (elige un período más corto)' : 'todos en una página (Por página: 50)'} para reordenar.`
-    : rows.some(g => g.problemaId) ? 'Hay movimientos con “ID por reparar” en este período: repáralos (función repararIds en Apps Script) para poder reordenar.' : ''
-  const puedeOrdenar = personal && !bloqueo && rows.length > 1
-  const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null)
-  function mover(id: string, destino: string | null, delta = 0) {
-    const ids = rows.map(g => g.id)
-    const from = ids.indexOf(id)
-    const to = destino ? ids.indexOf(destino) : from + delta
-    if (from < 0 || to < 0 || to >= ids.length || to === from) return
-    ids.splice(from, 1)
-    ids.splice(to, 0, id)
-    store.reorderGastos(ids)
+  const idsInvalidos = visible.some(g => g.problemaId)
+  const puedeOrdenar = personal && !idsInvalidos && visible.length > 1 && !store.pending.has('gastos:orden')
+  const bloqueo = personal && idsInvalidos ? 'Hay movimientos con “ID por reparar” en esta página: repáralos (función repararIds en Apps Script) para poder reordenar.' : ''
+  const ID_OK = /^[0-9a-fA-F-]{8,64}$/
+  function guardarOrden(nuevo: string[], movidos: string[]) {
+    // Huecos que ocupan en el orden global los gastos movidos; se rellenan con su nuevo orden.
+    const global = [...(store.data?.gastos ?? [])].sort(cmpPersonal).map(g => g.id)
+    const set = new Set(movidos)
+    const huecos = global.map((id, i) => (set.has(id) ? i : -1)).filter(i => i >= 0)
+    const completo = [...global]
+    huecos.forEach((h, k) => { completo[h] = nuevo[k] })
+    const validos = completo.filter(id => ID_OK.test(id))
+    store.reorderGastos(validos.length <= 5000 ? validos : nuevo.filter(id => ID_OK.test(id)))
+  }
+  const dnd = useReorden({ ids: visible.map(g => g.id), habilitado: puedeOrdenar, nombre: id => visible.find(g => g.id === id)?.descripcion || 'movimiento',
+    onCommit: nuevo => guardarOrden(nuevo, visible.map(g => g.id)) })
+  // Subir/bajar (móvil y teclado): intercambia con el vecino de la lista filtrada, aunque esté en otra página.
+  function mover(id: string, delta: number) {
+    const i = rows.findIndex(g => g.id === id), j = i + delta
+    if (i < 0 || j < 0 || j >= rows.length || rows[j].problemaId || rows[i].problemaId) return
+    const [lo, hi] = i < j ? [rows[i].id, rows[j].id] : [rows[j].id, rows[i].id]   // las filas filtradas conservan el orden global
+    guardarOrden([hi, lo], [lo, hi])
+  }
+
+  // Selección múltiple y eliminación masiva. La casilla del encabezado marca solo la página visible.
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [confirmLote, setConfirmLote] = useState<Gasto[] | null>(null)
+  const seleccionable = (g: Gasto) => g.estado === 'Activo' && !g.problemaId && !isBusy(g)
+  const filasPagina = dnd.orden.map(id => visible.find(g => g.id === id)!).filter(Boolean)
+  const selPagina = visible.filter(seleccionable)
+  const nSelPagina = selPagina.filter(g => sel.has(g.id)).length
+  // La selección solo contiene gastos existentes y activos: si cambian los datos, se depura.
+  useEffect(() => {
+    setSel(prev => {
+      if (!prev.size) return prev
+      const vivos = new Set((store.data?.gastos ?? []).filter(g => g.estado === 'Activo' && !g.problemaId).map(g => g.id))
+      const next = new Set([...prev].filter(id => vivos.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [store.data?.gastos])
+  const toggleFila = (g: Gasto, on: boolean) => setSel(s => { const n = new Set(s); if (on) n.add(g.id); else n.delete(g.id); return n })
+  const toggleTodos = (on: boolean) => setSel(s => { const n = new Set(s); selPagina.forEach(g => (on ? n.add(g.id) : n.delete(g.id))); return n })
+  const seleccionados = (store.data?.gastos ?? []).filter(g => sel.has(g.id) && seleccionable(g))
+  const loteOcupado = store.pending.has('gastos:lote')
+  function eliminarLote() {
+    const lote = confirmLote
+    if (!lote?.length || loteOcupado) return
+    setConfirmLote(null)
+    setSel(new Set())
+    // No bloquea la navegación: la escritura sigue en segundo plano; la pantalla cambia solo cuando el backend confirma.
+    const ok = store.track('gastos:lote', { pending: `Eliminando ${lote.length} gasto${lote.length === 1 ? '' : 's'}…`, ok: `${lote.length} gasto${lote.length === 1 ? '' : 's'} eliminado${lote.length === 1 ? '' : 's'} correctamente. Puedes restaurarlo${lote.length === 1 ? '' : 's'} desde "Eliminados".`, error: 'No se pudo eliminar la selección. No se eliminó ningún gasto.' },
+      () => store.actions.setEstadoLote(lote, 'Anulado'), { retry: false })
+    if (!ok) setSel(new Set(lote.map(g => g.id)))
   }
 
   const toggleSort = (key: SortKey) => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === 'fecha' || key === 'monto' ? -1 : 1 }))
@@ -210,9 +252,18 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
         )}
         {personal && (
           <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${bloqueo ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-primary-soft text-navy'}`}>
-            {bloqueo || 'Orden personalizado: arrastra ⋮⋮ (o usa ↑ ↓) para mover un movimiento. Se guarda al soltar; no cambia fechas ni montos, ni el orden de tu hoja.'}
+            {bloqueo || 'Orden personalizado: arrastra el asa ⠿ (o enfócala y usa Espacio y las flechas) para mover un movimiento. Funciona con filtros y páginas; se guarda al soltar y no cambia fechas, montos ni el orden de tu hoja.'}
           </p>
         )}
+
+        {seleccionados.length > 0 && (
+          <div className="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-navy/30 bg-primary-soft px-3 py-2 text-sm text-navy shadow-sm" role="region" aria-label="Acciones sobre la selección" data-testid="barra-seleccion">
+            <span className="mr-auto font-medium" aria-live="polite">{seleccionados.length} seleccionado{seleccionados.length === 1 ? '' : 's'}</span>
+            <Button variant="ghost" className="h-9 text-xs" onClick={() => setSel(new Set())}>Limpiar selección</Button>
+            <Button variant="danger" className="h-9" disabled={loteOcupado} onClick={() => setConfirmLote(seleccionados)}><Trash2 className="size-4" /> Eliminar {seleccionados.length} gasto{seleccionados.length === 1 ? '' : 's'}</Button>
+          </div>
+        )}
+        <AvisoOrden texto={dnd.aviso} />
 
         {!store.data ? <Skeleton className="h-64" /> : !rows.length ? (
           <Empty icon={<Receipt className="size-5" />} title="No hay gastos con estos filtros">Prueba otro período, quita filtros o registra un nuevo gasto.</Empty>
@@ -223,6 +274,8 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
               <table className="w-full min-w-[880px] text-sm">
                 <thead className="text-[11px] tracking-wide text-muted uppercase">
                   <tr className="border-y border-line bg-bg/60">
+                    <th scope="col" className="w-9 pl-3"><Checkbox label="Seleccionar los gastos de esta página" checked={selPagina.length > 0 && nSelPagina === selPagina.length} indeterminate={nSelPagina > 0 && nSelPagina < selPagina.length}
+                      disabled={!selPagina.length} onChange={toggleTodos} /></th>
                     {personal && <th scope="col" className="w-8 px-1"><span className="sr-only">Mover</span></th>}
                     <SortTh k="fecha">Fecha</SortTh><SortTh k="descripcion">Descripción</SortTh><SortTh k="categoria">Categoría / Subcategoría</SortTh>
                     <th scope="col" className="px-3 py-2.5 text-left font-medium">Ámbito</th>
@@ -232,23 +285,15 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map(g => {
+                  {filasPagina.map(g => {
                     const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                     const off = g.estado === 'Anulado'
                     return (
-                      <tr key={g.uid ?? g.id} data-id={g.id} data-foco={foco?.id === g.id || undefined}
-                        draggable={puedeOrdenar && drag?.from === g.id}
-                        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', g.id) }}
-                        onDragOver={e => { if (drag) { e.preventDefault(); if (drag.over !== g.id) setDrag({ ...drag, over: g.id }) } }}
-                        onDrop={e => { e.preventDefault(); if (drag && drag.from !== g.id) mover(drag.from, g.id); setDrag(null) }}
-                        onDragEnd={() => setDrag(null)}
-                        className={`border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${foco?.id === g.id ? 'bg-primary-soft/70 outline-2 -outline-offset-2 outline-navy/50' : ''} ${off ? 'opacity-60' : ''} ${drag?.over === g.id && drag.from !== g.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === g.id ? 'opacity-50' : ''}`}>
+                      <tr key={g.uid ?? g.id} data-id={g.id} data-foco={foco?.id === g.id || undefined} {...dnd.item(g.id)}
+                        className={`${CLASE_ARRASTRE} border-b border-line/70 transition last:border-0 hover:bg-bg/60 ${foco?.id === g.id ? 'bg-primary-soft/70 outline-2 -outline-offset-2 outline-navy/50' : ''} ${off ? 'opacity-60' : ''} ${sel.has(g.id) ? 'bg-primary-soft/40' : ''}`}>
+                        <td className="pl-3"><Checkbox label={`Seleccionar ${g.descripcion || g.subcategoria || 'gasto'}`} checked={sel.has(g.id)} disabled={!seleccionable(g)} onChange={on => toggleFila(g, on)} /></td>
                         {personal && (
-                          <td className="px-1">
-                            <button type="button" aria-label={`Arrastrar ${g.descripcion || g.subcategoria}`} disabled={!puedeOrdenar}
-                              onPointerDown={() => puedeOrdenar && setDrag({ from: g.id, over: null })} onPointerUp={() => setDrag(d => (d && !d.over ? null : d))}
-                              className="grid h-8 w-6 cursor-grab place-items-center rounded text-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-30"><GripVertical className="size-4" /></button>
-                          </td>
+                          <td className="px-1"><AsaOrden {...dnd.asa(g.id)} habilitado={puedeOrdenar} motivo={bloqueo || 'Se necesitan al menos dos movimientos'} /></td>
                         )}
                         <td className="tabular px-3 py-2.5 whitespace-nowrap text-muted">{formatDate(g.fecha, cfg.formato_fecha)}</td>
                         <td className="max-w-60 px-3 py-2.5">
@@ -277,7 +322,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
 
             {/* Móvil: tarjetas; desliza a la izquierda para Editar, Clonar o Eliminar */}
             <ul className="space-y-2 md:hidden" aria-label="Movimientos">
-              {visible.map(g => {
+              {filasPagina.map(g => {
                 const al = ambitoLook(g.ambito, catalogo), cl = categoriaLook(g.categoria, catalogo, g.ambito), ml = medioLook(g.medioPago)
                 const off = g.estado === 'Anulado'
                 return (
@@ -285,8 +330,8 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                     {/* Móvil: subir/bajar en lugar de arrastrar (mismas reglas y la misma petición única) */}
                     {puedeOrdenar && (
                       <div className="absolute top-1/2 left-1 z-10 flex -translate-y-1/2 flex-col">
-                        <button type="button" aria-label={`Subir ${g.descripcion}`} disabled={rows[0]?.id === g.id} onClick={() => mover(g.id, null, -1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronUp className="size-4" /></button>
-                        <button type="button" aria-label={`Bajar ${g.descripcion}`} disabled={rows[rows.length - 1]?.id === g.id} onClick={() => mover(g.id, null, 1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronDown className="size-4" /></button>
+                        <button type="button" aria-label={`Subir ${g.descripcion}`} disabled={rows[0]?.id === g.id} onClick={() => mover(g.id, -1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronUp className="size-4" /></button>
+                        <button type="button" aria-label={`Bajar ${g.descripcion}`} disabled={rows[rows.length - 1]?.id === g.id} onClick={() => mover(g.id, 1)} className="rounded p-0.5 text-muted disabled:opacity-30"><ChevronDown className="size-4" /></button>
                       </div>
                     )}
                     <SwipeRow width={off ? 120 : 168} actions={g.problemaId ? (
@@ -301,6 +346,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                       <button type="button" onClick={() => setConfirm(g)} className="flex flex-1 flex-col items-center justify-center gap-1 bg-coral-soft text-xs font-medium text-coral"><Trash2 className="size-4" />Eliminar</button>
                     </>)}>
                       <div className={`flex items-center gap-3 p-3 ${puedeOrdenar ? 'pl-8' : ''} ${off ? 'opacity-60' : ''}`}>
+                        <Checkbox label={`Seleccionar ${g.descripcion || g.subcategoria || 'gasto'}`} checked={sel.has(g.id)} disabled={!seleccionable(g)} onChange={on => toggleFila(g, on)} />
                         <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: `${cl.color}1F`, color: cl.color }}><cl.Icon className="size-5" /></span>
                         <div className="min-w-0 flex-1">
                           <p className={`truncate text-sm font-semibold ${off ? 'line-through' : ''}`}>{g.descripcion || g.subcategoria || g.categoria}</p>
@@ -342,6 +388,20 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
               <p className="tabular mt-1 text-lg font-bold">{formatMoney(toCents(confirm.monto), confirm.moneda)}</p>
             </div>
             <p className="text-muted">Dejará de contar en totales, gráficos y cajas. No se borra de la hoja: queda en <b>Eliminados</b> y puedes restaurarlo cuando quieras.</p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!confirmLote} onClose={() => setConfirmLote(null)} size="sm" title={`Eliminar ${confirmLote?.length ?? 0} gasto${confirmLote?.length === 1 ? '' : 's'}`} icon={<Trash2 className="size-5" />}
+        footer={<><Button variant="outline" onClick={() => setConfirmLote(null)}>Cancelar</Button><Button variant="danger" disabled={loteOcupado} onClick={eliminarLote}>Eliminar {confirmLote?.length ?? 0}</Button></>}>
+        {confirmLote && (
+          <div className="space-y-2 text-sm">
+            <div className="rounded-xl border border-line bg-bg/50 p-3">
+              <p className="font-semibold">{confirmLote.length} movimiento{confirmLote.length === 1 ? '' : 's'} seleccionado{confirmLote.length === 1 ? '' : 's'}</p>
+              <p className="tabular mt-1 text-lg font-bold">{formatMoney(confirmLote.reduce((t, g) => t + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0), cfg.moneda || 'PEN')}</p>
+              {confirmLote.some(g => g.moneda !== (cfg.moneda || 'PEN')) && <p className="text-[11px] text-muted">El total solo suma los gastos en {cfg.moneda || 'PEN'}.</p>}
+            </div>
+            <p className="text-muted">Dejarán de contar en totales, gráficos, fuentes y cajas. No se borran de la hoja: quedan en <b>Eliminados</b> y puedes restaurarlos cuando quieras. Si falla el guardado, no se elimina ninguno.</p>
           </div>
         )}
       </Modal>

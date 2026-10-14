@@ -828,10 +828,14 @@ describe('backend Apps Script', () => {
       expect(fuente({ id: 'f-x', recurrencia: 'unica', mes: '' }).error.code).toBe('VALIDATION')
       expect(fuente({ id: 'f x!' }).error.code).toBe('VALIDATION')
       expect(fuente({ id: 'f-usd', nombre: 'Dólares', moneda: 'USD' }).ok).toBe(true)
-      // mismo medio en dos fuentes activas → ambiguo; inactiva sí
+      // v1.16: varias fuentes (activas) pueden compartir un medio; la clave es el ID, no el medio
       expect(fuente({ id: 'f-s1', nombre: 'Sodexo', medioPago: 'Sodexo' }).ok).toBe(true)
-      expect(fuente({ id: 'f-s2', nombre: 'Sodexo 2', medioPago: 'sodexo' }).error.message).toMatch(/ya está asociada/)
+      expect(fuente({ id: 'f-s2', nombre: 'Sodexo 2', medioPago: 'sodexo' }).ok).toBe(true)
       expect(fuente({ id: 'f-s2', nombre: 'Sodexo 2', medioPago: 'sodexo', activo: false }).ok).toBe(true)
+      // una fuente con varios medios: se guardan separados por "|", sin repetidos ni 'Libre'
+      expect(fuente({ id: 'f-m', nombre: 'Multi', medioPago: ' Yape | plin |YAPE|Libre' }).data[10]).toBe('Yape|plin')
+      expect(fuente({ id: 'f-m', nombre: 'Multi', medioPago: 'Libre' }).data[10]).toBe('')
+      expect(b.post('saveMedio', { nombre: 'A|B' }).error.code).toBe('VALIDATION')
       const off = fuente({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10', activo: false })
       expect(off.data[6]).toBe(false)
       expect(b.post('data', { fresh: true }).data.fuentes.some((f: unknown[]) => f[0] === 'f-extra1')).toBe(true)
@@ -1093,6 +1097,28 @@ describe('backend Apps Script', () => {
     expect(b.post('data').data.gastos[0][10]).toBe('Anulado')
     b.post('setEstado', { id: gasto().id, estado: 'Activo' })
     expect(b.post('data').data.gastos[0][10]).toBe('Activo')
+  })
+
+  it('eliminación masiva: todo o nada, baja lógica recuperable y sin tocar otros gastos', () => {
+    const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']
+    ids.forEach(id => b.post('saveGasto', gasto({ id })))
+    const estados = () => b.post('data', { fresh: true }).data.gastos.map((r: unknown[]) => [r[13], r[10]])
+    // un ID inexistente → error y ningún cambio
+    expect(b.post('setEstadoLote', { ids: [ids[0], '99999999-9999-4999-8999-999999999999'], estado: 'Anulado' }).error.code).toBe('NOT_FOUND')
+    expect(estados().every((e: unknown[]) => e[1] === 'Activo')).toBe(true)
+    // validaciones
+    expect(b.post('setEstadoLote', { ids: [], estado: 'Anulado' }).error.code).toBe('VALIDATION')
+    expect(b.post('setEstadoLote', { ids: [ids[0], ids[0]], estado: 'Anulado' }).error.code).toBe('VALIDATION')
+    expect(b.post('setEstadoLote', { ids: [ids[0]], estado: 'Borrado' }).error.code).toBe('VALIDATION')
+    // lote válido: solo los elegidos pasan a Anulado
+    expect(b.post('setEstadoLote', { ids: [ids[0], ids[2]], estado: 'Anulado' }).ok).toBe(true)
+    expect(estados()).toEqual([[ids[0], 'Anulado'], [ids[1], 'Activo'], [ids[2], 'Anulado']])
+    // se puede restaurar
+    expect(b.post('setEstadoLote', { ids: [ids[0], ids[2]], estado: 'Activo' }).ok).toBe(true)
+    expect(estados().every((e: unknown[]) => e[1] === 'Activo')).toBe(true)
+    // repetir el mismo lote es idempotente
+    b.post('setEstadoLote', { ids: [ids[1]], estado: 'Anulado' }); b.post('setEstadoLote', { ids: [ids[1]], estado: 'Anulado' })
+    expect(estados()[1]).toEqual([ids[1], 'Anulado'])
   })
 
   it('valida entradas en el límite de confianza', () => {

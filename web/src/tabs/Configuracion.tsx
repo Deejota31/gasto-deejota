@@ -1,22 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  Activity, Bell, FolderOpen, Pencil, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
+  Activity, FolderOpen, Pencil, CheckCircle2, CircleAlert, Database, Download, ExternalLink, FileSpreadsheet, 
   Eye, EyeOff, Info, KeyRound, Link2, Loader2, Palette, RefreshCw, Settings, ShieldCheck, Tags, Unplug,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import { saveConnection, validarConexion, type CarpetaRespaldo, type Connection } from '../lib/api'
-import { Button, Card, ErrorBox, Field, inputCls, Select, Switch } from '../components/ui'
+import { Button, Card, ErrorBox, Field, inputCls } from '../components/ui'
 import { FuncionesBackend } from '../components/FuncionesBackend'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
-import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
+import { Preferencias } from '../components/Preferencias'
 
-export const APP_VERSION = '1.15.0'
-
-/** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
-function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return <span className="inline-flex items-center gap-1.5 [&>svg]:size-3.5 [&>svg]:text-muted">{icon}{children}</span>
-}
+export const APP_VERSION = '1.16.0'
 
 export default function Configuracion({ store, conn, onConnect, notify, goCatalogo }: {
   store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
@@ -49,7 +44,6 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
   const saveCfg = (clave: string, valor: string) => store.track(`config:${clave}`,
     { pending: 'Guardando configuración…', ok: 'Configuración guardada correctamente.', error: 'No se pudo guardar la configuración.' },
     () => store.actions.saveConfig(clave, valor))
-  const monedas = (cfg.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   const estado = store.error ? { tone: 'error', text: 'Con errores' } : store.loading ? { tone: 'sync', text: 'Sincronizando…' } : store.data ? { tone: 'ok', text: conn ? 'Conectado' : 'Modo demostración' } : { tone: 'idle', text: 'Sin datos' }
 
   return (
@@ -99,56 +93,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
 
         {/* B. Preferencias: tres grupos lógicos en una cuadrícula adaptable */}
         <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />}>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3">
-              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Moneda y finanzas</legend>
-              <Field label={<Label icon={<Coins />}>Moneda principal</Label>} htmlFor="cfg-moneda">
-                <Select id="cfg-moneda" label="Moneda principal" value={cfg.moneda || 'PEN'} onChange={v => saveCfg('moneda', v)} options={monedas} />
-              </Field>
-              <Field label={<Label icon={<Coins />}>Monedas permitidas</Label>} htmlFor="cfg-monedas" hint="Códigos ISO separados por coma">
-                <input id="cfg-monedas" className={inputCls} defaultValue={cfg.monedas || 'PEN,USD'} onBlur={e => {
-                  const v = e.target.value.toUpperCase().split(',').map(s => s.trim()).filter(s => /^[A-Z]{3}$/.test(s)).join(',')
-                  if (v && v !== cfg.monedas) void saveCfg('monedas', v)
-                }} />
-              </Field>
-              {monedas.filter(m => m !== (cfg.moneda || 'PEN')).filter(m => m === 'USD').map(m => (
-                <Field key={m} label={<Label icon={<Coins />}>{`Tipo de cambio ${m} → ${cfg.moneda || 'PEN'}`}</Label>} htmlFor={`cfg-tc-${m}`} hint="Solo USD tiene tipo de cambio configurable.">
-                  <input id={`cfg-tc-${m}`} className={`${inputCls} tabular`} type="number" step="0.0001" min="0" defaultValue={cfg[`tipo_cambio_${m}`] ?? ''}
-                    onBlur={e => e.target.value !== (cfg[`tipo_cambio_${m}`] ?? '') && saveCfg(`tipo_cambio_${m}`, e.target.value)} />
-                </Field>
-              ))}
-            </fieldset>
-            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3">
-              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Regionalización</legend>
-              <Field label={<Label icon={<Globe2 />}>Zona horaria</Label>} htmlFor="cfg-tz">
-                <input id="cfg-tz" className={inputCls} defaultValue={cfg.zona_horaria || 'America/Lima'} onBlur={e => {
-                  const v = e.target.value.trim()
-                  try { new Intl.DateTimeFormat('es', { timeZone: v }) } catch { return setError('Zona horaria inválida (ej. America/Lima).') }
-                  if (v !== cfg.zona_horaria) void saveCfg('zona_horaria', v)
-                }} />
-              </Field>
-              <Field label={<Label icon={<CalendarDays />}>Formato de fecha</Label>} htmlFor="cfg-fecha">
-                <Select id="cfg-fecha" label="Formato de fecha" value={cfg.formato_fecha || 'dd/MM/yyyy'} onChange={v => saveCfg('formato_fecha', v)} options={['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd']} />
-              </Field>
-            </fieldset>
-            <fieldset className="min-w-0 space-y-3 rounded-xl border border-line p-3 md:col-span-2 xl:col-span-1">
-              <legend className="px-1 text-[11px] font-semibold tracking-wide text-muted uppercase">Interfaz y experiencia</legend>
-              <Field label={<Label icon={<Palette />}>Tema visual</Label>} htmlFor="cfg-tema">
-                <Select id="cfg-tema" label="Tema visual" value={cfg.tema || 'claro'} onChange={v => saveCfg('tema', v)} options={['claro', 'oscuro']} />
-              </Field>
-              <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
-                <select id="cfg-refresco" aria-label="Actualizar datos automáticamente" className={inputCls} value={String(refrescoSegundos(cfg.refresco_segundos))}
-                  onChange={e => saveCfg('refresco_segundos', e.target.value)}>
-                  {REFRESCO_OPCIONES.map(o => <option key={o.segundos} value={o.segundos}>{o.label}</option>)}
-                </select>
-              </Field>
-              <div className="flex items-center gap-2 rounded-xl bg-bg/60 px-3 py-2.5">
-                <Bell className="size-4 shrink-0 text-muted" />
-                <Switch checked={cfg.notificaciones !== 'false'} onChange={v => saveCfg('notificaciones', String(v))} label="Mostrar notificaciones al guardar" />
-              </div>
-              <p className="text-[11px] text-muted">Los errores siempre se notifican.</p>
-            </fieldset>
-          </div>
+          <Preferencias cfg={cfg} saveCfg={saveCfg} setError={setError} />
         </Card>
 
         {/* D. Administración de datos */}

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarRange, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, FilterX, Layers, Search, Shapes, Tag, X } from 'lucide-react'
-import { monthLabel, monthEnd, presetRange, rangeLabel, shiftMonth, singleMonth } from '../lib/dates'
+import { formatDate, monthLabel, monthEnd, presetRange, rangeLabel, shiftMonth, singleMonth } from '../lib/dates'
 import { subKey } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook, sortMedios, subcategoriaLook, type Look } from '../lib/visual'
 import type { CatalogoItem, Filters, PeriodPreset } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { TIPOS_GASTO } from '../lib/types'
-import { Checkbox, inputCls, useDismiss } from './ui'
+import { Checkbox, inputCls } from './ui'
+import { Calendario } from './DatePicker'
 import { usePopover } from './Combobox'
 
 export function emptyFilters(today: string): Filters {
@@ -161,22 +162,30 @@ const PRESETS: { id: Exclude<PeriodPreset, 'custom'>; label: string }[] = [
   { id: '6m', label: 'Últimos 6 meses' }, { id: 'anio', label: 'Este año' },
 ]
 
-/** Período: atajos, navegación por mes y rango personalizado. */
+/** Período: atajos, navegación por mes y rango personalizado con calendario (portal: nunca se corta ni sale de pantalla). */
 export function PeriodPicker({ value, today, onChange }: { value: Filters; today: string; onChange: (p: Pick<Filters, 'preset' | 'desde' | 'hasta'>) => void }) {
   const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  const ref = useDismiss(open, close)
+  const btn = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const { pos, host } = usePopover(open, btn, { minWidth: 304, maxWidth: 360, maxHeight: 620 })
+  const close = useCallback((foco = true) => { setOpen(false); if (foco) btn.current?.focus() }, [])
+  useEffect(() => {
+    if (!open) return
+    const fuera = (e: PointerEvent) => { const n = e.target as Node; if (!panel.current?.contains(n) && !btn.current?.contains(n)) close(false) }
+    document.addEventListener('pointerdown', fuera)
+    return () => document.removeEventListener('pointerdown', fuera)
+  }, [open, close])
   const month = singleMonth(value.desde, value.hasta)
   const [desde, setDesde] = useState(value.desde)
   const [hasta, setHasta] = useState(value.hasta)
   const goMonth = (p: string) => onChange({ preset: p === today.slice(0, 7) ? 'mes' : 'custom', desde: `${p}-01`, hasta: monthEnd(p) })
 
   return (
-    <div ref={ref} className="relative flex items-center gap-1">
+    <div className="relative flex items-center gap-1">
       <button type="button" aria-label="Mes anterior" disabled={!month} onClick={() => month && goMonth(shiftMonth(month, -1))}
         className="grid h-10 w-8 place-items-center rounded-xl border border-line bg-card text-muted hover:text-ink disabled:opacity-40"><ChevronLeft className="size-4" /></button>
-      <button type="button" aria-haspopup="dialog" aria-expanded={open} aria-label="Período"
-        onClick={() => { setDesde(value.desde); setHasta(value.hasta); setOpen(!open) }}
+      <button ref={btn} type="button" aria-haspopup="dialog" aria-expanded={open} aria-label="Período"
+        onClick={() => { setDesde(value.desde); setHasta(value.hasta); setOpen(o => !o) }}
         className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-card px-3 text-left text-sm hover:border-navy/30">
         <CalendarRange className="size-4 shrink-0 text-navy" />
         <span className="min-w-0">
@@ -186,28 +195,28 @@ export function PeriodPicker({ value, today, onChange }: { value: Filters; today
       </button>
       <button type="button" aria-label="Mes siguiente" disabled={!month} onClick={() => month && goMonth(shiftMonth(month, 1))}
         className="grid h-10 w-8 place-items-center rounded-xl border border-line bg-card text-muted hover:text-ink disabled:opacity-40"><ChevronRight className="size-4" /></button>
-      {open && (
-        <div role="dialog" aria-label="Elegir período" className="absolute top-11 left-0 z-40 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-line bg-card p-3 shadow-xl">
+      {open && pos && createPortal(
+        <div ref={panel} role="dialog" aria-label="Elegir período"
+          onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close() } }}
+          style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, maxHeight: pos.maxHeight, width: 'max-content', maxWidth: 'calc(100vw - 16px)' }}
+          className="fade-in z-[300] overflow-y-auto overscroll-contain rounded-2xl border border-line bg-card p-3 text-ink shadow-xl ring-1 ring-black/5">
           <div className="grid grid-cols-2 gap-1">
             {PRESETS.map(p => (
-              <button key={p.id} type="button" onClick={() => { onChange({ preset: p.id, ...presetRange(p.id, today) }); setOpen(false) }}
+              <button key={p.id} type="button" onClick={() => { onChange({ preset: p.id, ...presetRange(p.id, today) }); close() }}
                 className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] ${value.preset === p.id ? 'bg-primary-soft font-medium text-navy' : 'hover:bg-bg'}`}>
                 {p.label}{value.preset === p.id && <Check className="size-3.5" />}
               </button>
             ))}
           </div>
           <div className="mt-3 border-t border-line pt-3">
-            <p className="mb-2 text-xs font-semibold">Personalizado</p>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-[11px] text-muted">Desde<input type="date" className={inputCls} value={desde} max={hasta} onChange={e => setDesde(e.target.value)} /></label>
-              <label className="text-[11px] text-muted">Hasta<input type="date" className={inputCls} value={hasta} min={desde} onChange={e => setHasta(e.target.value)} /></label>
-            </div>
+            <p className="mb-1 text-xs font-semibold">Personalizado</p>
+            <p className="mb-2 text-[11px] text-muted tabular" data-testid="rango-elegido">{desde ? formatDate(desde) : '—'} → {hasta ? formatDate(hasta) : '—'}</p>
+            <Calendario modo="rango" desde={desde} hasta={hasta} today={today} onRango={(a, b) => { setDesde(a); setHasta(b) }} />
             <button type="button" disabled={!desde || !hasta || desde > hasta}
-              onClick={() => { onChange({ preset: 'custom', desde, hasta }); setOpen(false) }}
+              onClick={() => { onChange({ preset: 'custom', desde, hasta }); close() }}
               className="mt-2 w-full rounded-xl bg-navy py-2 text-sm font-medium text-white disabled:opacity-50 dark:text-[#0E1525]">Aplicar rango</button>
           </div>
-        </div>
-      )}
+        </div>, host())}
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { mediosDeFuente } from './fuenteMedios'
 import { addDays, daysBetween, monthsInRange } from './dates'
 import { percent, toBaseCents } from './money'
 import type { Caja, Filters, Fuente, FuenteMes, Gasto, Presupuesto } from './types'
@@ -242,12 +243,16 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     const asignado = cents ?? 0
     return { fuente: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado }
   })
-  const porMedio = new Map<string, FuenteResumen>()
+  // Una fuente puede tener 0, 1 o varios medios y varias fuentes pueden compartir un medio: el grupo de un medio son
+  // sus fuentes en el orden definido por el usuario (el medio no es una clave).
+  const porMedio = new Map<string, FuenteResumen[]>()
   for (const r of fResumen) {
-    const k = r.fuente.medioPago && nrm(r.fuente.medioPago)
-    if (k && (!porMedio.has(k) || (r.fuente.activo && !porMedio.get(k)!.fuente.activo))) porMedio.set(k, r)
+    for (const m of mediosDeFuente(r.fuente.medioPago)) {
+      const k = nrm(m)
+      porMedio.set(k, [...(porMedio.get(k) ?? []), r])
+    }
   }
-  const libres = fResumen.filter(r => r.fuente.activo && !r.fuente.medioPago)
+  const libres = fResumen.filter(r => r.fuente.activo && !mediosDeFuente(r.fuente.medioPago).length)
   const principal = libres.find(r => r.aporta > 0) ?? libres[0] ?? null
   if (principal) principal.principal = true
   let gastadoInactivas = 0, countInactivas = 0, gastadoSinFuente = 0, countSinFuente = 0
@@ -305,8 +310,10 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     const cupo = new Map(fResumen.map(r => [r, Math.max(0, r.aporta)]))
     const cronologico = elegibles.sort((a, b) => a.g.fecha.localeCompare(b.g.fecha) || a.g.creadoEn.localeCompare(b.g.creadoEn) || a.g.id.localeCompare(b.g.id))
     for (const { g, cents } of cronologico) {
-      const fm = porMedio.get(nrm(g.medioPago))
-      if (fm && !fm.fuente.activo) { gastadoInactivas += cents; countInactivas++; fm.gastado += cents; fm.count++; continue }
+      const grupo = porMedio.get(nrm(g.medioPago)) ?? []
+      const activas = grupo.filter(r => r.fuente.activo)
+      // Todas las fuentes de ese medio están inactivas: el gasto va al cubo de "inactivas" (a la primera del grupo).
+      if (grupo.length && !activas.length) { gastadoInactivas += cents; countInactivas++; grupo[0].gastado += cents; grupo[0].count++; continue }
       let resto = cents, contado = false
       const poner = (r: FuenteResumen, monto: number) => {
         if (monto <= 0) return
@@ -315,13 +322,17 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
         if (!contado) { r.count++; contado = true }
         resto -= monto
       }
-      if (fm) poner(fm, Math.min(resto, Math.max(0, cupo.get(fm) ?? 0)))
+      // Cada centavo se coloca una sola vez: primero las fuentes de su medio (en orden), luego las libres.
+      for (const r of activas) {
+        if (resto <= 0) break
+        poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
+      }
       for (const r of libresOrden) {
         if (resto <= 0) break
         poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
       }
       if (resto > 0) {
-        const ultimo = libresOrden[libresOrden.length - 1] ?? fm
+        const ultimo = libresOrden[libresOrden.length - 1] ?? activas[activas.length - 1]
         if (ultimo) poner(ultimo, resto)
         else { gastadoSinFuente += resto; countSinFuente++ }
       }

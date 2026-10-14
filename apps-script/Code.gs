@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.15.0';
+var APP_VERSION = '1.16.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -632,7 +632,23 @@ function appError_(code, message) {
 function checkToken_(token) {
   var expected = PropertiesService.getScriptProperties().getProperty('API_TOKEN');
   if (!expected) throw appError_('NOT_INSTALLED', 'Ejecuta setup() en Apps Script antes de usar la app.');
-  if (typeof token !== 'string' || token !== expected) throw appError_('UNAUTHORIZED', 'Token inválido.');
+  if (!igualSeguro_(token, expected)) throw appError_('UNAUTHORIZED', 'Token inválido.');
+}
+
+// Zona horaria de la app: la de CONFIG (zona_horaria); si falta o no es válida, America/Lima. Se lee una vez por ejecución.
+var TZ_ = null;
+function tz_() {
+  if (TZ_) return TZ_;
+  var z = 'America/Lima';
+  try {
+    var ss = openSpreadsheet_(false);
+    if (ss.getSheetByName('CONFIG')) {
+      readRows_(ss, 'CONFIG').forEach(function (r) { if (str_(r[0]) === 'zona_horaria' && str_(r[1])) z = str_(r[1]); });
+    }
+    Utilities.formatDate(new Date(), z, 'yyyy');
+  } catch (e) { z = 'America/Lima'; }
+  TZ_ = z;
+  return z;
 }
 
 function withLock_(fn) {
@@ -648,7 +664,7 @@ function getData_(fresh) {
   var cached = fresh ? null : readCache_(gen);
   if (cached) { cached.cache = true; return cached; }
   var ss = openSpreadsheet_(false);
-  var tz = 'America/Lima';
+  var tz = tz_();
   var data = {
     version: APP_VERSION,
     sheetUrl: ss.getUrl(),
@@ -710,7 +726,17 @@ function periodo_(v, tz) {
 }
 
 function autoVacio_(v) { v = str_(v).replace(/^'/, ''); return norm_(v) === 'auto' ? '' : v; }  // Icono 'auto' = el automático
-function libreVacio_(v) { v = str_(v).replace(/^'/, ''); return norm_(v) === 'libre' ? '' : v; } // Medio 'Libre' = fuente libre
+// Medios de una fuente: 0, 1 o varios separados por "|". 'Libre' o vacío = ninguno (fuente libre). Sin repetidos.
+function libreVacio_(v) {
+  var vistos = {}, out = [];
+  String(str_(v).replace(/^'/, '')).split('|').forEach(function (x) {
+    x = x.trim();
+    var k = norm_(x);
+    if (!x || k === 'libre' || vistos[k]) return;
+    vistos[k] = true; out.push(x);
+  });
+  return out.join('|');
+}
 function str_(v) { return v === null || v === undefined ? '' : String(v).trim(); }
 function bool_(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
 function num_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
@@ -767,6 +793,7 @@ var ACTIONS = {
   data: function (p) { return getData_(p.fresh === true); },
   saveGasto: function (p) { return saveGasto_(p); },
   setEstado: setEstado_,
+  setEstadoLote: setEstadoLote_,
   saveCatalogo: saveCatalogo_,
   renameCatalogo: renameCatalogo_,
   reorderCategorias: reorderCategorias_,
@@ -827,16 +854,16 @@ function saveGasto_(p, origen) {
       var ex = exRange.getValues()[0];
       var creado = ex[G.CREADO] instanceof Date ? ex[G.CREADO].toISOString() : str_(ex[G.CREADO]);
       var actualizado = ex[G.ACTUALIZADO] instanceof Date ? ex[G.ACTUALIZADO].toISOString() : str_(ex[G.ACTUALIZADO]);
-      if (creado !== actualizado) { if (plId) vincular_(ss, [[g.id, plId]]); return normalizeGastoRow_(ex, 'America/Lima'); }
+      if (creado !== actualizado) { if (plId) vincular_(ss, [[g.id, plId]]); return normalizeGastoRow_(ex, tz_()); }
       var redo = gastoToRow_(g, str_(ex[G.ESTADO]) || 'Activo', str_(ex[G.ORIGEN]) || 'web', creado, creado);
       exRange.setValues([redo]);
       if (plId) vincular_(ss, [[g.id, plId]]);
-      return normalizeGastoRow_(redo, 'America/Lima');
+      return normalizeGastoRow_(redo, tz_());
     }
     var row = gastoToRow_(g, 'Activo', origen || 'web', now, now);
     appendRows_(sh, [row]);
     if (plId) vincular_(ss, [[g.id, plId]]);
-    return normalizeGastoRow_(row, 'America/Lima');
+    return normalizeGastoRow_(row, tz_());
   }
   if (p.mode === 'update') {
     if (!rowIndex) throw appError_('NOT_FOUND', 'El gasto ya no existe en la hoja.');
@@ -845,7 +872,7 @@ function saveGasto_(p, origen) {
     var updated = gastoToRow_(g, str_(prev[G.ESTADO]) || 'Activo', str_(prev[G.ORIGEN]) || 'web',
       prev[G.CREADO] instanceof Date ? prev[G.CREADO].toISOString() : str_(prev[G.CREADO]), now);
     range.setValues([updated]);
-    return normalizeGastoRow_(updated, 'America/Lima');
+    return normalizeGastoRow_(updated, tz_());
   }
   throw appError_('VALIDATION', 'mode debe ser create o update.');
 }
@@ -859,6 +886,33 @@ function setEstado_(p) {
   sh.getRange(rowIndex, G.ESTADO + 1).setValue(p.estado);
   sh.getRange(rowIndex, G.ACTUALIZADO + 1).setValue(now);
   return { id: p.id, estado: p.estado, actualizadoEn: now };
+}
+
+// Elimina (Anulado) o restaura varios gastos en UNA petición y una sola lectura de IDs. Todo o nada: si algún ID no existe,
+// está repetido o es inválido no se cambia ninguno. Es la misma baja lógica de setEstado_ (recuperable desde "Eliminados").
+function setEstadoLote_(p) {
+  if (p.estado !== 'Activo' && p.estado !== 'Anulado') throw appError_('VALIDATION', 'Estado inválido.');
+  var ids = Array.isArray(p.ids) ? p.ids.map(function (x) { return requireId_(x); }) : [];
+  if (!ids.length || ids.length > 200) throw appError_('VALIDATION', 'Elige entre 1 y 200 gastos.');
+  var seen = {};
+  ids.forEach(function (id) { var k = id.toLowerCase(); if (seen[k]) throw appError_('VALIDATION', 'Hay IDs repetidos en la selección.'); seen[k] = true; });
+  var sh = openSpreadsheet_(false).getSheetByName('GASTOS');
+  var last = sh.getLastRow();
+  var col = last > 1 ? sh.getRange(2, G.ID + 1, last - 1, 1).getValues() : [];
+  var filas = {}, veces = {};
+  col.forEach(function (r, i) { var k = String(r[0]).toLowerCase(); if (seen[k]) { filas[k] = i + 2; veces[k] = (veces[k] || 0) + 1; } });
+  ids.forEach(function (id) {
+    var k = id.toLowerCase();
+    if (!filas[k]) throw appError_('NOT_FOUND', 'Algún gasto ya no existe en la hoja. Actualiza los datos y vuelve a elegir.');
+    if (veces[k] > 1) throw appError_('VALIDATION', 'Un gasto tiene el ID repetido en la hoja. Ejecuta repararIds primero.');
+  });
+  var now = new Date().toISOString();
+  ids.forEach(function (id) {
+    var r = filas[id.toLowerCase()];
+    sh.getRange(r, G.ESTADO + 1).setValue(p.estado);
+    sh.getRange(r, G.ACTUALIZADO + 1).setValue(now);
+  });
+  return { ids: ids, estado: p.estado, actualizadoEn: now };
 }
 
 function saveCatalogo_(p) {
@@ -1019,6 +1073,7 @@ function deleteCategoria_(p) {
 
 function saveMedio_(p) {
   var nombre = text_(p.nombre, 'Medio de pago', 40, true);
+  if (nombre.indexOf('|') >= 0) throw appError_('VALIDATION', 'El nombre del medio no puede contener “|” (se usa para separar varios medios en una fuente).');
   if (norm_(nombre) === 'libre') throw appError_('VALIDATION', '“Libre” está reservado para las fuentes sin medio de pago. Usa otro nombre.');
   var activo = p.activo !== false;
   var ss = openSpreadsheet_(false);
@@ -1117,7 +1172,7 @@ function savePresupuesto_(p) {
   var sh = openSpreadsheet_(false).getSheetByName('PRESUPUESTOS');
   var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues() : [];
   for (var i = 0; i < rows.length; i++) {
-    if (periodo_(rows[i][0], 'America/Lima') === p.periodo && str_(rows[i][1]) === cajaId) {
+    if (periodo_(rows[i][0], tz_()) === p.periodo && str_(rows[i][1]) === cajaId) {
       sh.getRange(i + 2, 3).setValue(monto);
       return [p.periodo, cajaId, monto];
     }
@@ -1387,7 +1442,7 @@ function atajoCatalogo_() {
   medios.sort(function (x, y) { return pos(x) - pos(y); });
   return {
     version: APP_VERSION,
-    hoy: Utilities.formatDate(new Date(), 'America/Lima', 'yyyy-MM-dd'),
+    hoy: Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd'),
     monedas: monedas, moneda: monedas[0], medios: medios,
     ambitos: orden(values(amb)).filter(function (a) { return (categorias[a] || []).length; }),
     categorias: categorias, subcategorias: subcategorias
@@ -1440,7 +1495,7 @@ function iso_(v) { return v instanceof Date ? v.toISOString() : str_(v); }
 function fuenteOut_(r) {
   return [str_(r[0]), str_(r[1]).replace(/^'/, ''), num_(r[2]), str_(r[3]) || 'PEN', str_(r[4]), autoVacio_(r[5]),
     str_(r[6]) === '' ? true : bool_(r[6]), num_(r[7]), str_(r[8]) === 'unica' ? 'unica' : 'mensual',
-    periodo_(r[9], 'America/Lima'), libreVacio_(r[10]), iso_(r[11]), iso_(r[12])];
+    periodo_(r[9], tz_()), libreVacio_(r[10]), iso_(r[11]), iso_(r[12])];
 }
 
 /**
@@ -1483,7 +1538,7 @@ function saveFuente_(p) {
   if (mes && !MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes de aplicación inválido (AAAA-MM).');
   if (recurrencia === 'unica' && !mes) throw appError_('VALIDATION', 'Una fuente de un solo mes necesita su mes de aplicación.');
   var activo = p.activo === undefined ? true : p.activo === true;
-  var medio = libreVacio_(text_(p.medioPago, 'Medio de pago', 60, false));
+  var medio = libreVacio_(text_(p.medioPago, 'Medios de pago', 400, false)); // varios medios permitidos; el importe no se divide
   var h = fuentesSheets_();
   var moneda = monedaPermitida_(h.ss, p.moneda);
   var rows = fuentesRows_(h.fuentes);
@@ -1493,10 +1548,7 @@ function saveFuente_(p) {
     if (!rid) continue;
     if (rid === id) { idx = i; continue; }
     if (norm_(String(rows[i][1]).replace(/^'/, '')) === norm_(nombre)) throw appError_('VALIDATION', 'Ya existe una fuente llamada “' + str_(rows[i][1]) + '”.');
-    var rActivo = str_(rows[i][6]) === '' ? true : bool_(rows[i][6]);
-    if (medio && activo && rActivo && norm_(libreVacio_(rows[i][10])) === norm_(medio)) {
-      throw appError_('VALIDATION', 'La fuente “' + str_(rows[i][1]) + '” ya está asociada a ' + medio + '. Desactívala o quita su medio primero.');
-    }
+    // Varias fuentes pueden compartir el mismo medio de pago: el medio no es una clave (la clave es el ID).
   }
   var now = new Date().toISOString();
   var prev = idx >= 0 ? rows[idx] : null;
@@ -1519,7 +1571,7 @@ function saveFuenteMes_(p) {
   var rows = n ? h.meses.getRange(2, 1, n, SHEETS.FUENTES_MESES.length).getValues() : [];
   var idx = -1;
   for (var i = 0; i < rows.length; i++) {
-    if (str_(rows[i][0]) === fuenteId && periodo_(rows[i][1], 'America/Lima') === mes && (str_(rows[i][3]) === 'desde' ? 'desde' : 'solo') === modo) idx = i;
+    if (str_(rows[i][0]) === fuenteId && periodo_(rows[i][1], tz_()) === mes && (str_(rows[i][3]) === 'desde' ? 'desde' : 'solo') === modo) idx = i;
   }
   if (p.quitar === true) {
     if (idx >= 0) h.meses.deleteRow(idx + 2);
@@ -1580,7 +1632,7 @@ function migrarGeneralAFuente_() {
     true, 0, 'mensual', '', 'Libre', now, now];
   appendRows_(h.fuentes, [fila]);
   var ajustes = readRows_(h.ss, 'PRESUPUESTOS').filter(function (r) { return str_(r[1]) === str_(general[0]); })
-    .map(function (r) { return [FUENTE_GENERAL_ID, periodo_(r[0], 'America/Lima'), num_(r[2]), 'solo', now]; })
+    .map(function (r) { return [FUENTE_GENERAL_ID, periodo_(r[0], tz_()), num_(r[2]), 'solo', now]; })
     .filter(function (r) { return MES_RE.test(r[1]); });
   appendRows_(h.meses, ajustes);
   return { creada: true, meses: ajustes.length, respaldo: respaldo.url, fuente: fuenteOut_(fila),
@@ -1690,6 +1742,10 @@ function saveConfig_(p) {
   var allowed = CONFIG_INICIAL.map(function (r) { return r[0]; });
   if (allowed.indexOf(p.clave) < 0) throw appError_('VALIDATION', 'Clave de configuración no permitida.');
   var valor = text_(p.valor, 'Valor', 200, false);
+  if (p.clave === 'zona_horaria') {
+    try { Utilities.formatDate(new Date(), valor, 'yyyy'); } catch (e) { throw appError_('VALIDATION', 'Zona horaria inválida (ej. America/Lima).'); }
+    TZ_ = null;
+  }
   var sh = openSpreadsheet_(false).getSheetByName('CONFIG');
   var idx = findRowByValue_(sh, 1, p.clave);
   if (idx) sh.getRange(idx, 2).setValue(valor); else appendRows_(sh, [[p.clave, valor]]);
@@ -1711,7 +1767,7 @@ function diagnose_() {
  */
 function backup_() {
   var ss = openSpreadsheet_(false);
-  var name = SPREADSHEET_NAME + ' - Respaldo ' + Utilities.formatDate(new Date(), 'America/Lima', 'yyyy-MM-dd HH:mm');
+  var name = SPREADSHEET_NAME + ' - Respaldo ' + Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
   try {
     var carpeta = carpetaRespaldos_(ss);
     var copia = DriveApp.getFileById(ss.getId()).makeCopy(name, carpeta);
@@ -2116,7 +2172,7 @@ function saveGastosBatch_(p) {
     estado: 'confirmado', loteId: loteId, solicitados: gastos.length, confirmados: gastos.length,
     nuevos: nuevas.length, yaExistian: gastos.length - nuevas.length,
     ids: gastos.map(function (g) { return g.id; }),
-    gastos: filas.map(function (r) { return normalizeGastoRow_(r, 'America/Lima'); }),
+    gastos: filas.map(function (r) { return normalizeGastoRow_(r, tz_()); }),
     mensaje: 'Se registraron ' + gastos.length + ' gastos.'
   };
 }

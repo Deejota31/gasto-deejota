@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
-  Copy, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2,
+  Copy, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, X,
 } from 'lucide-react'
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel, todayIn } from '../lib/dates'
@@ -13,6 +13,12 @@ import { dependenciasFuente } from '../lib/dependencias'
 import { MenuAcciones } from './MenuAcciones'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 import { Combobox } from './Combobox'
+import { MonthPicker } from './DatePicker'
+import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
+import { guardarPref, leerPref } from '../lib/prefs'
+import { mediosDeFuente, unirMedios } from '../lib/fuenteMedios'
+
+const NINGUNO = '__ninguno__'
 
 /**
  * Fuentes de dinero (v1.8): General, Sodexo, Extra 1… Cada fuente activa suma su importe del mes al presupuesto
@@ -37,7 +43,8 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
   const todas = useMemo(() => fuentes.map(r => r.fuente), [fuentes])
   const [q, setQ] = useState('')
   const [estado, setEstado] = useState<'todas' | 'activas' | 'inactivas'>('todas')
-  const [vista, setVista] = useState<'grid' | 'lista'>('grid')
+  const [vista, setVistaState] = useState<'grid' | 'lista'>(() => leerPref('deejota.vista.fuentes', ['grid', 'lista'] as const, 'lista'))
+  const setVista = (v: 'grid' | 'lista') => { setVistaState(v); guardarPref('deejota.vista.fuentes', v) }
   const [verTodas, setVerTodas] = useState(false)
   const [form, setForm] = useState<{ fuente: Fuente | null; clonDe?: Fuente | null; key: number } | null>(null)
   const [borrar, setBorrar] = useState<FuenteResumen | null>(null)
@@ -49,7 +56,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
   const term = normName(q)
   const visibles = fuentes
     .filter(r => estado === 'todas' || (estado === 'activas') === r.fuente.activo)
-    .filter(r => !term || normName(`${r.fuente.nombre} ${r.fuente.medioPago}`).includes(term))
+    .filter(r => !term || normName(`${r.fuente.nombre} ${mediosDeFuente(r.fuente.medioPago).join(' ')}`).includes(term))
   const filtrando = !!term || estado !== 'todas'
   // Con muchas fuentes se ven las primeras 6 (o todas al buscar/filtrar o al pedirlo): la página no se vuelve eterna en el móvil.
   const LIMITE = 6
@@ -66,6 +73,12 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
     store.track('fuentes:orden', { pending: 'Guardando el orden…', ok: 'Orden de fuentes guardado.', error: 'No se pudo guardar el orden de las fuentes. Se restauró el anterior.' },
       () => store.actions.reorderFuentes(xs), { retry: false })
   }
+  // Arrastrar y soltar: solo con la lista completa (sin búsqueda, filtros ni "ver menos"); guarda UNA vez al soltar.
+  const puedeArrastrar = !filtrando && mostradas.length === fuentes.length && fuentes.length > 1
+  const motivoNoArrastrar = filtrando ? 'Quita la búsqueda y los filtros para reordenar' : mostradas.length < fuentes.length ? 'Muestra todas las fuentes para reordenar' : 'Se necesitan al menos dos fuentes'
+  const dnd = useReorden({ ids, habilitado: puedeArrastrar, nombre: id => fuentes.find(r => r.fuente.id === id)?.fuente.nombre ?? 'Fuente',
+    onCommit: xs => store.track('fuentes:orden', { pending: 'Guardando el orden…', ok: 'Orden de fuentes guardado.', error: 'No se pudo guardar el orden de las fuentes. Se restauró el anterior.' },
+      () => store.actions.reorderFuentes(xs), { retry: false }) })
   const guardarEstado = (f: Fuente, on: boolean) => store.track(`fuente:${f.id}`,
     { pending: on ? `Activando ${f.nombre}…` : `Desactivando ${f.nombre}…`, ok: `${f.nombre} ${on ? 'activada: vuelve a sumar al presupuesto' : 'desactivada: ya no suma al presupuesto. No se borró nada'}.`, error: `No se pudo ${on ? 'activar' : 'desactivar'} ${f.nombre}.` },
     () => store.actions.saveFuente({ ...f, activo: on }))
@@ -115,17 +128,21 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         </div>
       )}
 
-      {muchas && (
-        <div className="mb-3 grid gap-2 rounded-2xl bg-bg/70 p-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-          <label className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
-            <input aria-label="Buscar fuente" className={`${inputCls} h-11 pl-9`} placeholder="Buscar fuente…" value={q} onChange={e => setQ(e.target.value)} />
-          </label>
-          <div className="w-full sm:w-36"><SelectField label="Filtrar fuentes por estado" value={estado} onChange={v => setEstado(v as typeof estado)}>
-            <option value="todas">Todas</option><option value="activas">Activas</option><option value="inactivas">Inactivas</option>
-          </SelectField></div>
-          <div className="flex items-center gap-1 rounded-xl bg-card p-1 ring-1 ring-line" role="radiogroup" aria-label="Vista de fuentes">
-            {([['grid', LayoutGrid, 'Tarjetas'], ['lista', List, 'Lista']] as const).map(([v, Icon, l]) => (
+      {fuentes.length > 0 && (
+        <div className={`mb-3 grid gap-2 rounded-2xl bg-bg/70 p-2 ${muchas ? 'sm:grid-cols-[minmax(0,1fr)_auto_auto]' : 'grid-cols-[1fr_auto]'}`}>
+          {muchas ? (
+            <>
+              <label className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
+                <input aria-label="Buscar fuente" className={`${inputCls} h-11 pl-9`} placeholder="Buscar fuente…" value={q} onChange={e => setQ(e.target.value)} />
+              </label>
+              <div className="w-full sm:w-36"><SelectField label="Filtrar fuentes por estado" value={estado} onChange={v => setEstado(v as typeof estado)}>
+                <option value="todas">Todas</option><option value="activas">Activas</option><option value="inactivas">Inactivas</option>
+              </SelectField></div>
+            </>
+          ) : <p className="self-center px-2 text-[11px] text-muted">{puedeArrastrar ? 'Arrastra el asa ⠿ para reordenar; el orden decide cuál fuente se usa primero.' : ''}</p>}
+          <div className="flex items-center gap-1 justify-self-end rounded-xl bg-card p-1 ring-1 ring-line" role="radiogroup" aria-label="Vista de fuentes">
+            {([['lista', List, 'Lista'], ['grid', LayoutGrid, 'Tarjetas']] as const).map(([v, Icon, l]) => (
               <button key={v} type="button" role="radio" aria-checked={vista === v} aria-label={l} title={l} onClick={() => setVista(v)}
                 className={`grid size-9 place-items-center rounded-lg transition ${vista === v ? 'bg-primary-soft text-navy' : 'text-muted hover:bg-bg'}`}><Icon className="size-4" /></button>
             ))}
@@ -135,21 +152,25 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
 
       {fuentes.length > 0 && !visibles.length ? (
         <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-muted">Ninguna fuente coincide. <button className="font-semibold text-navy underline" onClick={() => { setQ(''); setEstado('todas') }}>Limpiar filtros</button></div>
-      ) : fuentes.length > 0 && (vista === 'grid' || !muchas ? (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de fuentes">
-          {mostradas.map(r => <TarjetaFuente key={r.fuente.id} r={r} todas={todas} money={money} mes={mes} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
-            acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
-              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)}
-              onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />} />)}
-        </ul>
-      ) : (
-        <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de fuentes">
-          {mostradas.map(r => <FilaFuente key={r.fuente.id} r={r} todas={todas} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
-            acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
-              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)}
-              onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />} />)}
-        </ul>
-      ))}
+      ) : fuentes.length > 0 && (() => {
+        const porId = new Map(mostradas.map(r => [r.fuente.id, r]))
+        const ordenadas = (puedeArrastrar ? dnd.orden : mostradas.map(r => r.fuente.id)).map(id => porId.get(id)).filter((r): r is FuenteResumen => !!r)
+        const acc = (r: FuenteResumen) => <AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
+          onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />
+        const asa = (r: FuenteResumen) => <AsaOrden {...dnd.asa(r.fuente.id)} habilitado={puedeArrastrar} motivo={motivoNoArrastrar} />
+        return vista === 'grid' ? (
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de fuentes">
+            {ordenadas.map(r => <TarjetaFuente key={r.fuente.id} r={r} todas={todas} money={money} mes={mes} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
+              dnd={dnd.item(r.fuente.id)} asa={asa(r)} acciones={acc(r)} />)}
+          </ul>
+        ) : (
+          <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de fuentes">
+            {ordenadas.map(r => <FilaFuente key={r.fuente.id} r={r} todas={todas} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
+              dnd={dnd.item(r.fuente.id)} asa={asa(r)} acciones={acc(r)} />)}
+          </ul>
+        )
+      })()}
+      <AvisoOrden texto={dnd.aviso} />
 
       {!filtrando && visibles.length > LIMITE && (
         <div className="mt-3 flex justify-center">
@@ -202,21 +223,24 @@ function Badges({ r }: { r: FuenteResumen }) {
     <span className="flex flex-wrap items-center gap-1">
       <span className={chip} style={{ color: e.tono.fg, background: e.tono.bg }} data-testid="estado-fuente">{e.txt}</span>
       {r.principal && <span className={chip} style={{ color: TONO.info.fg, background: TONO.info.bg }} title="Recibe los gastos que no tienen una fuente por medio de pago"><Star className="size-2.5" /> Principal</span>}
-      {r.fuente.medioPago && <span className={chip} style={{ color: '#4D7C0F', background: '#F0F9E0' }} title={`Los gastos pagados con ${r.fuente.medioPago} se atribuyen a esta fuente`}><CreditCard className="size-2.5" /> {r.fuente.medioPago}</span>}
+      {mediosDeFuente(r.fuente.medioPago).length > 0 && <span className={chip} style={{ color: '#4D7C0F', background: '#F0F9E0' }} title={`Los gastos pagados con ${mediosDeFuente(r.fuente.medioPago).join(', ')} se atribuyen a esta fuente`}><CreditCard className="size-2.5" /> {mediosDeFuente(r.fuente.medioPago).join(', ')}</span>}
       {r.ajustado && <span className={chip} style={{ color: TONO.atencion.fg, background: TONO.atencion.bg }} title={`Importe base registrado: ${r.fuente.moneda} ${r.fuente.monto.toFixed(2)}. Este período usa un importe propio (ajuste por mes, hoja FUENTES_MESES).`}>Ajustado</span>}
     </span>
   )
 }
 
-function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; mes: string | null; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
+type DndItem = { ref: (el: HTMLElement | null) => void; 'data-arrastrando'?: string }
+
+function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones, dnd, asa }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; mes: string | null; busy: boolean; onToggle: () => void; acciones: ReactNode; dnd: DndItem; asa: ReactNode }) {
   const f = r.fuente
   const { Icon, color } = fuenteLook(f, todas)
   const pct = r.pct ?? 0
   return (
-    <li className={`relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${f.activo ? '' : 'opacity-75'}`} data-testid="fuente">
+    <li {...dnd} className={`${CLASE_ARRASTRE} relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${f.activo ? '' : 'opacity-75'}`} data-testid="fuente">
       <span className="h-1.5" style={{ background: f.activo ? `linear-gradient(90deg, ${color}, ${color}99)` : 'var(--line)' }} aria-hidden />
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-start gap-3">
+          {asa}
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl" style={{ background: `${color}1A`, color }}><Icon className="size-5" /></span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-ink" data-testid="fuente-nombre">{f.nombre}</p>
@@ -251,17 +275,18 @@ function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones }: { r: 
   )
 }
 
-function FilaFuente({ r, todas, money, busy, onToggle, acciones }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
+function FilaFuente({ r, todas, money, busy, onToggle, acciones, dnd, asa }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode; dnd: DndItem; asa: ReactNode }) {
   const f = r.fuente
   const { Icon, color } = fuenteLook(f, todas)
   return (
-    <li data-testid="fuente" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${f.activo ? '' : 'opacity-70'}`}>
+    <li {...dnd} data-testid="fuente" className={`${CLASE_ARRASTRE} grid grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-transparent px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${f.activo ? '' : 'opacity-70'}`}>
+      {asa}
       <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold" data-testid="fuente-nombre">{f.nombre}{busy && <span className="ml-2 text-[10px] font-normal text-muted">Guardando…</span>}</p>
         <p className="truncate text-[11px] text-muted">{recurrenciaTxt(f)}</p>
       </div>
-      <div className="order-last col-span-3 sm:order-none sm:col-span-1"><Badges r={r} /></div>
+      <div className="order-last col-span-4 sm:order-none sm:col-span-1"><Badges r={r} /></div>
       <span className="tabular hidden text-right text-sm font-bold sm:block" data-testid="fuente-aporte">{money(r.asignado)}</span>
       <Toggle on={f.activo} onChange={onToggle} label={`${f.activo ? 'Desactivar' : 'Activar'} ${f.nombre}`} disabled={busy} />
       {acciones}
@@ -303,7 +328,7 @@ function BorrarFuente({ store, r, data, money, onClose, onDesactivar }: {
             if (ok) onClose()
           }}><Trash2 className="size-4" /> Eliminar</Button></>}>
       <div className="space-y-3 text-sm" data-testid="eliminar-fuente">
-        <p className="font-semibold">“{f.nombre}” · {recurrenciaTxt(f)}{f.medioPago ? ` · ${f.medioPago}` : ''}</p>
+        <p className="font-semibold">“{f.nombre}” · {recurrenciaTxt(f)}{mediosDeFuente(f.medioPago).length ? ` · ${mediosDeFuente(f.medioPago).join(', ')}` : ''}</p>
         {bloqueada ? (
           <p className="rounded-xl px-3 py-2 text-xs" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }} data-testid="fuente-con-gastos">
             Tiene {deps.gastos} gasto(s) atribuido(s) en tu historial. Para no perder la trazabilidad no se elimina.
@@ -329,8 +354,8 @@ function DesactivarFuente({ r, c, money, periodo, onClose, onConfirm }: { r: Fue
       <div className="space-y-3 text-sm" data-testid="impacto-desactivar">
         <p>En {periodo} el presupuesto consolidado pasará de <b className="tabular">{money(c.presupuesto)}</b> a <b className="tabular">{money(P2)}</b>, y el disponible de <b className="tabular">{money(c.presupuesto - gastado)}</b> a <b className="tabular">{money(P2 - gastado)}</b>.</p>
         {r.count > 0 && <p className="rounded-xl px-3 py-2 text-xs" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }}>
-          {r.count} gasto(s) por {money(r.gastado)} están atribuidos a esta fuente. {r.fuente.medioPago
-            ? `Los pagados con ${r.fuente.medioPago} seguirán descontando del presupuesto y se mostrarán en una conciliación aparte: no se pasan a otra fuente.`
+          {r.count} gasto(s) por {money(r.gastado)} están atribuidos a esta fuente. {mediosDeFuente(r.fuente.medioPago).length
+            ? `Los pagados con ${mediosDeFuente(r.fuente.medioPago).join(', ')} seguirán descontando del presupuesto y se mostrarán en una conciliación aparte: no se pasan a otra fuente.`
             : 'Pasarán a la siguiente fuente principal activa (si no hay, se mostrarán como “sin fuente”). Siguen descontando del presupuesto.'}</p>}
         <p className="text-xs text-muted">No se borra la fuente, ni sus importes por mes, ni ningún gasto. Puedes reactivarla cuando quieras.</p>
       </div>
@@ -346,7 +371,7 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
 }) {
   const editar = !!fuente
   // ID fijo mientras el formulario está abierto: guardar dos veces (doble clic, reintento) actualiza la misma fuente.
-  const [id] = useState(() => fuente?.id ?? `f-${crypto.randomUUID().slice(0, 12)}`)
+  const [id] = useState(() => fuente?.id ?? `f-${crypto.randomUUID()}`)
   const mesRef = mes ?? hoyMes
   // Clonar: parte de la configuración de la original (sin gastos ni importes por mes) y nace INACTIVA: no suma dinero
   // al presupuesto hasta que el usuario la active y confirme el importe.
@@ -354,7 +379,8 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
   const [moneda, setMoneda] = useState(fuente?.moneda ?? clonDe?.moneda ?? monedas[0] ?? 'PEN')
   const [recurrencia, setRecurrencia] = useState<Recurrencia>(fuente?.recurrencia ?? clonDe?.recurrencia ?? 'mensual')
   const [mesAplic, setMesAplic] = useState(fuente ? fuente.mes : clonDe ? clonDe.mes : mesRef)
-  const [medio, setMedio] = useState(fuente?.medioPago ?? clonDe?.medioPago ?? '')
+  const [elegidos, setElegidos] = useState<string[]>(() => mediosDeFuente(fuente?.medioPago ?? clonDe?.medioPago ?? ''))
+  const medio = unirMedios(elegidos)
   const [activo, setActivo] = useState(fuente?.activo ?? (clonDe ? false : true))
   // Importe: al crear es el importe base; al editar es el del mes elegido (solo ese mes o desde ese mes).
   const actualMes = fuente && mes ? fuenteMontoMes(fuente, mes, meses) : null
@@ -365,9 +391,9 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
   const esMesBase = !!fuente && fuente.recurrencia === 'unica' && recurrencia === 'unica' && mes === mesAplic
   const otras = fuentes.filter(f => f.id !== id)
   // Automático: el del medio de pago asociado (Yape se ve como Yape) y, sin medio (fuente libre), el de la fuente General.
-  const auto = medio ? medioLook(medio) : fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }, otras)
+  const auto = elegidos.length ? medioLook(elegidos[0]) : fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }, otras)
   const { Icon, color } = auto // el aspecto es siempre automático (ya no se elige aquí)
-  const mediosOpc = useMemo(() => [...new Set([...(medio ? [medio] : []), ...medios])], [medio, medios])
+  const mediosOpc = useMemo(() => [...new Set([...elegidos, ...medios])].filter(m => !elegidos.some(e => normName(e) === normName(m))), [elegidos, medios])
 
   function save() {
     const errs: Record<string, string> = {}
@@ -378,8 +404,6 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
     if (!monedas.includes(moneda)) errs.moneda = 'Moneda no permitida'
     if (recurrencia === 'unica' && !MES_RE.test(mesAplic)) errs.mes = 'Elige el mes de aplicación'
     if (mesAplic && !MES_RE.test(mesAplic)) errs.mes = 'Mes inválido'
-    const dupMedio = medio && activo && otras.find(f => f.activo && normName(f.medioPago) === normName(medio))
-    if (dupMedio) errs.medio = `La fuente “${dupMedio.nombre}” ya usa ${medio}`
     if (editar && !mes && Number(m) !== fuente!.monto && !esMesBase) errs.monto = 'Para cambiar un importe, elige un único mes en el período.'
     setErrors(errs)
     if (Object.keys(errs).length) return
@@ -448,13 +472,24 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
         <Field label={recurrencia === 'unica' ? 'Mes de aplicación' : 'Mes de aplicación (desde)'} error={errors.mes} htmlFor="fuente-mes"
           hint={recurrencia === 'mensual' && !mesAplic ? 'Sin mes: suma en todos los meses, también los anteriores.' : undefined}>
           <span className="flex items-center gap-2">
-            <input id="fuente-mes" type="month" className={`${inputCls} h-11`} value={mesAplic} onChange={e => setMesAplic(e.target.value)} />
+            <span className="min-w-0 flex-1"><MonthPicker id="fuente-mes" label="Mes de aplicación" value={mesAplic} invalid={!!errors.mes} onChange={setMesAplic} /></span>
             {recurrencia === 'mensual' && mesAplic && <button type="button" className="shrink-0 text-xs text-muted underline" onClick={() => setMesAplic('')}>Todos</button>}
           </span>
         </Field>
-        <Field label="Medio de pago asociado (opcional)" error={errors.medio} htmlFor="fuente-medio" hint="Ej. Sodexo: los gastos pagados con ese medio se atribuyen a esta fuente. No cambia ningún gasto.">
-          <Combobox id="fuente-medio" label="Medio de pago asociado" value={medio} onChange={setMedio} placeholder="Ninguno (fuente libre)"
-            options={[{ value: '', label: 'Ninguno (fuente libre)' }, ...mediosOpc.map(x => { const l = medioLook(x); return { value: x, label: x, Icon: l.Icon, color: l.color } })]} />
+        <Field label="Medios de pago asociados (opcional)" error={errors.medio} htmlFor="fuente-medio"
+          hint="Los gastos pagados con esos medios se atribuyen a esta fuente. El importe no se divide entre medios. Varias fuentes pueden compartir un medio; se usan en el orden de la lista. No cambia ningún gasto.">
+          <div className="space-y-2">
+            <ul className="flex flex-wrap gap-1.5" aria-label="Medios elegidos" data-testid="fuente-medios">
+              {!elegidos.length && <li className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted">Ninguno (fuente libre)</li>}
+              {elegidos.map(m => { const l = medioLook(m); return (
+                <li key={m} className="flex items-center gap-1.5 rounded-full py-1 pr-1 pl-2 text-xs font-medium" style={{ background: `${l.color}1A`, color: l.color }}>
+                  <l.Icon className="size-3.5" />{m}
+                  <button type="button" aria-label={`Quitar ${m}`} onClick={() => setElegidos(xs => xs.filter(x => x !== m))} className="grid size-5 place-items-center rounded-full hover:bg-black/10"><X className="size-3" /></button>
+                </li>) })}
+            </ul>
+            <Combobox id="fuente-medio" label="Agregar medio de pago" value="" onChange={v => setElegidos(xs => v === NINGUNO ? [] : [...xs, v])} placeholder="Agregar medio de pago…"
+              options={[{ value: NINGUNO, label: 'Ninguno (fuente libre)' }, ...mediosOpc.map(x => { const l = medioLook(x); return { value: x, label: x, Icon: l.Icon, color: l.color } })]} />
+          </div>
         </Field>
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Fuente activa" />

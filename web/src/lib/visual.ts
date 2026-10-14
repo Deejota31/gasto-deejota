@@ -1,3 +1,4 @@
+import { mediosDeFuente } from './fuenteMedios'
 import { ArrowLeftRight, Banknote, CreditCard, Smartphone, Ticket, Wallet, type LucideIcon } from 'lucide-react'
 import type { Caja, CatalogoItem, Fuente } from './types'
 import { ICONOS, ICONS, sugerirIconos } from './iconos'
@@ -186,7 +187,7 @@ export const claveDeIcono = (Icon: LucideIcon): string => CLAVE_DE.get(Icon) ?? 
 
 /** Aspecto de la fuente General (y de toda fuente libre sin icono propio): billete en azul marino. */
 const LIBRE_BASE: Look = { Icon: ICONS.banknote, color: '#1E3A8A' }
-const esGeneral = (f: Pick<Fuente, 'nombre' | 'medioPago'>) => !f.medioPago && f.nombre.trim().toLowerCase() === 'general'
+const esGeneral = (f: Pick<Fuente, 'nombre' | 'medioPago'>) => !mediosDeFuente(f.medioPago).length && f.nombre.trim().toLowerCase() === 'general'
 
 /** Aspecto de la fuente que elegiste (icono guardado) o, si no, el automático de ese caso. */
 function propio(f: Pick<Fuente, 'icono' | 'color'>): Look | null {
@@ -203,7 +204,8 @@ function propio(f: Pick<Fuente, 'icono' | 'color'>): Look | null {
 export function fuenteLook(f: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>, todas: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>[] = []): Look {
   const mio = propio(f)
   if (mio) return mio
-  if (f.medioPago) return medioLook(f.medioPago)
+  const ms = mediosDeFuente(f.medioPago)
+  if (ms.length) return medioLook(ms[0])
   const general = todas.find(esGeneral)
   return (general && propio(general)) || LIBRE_BASE
 }
