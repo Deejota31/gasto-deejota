@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag } from 'lucide-react'
+import { ChevronDown, FolderTree, Layers, Pencil, Plus, Search, Shapes, Tag, Wallet } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem } from '../lib/types'
 import { ambitoLook, categoriaLook, COLORS, ICONS, subcategoriaLook } from '../lib/visual'
 import { IconPicker } from '../components/IconPicker'
 import { ColorPicker } from '../components/Apariencia'
+import { MediosPago } from '../components/MediosPago'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { Button, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
 
@@ -54,6 +55,7 @@ export default function Categorias({ store }: { store: AppStore }) {
     { label: 'Ámbitos', n: tree.filter(a => a.activo).length, Icon: Layers, cls: 'bg-primary-soft text-navy' },
     { label: 'Categorías', n: new Set(activos.filter(c => c.categoria).map(c => `${c.ambito}|${c.categoria}`)).size, Icon: Shapes, cls: 'bg-coral-soft text-coral' },
     { label: 'Subcategorías', n: activos.filter(c => c.subcategoria).length, Icon: Tag, cls: 'bg-verde-soft text-verde' },
+    { label: 'Medios de pago', n: (store.data?.medios ?? []).filter(m => m.activo && m.nombre.trim()).length, Icon: Wallet, cls: 'bg-turquesa/10 text-turquesa' },
   ]
 
   const results = term ? tree.map(a => ({
@@ -68,32 +70,34 @@ export default function Categorias({ store }: { store: AppStore }) {
         <div className="flex flex-wrap items-center gap-3">
           <span className="grid size-10 place-items-center rounded-xl bg-primary-soft text-navy"><FolderTree className="size-5" /></span>
           <div className="mr-auto">
-            <h1 className="text-base font-semibold">Catálogo de gastos</h1>
-            <p className="text-xs text-muted">Ámbito → categoría → subcategoría. Desactivar oculta una opción sin perder el historial.</p>
+            <h1 className="text-base font-semibold">Catálogo</h1>
+            <p className="text-xs text-muted">Ámbito → categoría → subcategoría, y tus medios de pago. Desactivar oculta una opción sin perder el historial.</p>
           </div>
+          <label className="relative order-last w-full sm:order-none sm:w-72">
+            <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
+            <input aria-label="Buscar en el catálogo" placeholder="Buscar ámbito, categoría o subcategoría…" className={`${inputCls} h-10 pl-9`} value={q} onChange={e => setQ(e.target.value)} />
+          </label>
           <div ref={menuRef} className="relative">
             <Button onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} disabled={!store.data}><Plus className="size-4" /> Agregar <ChevronDown className="size-4" /></Button>
             {menu && (
-              <div role="menu" className="absolute top-11 right-0 z-40 w-56 rounded-2xl border border-line bg-card p-1.5 shadow-xl">
+              <div role="menu" className="absolute top-11 right-0 z-40 w-60 rounded-2xl border border-line bg-card p-1.5 shadow-xl">
                 {([['ambito', 'Nuevo ámbito', Layers], ['categoria', 'Nueva categoría', Shapes], ['subcategoria', 'Nueva subcategoría', Tag]] as const).map(([nivel, label, Icon]) => (
                   <button key={nivel} role="menuitem" type="button" onClick={() => { setMenu(false); setTarget({ mode: 'create', nivel, ambito: current?.name }) }}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Icon className="size-4 text-muted" />{label}</button>
                 ))}
+                <button role="menuitem" type="button" onClick={() => { setMenu(false); setQ(''); setTimeout(() => { const el = document.getElementById('medio-nuevo'); el?.scrollIntoView?.({ block: 'center' }); el?.focus() }, 0) }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Wallet className="size-4 text-muted" />Nuevo medio de pago</button>
               </div>
             )}
           </div>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.6fr)]">
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {stats.map(s => (
             <div key={s.label} className="flex items-center gap-3 rounded-xl border border-line p-3">
               <span className={`grid size-9 place-items-center rounded-xl ${s.cls}`}><s.Icon className="size-4" /></span>
               <div><p className="tabular text-xl font-bold">{s.n}</p><p className="text-xs text-muted">{s.label}</p></div>
             </div>
           ))}
-          <label className="relative self-center">
-            <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
-            <input aria-label="Buscar en el catálogo" placeholder="Buscar ámbito, categoría o subcategoría…" className={`${inputCls} h-11 pl-9`} value={q} onChange={e => setQ(e.target.value)} />
-          </label>
         </div>
       </section>
 
@@ -150,6 +154,16 @@ export default function Categorias({ store }: { store: AppStore }) {
             </section>
           )}
         </>
+      )}
+
+      {store.data && !term && (
+        <section className="rounded-2xl border border-line bg-card p-4" aria-label="Medios de pago">
+          <div className="mb-3 flex items-center gap-2.5">
+            <span className="grid size-9 place-items-center rounded-xl bg-turquesa/10 text-turquesa"><Wallet className="size-4" /></span>
+            <div><h2 className="text-sm font-semibold">Medios de pago</h2><p className="text-xs text-muted">Con qué pagas tus gastos. Cada uno se ve igual en toda la web.</p></div>
+          </div>
+          <MediosPago store={store} />
+        </section>
       )}
 
       {target && <CatalogModal key={JSON.stringify(target)} store={store} target={target} tree={tree} onClose={() => setTarget(null)} />}
@@ -252,16 +266,23 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         await store.actions.renameCatalogo({ nivel, ambito: target.ambito!, categoria: target.categoria, subcategoria: target.subcategoria, nuevo: n })
         renombrado = true
       }
-      await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(usaVisual ? { icono, color } : icono !== iconoInicial ? { icono } : {}) })
+      await store.actions.saveCatalogo({ ambito: a, categoria: c, subcategoria: s, activo, ...(heredado ? {} : usaVisual ? { icono, color } : icono !== iconoInicial ? { icono } : {}) })
     })
     if (ok) onClose()
   }
 
-  const Preview = ICONS[icono] ?? ICONS.tag
+  // Categorías y subcategorías se comparten entre ámbitos: si el nombre ya existe en otro, usa su mismo icono y color.
+  const nn = normName(nombre)
+  const hermana = mode === 'create' && nn && nivel !== 'ambito'
+    ? catalogo.find(c => nivel === 'categoria' ? !!c.categoria && !c.subcategoria && normName(c.categoria) === nn
+      : c.categoria === categoria && !!c.subcategoria && normName(c.subcategoria) === nn)
+    : undefined
+  const heredado = hermana ? (nivel === 'categoria' ? categoriaLook(hermana.categoria, catalogo) : subcategoriaLook(hermana.subcategoria, hermana.categoria, catalogo)) : null
+  const Preview = heredado ? heredado.Icon : ICONS[icono] ?? ICONS.tag
   return (
     <Modal open onClose={onClose} size="md" title={`${mode === 'create' ? (masc ? 'Nuevo' : 'Nueva') : 'Editar'} ${label}`}
       subtitle={mode === 'create' ? 'Aparecerá de inmediato en el formulario de gastos.' : 'Los gastos existentes conservan su clasificación.'}
-      icon={<Preview className="size-5" style={{ color: colorSub }} />}
+      icon={<Preview className="size-5" style={{ color: heredado ? heredado.color : colorSub }} />}
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{mode === 'create' ? 'Agregar' : 'Guardar'}</Button></>}>
       <div className="space-y-4">
         {nivel !== 'ambito' && (
@@ -284,16 +305,23 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
         <Field label="Nombre" htmlFor="cm-nombre" hint={enUso ? `Se renombrará también en ${enUso} gasto(s) registrados.` : undefined}>
           <input id="cm-nombre" autoFocus className={inputCls} maxLength={nivel === 'ambito' ? 40 : 60} value={nombre} onChange={e => setNombre(e.target.value)} placeholder={`Nombre ${masc ? 'del' : 'de la'} ${label}`} />
         </Field>
-        <Picker label="Icono">
-          <IconPicker value={icono} onChange={setIcono} color={colorSub} nombre={nombre}
-            contexto={nivel === 'ambito' ? [] : nivel === 'categoria' ? [ambito] : [categoria]} />
-          {nivel === 'subcategoria' && <p className="mt-1 text-[11px] text-muted">El color lo hereda de su categoría.</p>}
-        </Picker>
-        {usaVisual && (
+        {heredado ? (
+          <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted" data-testid="apariencia-heredada">
+            {nivel === 'categoria' ? 'Esta categoría' : 'Esta subcategoría'} ya existe en otro ámbito: usará su mismo icono y color (se comparten en todos los ámbitos).
+          </p>
+        ) : (
           <>
-            <Picker label="Color">
-              <ColorPicker value={color} onChange={setColor} />
+            <Picker label="Icono">
+              <IconPicker value={icono} onChange={setIcono} color={colorSub} nombre={nombre}
+                contexto={nivel === 'ambito' ? [] : nivel === 'categoria' ? [ambito] : [categoria]} />
+              {nivel === 'subcategoria' && <p className="mt-1 text-[11px] text-muted">El color lo hereda de su categoría.</p>}
+              {nivel !== 'ambito' && <p className="mt-1 text-[11px] text-muted">Se aplica a este nombre en todos los ámbitos.</p>}
             </Picker>
+            {usaVisual && (
+              <Picker label="Color">
+                <ColorPicker value={color} onChange={setColor} />
+              </Picker>
+            )}
           </>
         )}
         {mode === 'edit' && <Switch checked={activo} onChange={setActivo} label={activo ? 'Activa: se ofrece al registrar gastos' : 'Inactiva: oculta en formularios, se conserva en el historial'} />}

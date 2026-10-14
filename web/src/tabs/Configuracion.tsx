@@ -1,24 +1,24 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Activity, Bell, FolderOpen, Pencil, CalendarDays, CheckCircle2, CircleAlert, Coins, Database, Download, ExternalLink, FileSpreadsheet, Globe2,
-  Info, KeyRound, Link2, Loader2, Palette, Plus, RefreshCw, Settings, ShieldCheck, Tags, Unplug, Wallet,
+  Info, KeyRound, Link2, Loader2, Palette, RefreshCw, Settings, ShieldCheck, Tags, Unplug,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
-import { saveConnection, type CarpetaRespaldo, type Connection } from '../lib/api'
+import { saveConnection, validarConexion, type CarpetaRespaldo, type Connection } from '../lib/api'
 import { Button, Card, ErrorBox, Field, inputCls, Select, Switch } from '../components/ui'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
-import { sortMedios, medioLook } from '../lib/visual'
+import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
 
-export const APP_VERSION = '1.10.0'
+export const APP_VERSION = '1.11.0'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return <span className="inline-flex items-center gap-1.5 [&>svg]:size-3.5 [&>svg]:text-muted">{icon}{children}</span>
 }
 
-export default function Configuracion({ store, conn, onConnect, notify, goCategorias }: {
-  store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCategorias: () => void
+export default function Configuracion({ store, conn, onConnect, notify, goCatalogo }: {
+  store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
 }) {
   const cfg = store.data?.config ?? {}
   const [url, setUrl] = useState(conn?.url ?? '')
@@ -35,8 +35,8 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
   }
 
   function connect() {
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url.trim())) return setConnError('La URL debe ser la del despliegue: https://script.google.com/macros/s/…/exec')
-    if (token.trim().length < 16) return setConnError('El token parece incompleto. Cópialo del registro de setup().')
+    const malo = validarConexion(url, token)
+    if (malo) return setConnError(malo)
     setConnError('')
     const c = { url: url.trim(), token: token.trim() }
     saveConnection(c)
@@ -120,6 +120,12 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
             <Field label={<Label icon={<CalendarDays />}>Formato de fecha</Label>} htmlFor="cfg-fecha">
               <Select id="cfg-fecha" label="Formato de fecha" value={cfg.formato_fecha || 'dd/MM/yyyy'} onChange={v => saveCfg('formato_fecha', v)} options={['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd']} />
             </Field>
+            <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
+              <select id="cfg-refresco" aria-label="Actualizar datos automáticamente" className={inputCls} value={String(refrescoSegundos(cfg.refresco_segundos))}
+                onChange={e => saveCfg('refresco_segundos', e.target.value)}>
+                {REFRESCO_OPCIONES.map(o => <option key={o.segundos} value={o.segundos}>{o.label}</option>)}
+              </select>
+            </Field>
             <Field label={<Label icon={<Palette />}>Tema visual</Label>} htmlFor="cfg-tema">
               <Select id="cfg-tema" label="Tema visual" value={cfg.tema || 'claro'} onChange={v => saveCfg('tema', v)} options={['claro', 'oscuro']} />
             </Field>
@@ -131,14 +137,9 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
           <p className="mt-2 text-[11px] text-muted">Solo USD tiene tipo de cambio configurable. Los errores siempre se notifican.</p>
         </Card>
 
-        {/* D. Medios de pago */}
-        <Card title="Medios de pago" icon={<Wallet className="size-4 text-coral" />}>
-          <MediosEditor store={store} />
-        </Card>
-
         {/* E. Datos */}
         <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />} className="lg:col-span-2">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
             <Action icon={<Activity />} title="Diagnóstico" desc="Filas por hoja y estado" loading={busy === 'diag'}
               onClick={() => run('diag', async () => setDiag(JSON.stringify(await store.actions.diagnose(), null, 2)))} />
             <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu carpeta Backup" loading={busy === 'backup'}
@@ -152,7 +153,12 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatego
               const blob = new Blob([toCsv(store.data!.gastos)], { type: 'text/csv;charset=utf-8' })
               const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'gastos-completo.csv'; a.click(); URL.revokeObjectURL(a.href)
             }} />
-            <Action icon={<Tags />} title="Administrar categorías" desc="Ámbitos, categorías y subcategorías" onClick={goCategorias} />
+            <Action icon={<CheckCircle2 />} title="Completar vacíos" desc="Rellena celdas vacías de la hoja" loading={busy === 'vacios'} disabled={!store.data}
+              onClick={() => run('vacios', async () => {
+                const r = await store.actions.completarVacios()
+                showToast('success', r.total ? `Hoja completada: ${r.total} fila(s) con valores que estaban vacíos.` : 'La hoja ya no tiene celdas vacías por completar.')
+              })} />
+            <Action icon={<Tags />} title="Administrar catálogo" desc="Ámbitos, categorías, subcategorías y medios de pago" onClick={goCatalogo} />
             {store.data?.sheetUrl
               ? <a href={store.data.sheetUrl} target="_blank" rel="noopener noreferrer" className={ACTION_CLS}><ActionBody icon={<ExternalLink />} title="Abrir hoja" desc="Google Sheets" /></a>
               : <Action icon={<ExternalLink />} title="Abrir hoja" desc="Disponible al conectar" disabled onClick={() => {}} />}
@@ -251,42 +257,6 @@ function CarpetaRespaldos({ store }: { store: AppStore }) {
       )}
       <p className="mt-1.5 text-[11px] text-muted">En Drive abre la carpeta que quieras y copia el enlace de la barra de direcciones. Cada respaldo es una copia completa de tu hoja.</p>
       {error && <p className="mt-1 text-xs text-[#C0362C]">{error}</p>}
-    </div>
-  )
-}
-
-function MediosEditor({ store }: { store: AppStore }) {
-  const [nuevo, setNuevo] = useState('')
-  const raw = store.data?.medios ?? []
-  const medios = sortMedios(raw.map(m => m.nombre)).map(n => raw.find(m => m.nombre === n)!).filter(m => m && m.nombre.trim())
-  const save = (nombre: string, activo: boolean) => store.track(`medio:${nombre.toLowerCase()}`,
-    { pending: 'Guardando medio de pago…', ok: 'Medio de pago guardado correctamente.', error: 'No se pudo guardar el medio de pago.' },
-    () => store.actions.saveMedio({ nombre, activo }))
-  return (
-    <div className="space-y-3">
-      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Medios de pago">
-        {medios.map(m => {
-          const { Icon, color } = medioLook(m.nombre)
-          const busy = store.pending.has(`medio:${m.nombre.toLowerCase()}`)
-          return (
-            <li key={m.nombre}>
-              <button type="button" onClick={() => save(m.nombre, !m.activo)} disabled={busy} aria-pressed={m.activo}
-                title={m.activo ? 'Activo: toca para desactivar' : 'Inactivo: toca para reactivar'}
-                className={`flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-sm transition ${m.activo ? 'border-line bg-card hover:bg-bg' : 'border-dashed border-line bg-bg/50 text-muted'}`}>
-                <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: m.activo ? `${color}1F` : undefined, color: m.activo ? color : undefined }}>
-                  {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}
-                </span>
-                <span className={`min-w-0 flex-1 truncate font-medium ${m.activo ? '' : 'line-through'}`}>{m.nombre}</span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-      <form className="flex gap-2" onSubmit={e => { e.preventDefault(); if (nuevo.trim()) { void save(nuevo.trim(), true); setNuevo('') } }}>
-        <input aria-label="Nuevo medio de pago" className={inputCls} maxLength={40} value={nuevo} onChange={e => setNuevo(e.target.value)} placeholder="Nuevo medio de pago" />
-        <Button type="submit" variant="soft" disabled={!nuevo.trim()}><Plus className="size-4" /> Agregar</Button>
-      </form>
-      <p className="text-[11px] text-muted">Toca un medio para activarlo o desactivarlo. “Otros” siempre va al final.</p>
     </div>
   )
 }

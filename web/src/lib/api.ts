@@ -14,6 +14,13 @@ export function loadConnection(): Connection | null {
   } catch { return null }
 }
 
+/** Valida la URL del despliegue y el token antes de guardarlos. Devuelve el mensaje de error o null si está bien. */
+export function validarConexion(url: string, token: string): string | null {
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url.trim())) return 'La URL debe ser la del despliegue: https://script.google.com/macros/s/…/exec'
+  if (token.trim().length < 16) return 'El token parece incompleto. Cópialo del registro de setup().'
+  return null
+}
+
 export function saveConnection(c: Connection | null) {
   try { c ? localStorage.setItem(STORAGE_KEY, JSON.stringify(c)) : localStorage.removeItem(STORAGE_KEY) } catch { /* modo privado */ }
 }
@@ -270,6 +277,10 @@ export function createApi(t: Transport) {
       await t('reorderFuentes', { ids })
     },
     /** Crea la fuente General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
+    /** Rellena celdas vacías de la hoja (Activo, Icono, Medio, Orden…). `catalogo` trae el icono/color a escribir en cada fila vacía. */
+    async completarVacios(catalogo: { ambito: string; categoria: string; subcategoria: string; icono: string; color: string }[]) {
+      return parse(z.object({ cajas: z.number(), fuentes: z.number(), catalogo: z.number(), config: z.number() }), await t('completarVacios', { catalogo }))
+    },
     async migrarGeneralAFuente() {
       const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fuente: fuenteRow.optional(), ajustes: z.array(fuenteMesRow).optional() }), await t('migrarGeneralAFuente', {}))
       return { creada: r.creada, meses: r.meses, fuente: r.fuente ? toFuente(r.fuente) : null, ajustes: (r.ajustes ?? []).map(toFuenteMes) }

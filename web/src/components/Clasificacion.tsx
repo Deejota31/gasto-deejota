@@ -70,7 +70,7 @@ export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, ke
               const l = categoriaLook(c, catalogo, value.ambito)
               return <Chip key={c} on={value.categoria === c} color={l.color} onClick={() => value.categoria !== c && onChange({ ...value, categoria: c, subcategoria: '' })}><l.Icon className="size-4" />{c}</Chip>
             })}
-            {!o.categorias.length && <p className="text-xs text-muted">No hay categorías activas para este ámbito. Agrégalas en Categorías.</p>}
+            {!o.categorias.length && <p className="text-xs text-muted">No hay categorías activas para este ámbito. Agrégalas en Catálogo.</p>}
           </div>
         )}
         {err('categoria')}

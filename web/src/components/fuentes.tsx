@@ -6,7 +6,7 @@ import {
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
-import { COLORS, fuenteLook, medioLook } from '../lib/visual'
+import { fuenteLook, medioLook } from '../lib/visual'
 import type { AppStore } from '../lib/store'
 import type { Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch, useDismiss } from './ui'
@@ -32,6 +32,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
 }) {
   const data = store.data!
   const fuentes = c.fuentes.lista
+  const todas = useMemo(() => fuentes.map(r => r.fuente), [fuentes])
   const [q, setQ] = useState('')
   const [estado, setEstado] = useState<'todas' | 'activas' | 'inactivas'>('todas')
   const [vista, setVista] = useState<'grid' | 'lista'>('grid')
@@ -132,13 +133,13 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-muted">Ninguna fuente coincide. <button className="font-semibold text-navy underline" onClick={() => { setQ(''); setEstado('todas') }}>Limpiar filtros</button></div>
       ) : fuentes.length > 0 && (vista === 'grid' || !muchas ? (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de fuentes">
-          {mostradas.map(r => <TarjetaFuente key={r.fuente.id} r={r} money={money} mes={mes} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
+          {mostradas.map(r => <TarjetaFuente key={r.fuente.id} r={r} todas={todas} money={money} mes={mes} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
             acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
               onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} />} />)}
         </ul>
       ) : (
         <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de fuentes">
-          {mostradas.map(r => <FilaFuente key={r.fuente.id} r={r} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
+          {mostradas.map(r => <FilaFuente key={r.fuente.id} r={r} todas={todas} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
             acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
               onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} />} />)}
         </ul>
@@ -200,9 +201,9 @@ function Badges({ r }: { r: FuenteResumen }) {
   )
 }
 
-function TarjetaFuente({ r, money, mes, busy, onToggle, acciones }: { r: FuenteResumen; money: (n: number) => string; mes: string | null; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
+function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; mes: string | null; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
   const f = r.fuente
-  const { Icon, color } = fuenteLook(f)
+  const { Icon, color } = fuenteLook(f, todas)
   const pct = r.pct ?? 0
   return (
     <li className={`relative flex flex-col overflow-hidden rounded-2xl border border-line bg-card transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_22px_rgb(15_23_42/0.07)] ${f.activo ? '' : 'opacity-75'}`} data-testid="fuente">
@@ -242,9 +243,9 @@ function TarjetaFuente({ r, money, mes, busy, onToggle, acciones }: { r: FuenteR
   )
 }
 
-function FilaFuente({ r, money, busy, onToggle, acciones }: { r: FuenteResumen; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
+function FilaFuente({ r, todas, money, busy, onToggle, acciones }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode }) {
   const f = r.fuente
-  const { Icon, color } = fuenteLook(f)
+  const { Icon, color } = fuenteLook(f, todas)
   return (
     <li data-testid="fuente" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${f.activo ? '' : 'opacity-70'}`}>
       <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
@@ -325,10 +326,9 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
   const tieneSolo = !!fuente && !!mes && meses.some(m => m.fuenteId === fuente.id && m.mes === mes && m.modo === 'solo')
   const esMesBase = !!fuente && fuente.recurrencia === 'unica' && recurrencia === 'unica' && mes === mesAplic
   const otras = fuentes.filter(f => f.id !== id)
-  // Automático: el del medio de pago asociado y, sin medio, uno según el nombre con un color que va rotando.
-  const colorBase = fuente?.color || COLORS[(fuentes.length + 1) % COLORS.length]
-  const auto = medio ? medioLook(medio) : { ...fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }), color: colorBase }
-  const ap = useApariencia({ icono: fuente?.icono ?? '', color: colorBase }, auto)
+  // Automático: el del medio de pago asociado (Yape se ve como Yape) y, sin medio (fuente libre), el de la fuente General.
+  const auto = medio ? medioLook(medio) : fuenteLook({ nombre: nombre || 'Fuente', medioPago: '', icono: '', color: '' }, otras)
+  const ap = useApariencia({ icono: fuente?.icono ?? '', color: fuente?.color || auto.color }, auto)
   const { Icon, color } = ap.look
   const mediosOpc = useMemo(() => [...new Set([...(medio ? [medio] : []), ...medios])], [medio, medios])
 
@@ -416,7 +416,7 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
             {mediosOpc.map(x => <option key={x} value={x}>{x}</option>)}
           </SelectField>
         </Field>
-        <AparienciaCampos ap={ap} nombre={nombre} contexto={['dinero', medio]} autoTexto={medio ? `como ${medio}` : 'según el nombre'} />
+        <AparienciaCampos ap={ap} nombre={nombre} contexto={['dinero', medio]} autoTexto={medio ? `como ${medio}` : 'como General'} />
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Fuente activa" />
           <p className="mt-1 text-[11px] text-muted">Inactiva: queda guardada pero no suma al presupuesto.</p>

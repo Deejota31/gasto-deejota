@@ -165,9 +165,20 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const k = (r: unknown[]) => r.slice(0, 3).map(x => normName(String(x ?? ''))).join('|')
       const key = k([p.ambito, p.categoria ?? '', p.subcategoria ?? ''])
       const prev = db.catalogo.find(r => k(r) === key)
-      const icono = p.icono === undefined ? (prev?.[4] ?? '') : p.icono
-      const color = p.color === undefined ? (prev?.[5] ?? '') : p.color
-      if (prev) { prev[3] = p.activo !== false; prev[4] = icono; prev[5] = color; return [...prev] }
+      let icono = p.icono === undefined ? (prev?.[4] ?? '') : p.icono
+      let color = p.color === undefined ? (prev?.[5] ?? '') : p.color
+      // Categorías y subcategorías se comparten entre ámbitos (igual que saveCatalogo_ en Code.gs).
+      const cat = String(p.categoria ?? ''), sub = String(p.subcategoria ?? '')
+      const hermana = (r: unknown[]) => !!cat && normName(String(r[1])) === normName(cat) && (sub ? normName(String(r[2])) === normName(sub) : String(r[2] ?? '') === '')
+      if (prev) {
+        prev[3] = p.activo !== false; prev[4] = icono; prev[5] = color
+        if (hermana(prev) && (p.icono !== undefined || p.color !== undefined)) {
+          for (const r of db.catalogo) if (r !== prev && hermana(r)) { if (p.icono !== undefined) r[4] = icono; if (p.color !== undefined) r[5] = color }
+        }
+        return [...prev]
+      }
+      const existente = db.catalogo.find(r => hermana(r) && (r[4] || r[5]))
+      if (existente) { icono = String(existente[4] || icono); color = String(existente[5] || color) }
       const orden = nextOrden(db.catalogo.map(r => ({ ambito: String(r[0]), categoria: String(r[1]), orden: typeof r[6] === 'number' ? r[6] : undefined })),
         String(p.ambito), String(p.categoria ?? ''), String(p.subcategoria ?? ''))
       const row = [p.ambito, p.categoria ?? '', p.subcategoria ?? '', p.activo !== false, icono, color, orden ?? '']
@@ -241,6 +252,20 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const ids = p.ids as string[]
       db.fuentes.forEach(r => { r[7] = ids.indexOf(String(r[0])) + 1 || ids.length + 1 })
       return { ok: true }
+    },
+    // Igual que completarVacios_ en Code.gs: solo rellena celdas vacías del catálogo con lo que envía la web.
+    completarVacios: p => {
+      let catalogo = 0
+      const defs = new Map((Array.isArray(p.catalogo) ? p.catalogo as Record<string, string>[] : []).map(d => [[d.ambito, d.categoria, d.subcategoria].map(x => normName(String(x ?? ''))).join('|'), d]))
+      for (const r of db.catalogo) {
+        const d = defs.get(r.slice(0, 3).map(x => normName(String(x ?? ''))).join('|'))
+        if (!d) continue
+        let cambio = false
+        if (!r[4] && d.icono) { r[4] = d.icono; cambio = true }
+        if (!r[5] && d.color) { r[5] = d.color; cambio = true }
+        if (cambio) catalogo++
+      }
+      return { cajas: 0, fuentes: 0, catalogo, config: 0 }
     },
     migrarGeneralAFuente: () => {
       if (db.fuentes.some(r => r[0] === 'fuente-general')) return { creada: false, meses: 0 }

@@ -4,6 +4,7 @@ import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { sortCatalogo } from './orden'
+import { ambitoLook, categoriaLook, claveDeIcono, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
 
 /** El catálogo siempre se entrega ordenado ("Otros" al final de cada grupo), venga de la hoja o de un cambio local. */
@@ -70,6 +71,8 @@ export function buildApi(conn: Connection | null): Api {
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const api = useMemo(() => apiOverride ?? buildApi(conn), [conn, apiOverride])
   const [data, setData] = useState<AppData | null>(() => { const s = readSnapshot(conn); return s && normalize(s) })
+  const dataRef = useRef(data)
+  dataRef.current = data
   const [ordenGastos, setOrdenGastos] = useState<Map<string, number>>(() => ordenMap(readSnapshot(conn)))
   // Sube con cada reordenamiento local y con cada respuesta de reordenamiento: una lectura iniciada antes no lo pisa.
   const ordenVersion = useRef(0)
@@ -115,8 +118,9 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   useEffect(() => { quiet.current = data?.config.notificaciones === 'false' }, [data?.config.notificaciones])
 
   // fresh=true salta la caché del servidor: "Actualizar" siempre trae lo último, incluidas ediciones hechas a mano en la hoja.
-  const refresh = useCallback(async (fresh = true) => {
-    if (loadingRef.current) return // evita peticiones duplicadas por clics repetidos
+  /** Devuelve true si la lectura terminó bien (false: error u otra lectura en curso). */
+  const refresh = useCallback(async (fresh = true): Promise<boolean> => {
+    if (loadingRef.current) return false // evita peticiones duplicadas por clics repetidos
     loadingRef.current = true
     journal.current = []
     plantillasLoaded.current = false // la próxima apertura de "Gastos mensuales" relee la hoja
@@ -133,8 +137,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       if (ordenVigente) setOrdenGastos(ordenMap(raw))
       setLastSync(new Date())
       writeSnapshot(conn, ordenVigente ? merged : { ...merged, ordenGastos: [...ordenRef.current] })
+      return true
     } catch (e) {
       setError((e as Error).message)
+      return false
     } finally {
       loadingRef.current = false
       setLoading(false)
@@ -176,7 +182,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async saveCatalogo(item: CatalogoItem) {
       const s = await api.saveCatalogo(item)
       const key = (c: CatalogoItem) => `${c.ambito}|${c.categoria}|${c.subcategoria}`.toLowerCase()
-      patch(d => ({ ...d, catalogo: d.catalogo.some(c => key(c) === key(s)) ? d.catalogo.map(c => key(c) === key(s) ? s : c) : [...d.catalogo, s] }))
+      // Categorías y subcategorías se comparten entre ámbitos: sus hermanas toman el mismo icono y color.
+      const hermana = (c: CatalogoItem) => !!s.categoria && c.categoria === s.categoria && c.subcategoria === s.subcategoria
+      const compartir = (c: CatalogoItem) => hermana(c) && key(c) !== key(s) ? { ...c, icono: s.icono || c.icono, color: s.color || c.color } : c
+      patch(d => ({ ...d, catalogo: (d.catalogo.some(c => key(c) === key(s)) ? d.catalogo.map(c => key(c) === key(s) ? s : c) : [...d.catalogo, s]).map(compartir) }))
     },
     async renameCatalogo(p: Parameters<Api['renameCatalogo']>[0]) {
       const r = await api.renameCatalogo(p)
@@ -262,11 +271,26 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const key = saved.ids.join(',')
       patch(d => ({ ...d, revisiones: [...(d.revisiones ?? []).filter(x => x.ids.join(',') !== key), saved] }))
     },
+    /**
+     * Rellena en la hoja las celdas vacías (Activo, Icono, Medio de pago "Libre", Orden…). Para el catálogo envía el icono y
+     * el color que se ven hoy en cada fila, así la hoja queda igual que la web. Devuelve cuántas filas cambió en total.
+     */
+    async completarVacios() {
+      const cat = dataRef.current?.catalogo ?? []
+      const defs = cat.filter(c => !c.icono || !c.color).map(c => {
+        const l = !c.categoria ? ambitoLook(c.ambito, cat) : !c.subcategoria ? categoriaLook(c.categoria, cat) : subcategoriaLook(c.subcategoria, c.categoria, cat)
+        return { ambito: c.ambito, categoria: c.categoria, subcategoria: c.subcategoria, icono: claveDeIcono(l.Icon), color: l.color }
+      })
+      const r = await api.completarVacios(defs)
+      const n = r.cajas + r.fuentes + r.catalogo + r.config
+      if (n > 0) await refresh(true)
+      return { ...r, total: n }
+    },
     diagnose: () => api.diagnose(),
     carpetaRespaldo: () => api.carpetaRespaldo(),
     saveCarpetaRespaldo: (c: string) => api.saveCarpetaRespaldo(c),
     backup: () => api.backup(),
-  }), [api, patch])
+  }), [api, patch, refresh])
 
   /**
    * Ejecuta una escritura sin bloquear la interfaz: la promesa sigue en segundo plano y el resultado real
