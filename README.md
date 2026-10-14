@@ -28,6 +28,13 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.14.0
+
+- **Configuración rediseñada** (sin perder funciones): encabezado con estado, conexión a Google Sheets (token oculto con ojo para verlo), Preferencias en tres grupos (Moneda y finanzas · Regionalización · Interfaz y experiencia), Administración de datos, Funciones del backend en acordeones por categoría con una **consola de resultados** (función, estado, duración, copiar, expandir/contraer, desplazamiento interno) y "Acerca de" compacto.
+- **Duplicado eliminado:** "Completar vacíos" ejecutaba la misma operación desde Administración de datos y desde Funciones del backend; queda solo en *Mantenimiento de la hoja*. "Administrar catálogo/Actualizar catálogo", "Crear respaldo/Autorizar respaldos" y "Abrir hoja/Mis archivos" hacen cosas distintas y se conservan.
+- **Catálogo:** se quitó el botón inferior "Nuevo medio de pago"; se crea desde **+ Agregar → Nuevo medio de pago**.
+- **Cajas:** se quitó el panel grande de Presupuesto consolidado (sigue en el Dashboard y Salud financiera). El botón "Ajustar presupuesto" (cuando no hay fuentes) pasó a la cabecera. Sin cambios en fórmulas ni en el backend.
+
 ## Novedades v1.13.0
 
 - **Sincronización con Google Sheets corregida (causa raíz):** la web abría con la lectura en caché del servidor (10 min) y con una copia local, así que fuentes borradas a mano en la hoja seguían apareciendo. Ahora cada apertura/"Actualizar" lee la hoja directamente, la hoja manda (se reconcilia por ID: altas, ediciones y bajas), se conservan tus cambios pendientes y, si la lectura falla, aparece un aviso "datos sin confirmar" en vez de mostrar la copia como vigente. Refrescar nunca escribe en la hoja.

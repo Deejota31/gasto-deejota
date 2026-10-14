@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, Pencil, Plus, Wallet } from 'lucide-react'
+import { Loader2, Pencil, Wallet } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Medio } from '../lib/types'
 import { claveDeIcono, medioLook, medioLookBase, sortMedios } from '../lib/visual'
@@ -38,7 +38,6 @@ export function MediosPago({ store, editando, setEditando }: { store: AppStore; 
           )
         })}
       </ul>
-      <Button type="button" variant="soft" onClick={() => setEditando('nuevo')}><Plus className="size-4" /> Nuevo medio de pago</Button>
       <p className="text-[11px] text-muted">Toca un medio para activarlo o desactivarlo; el lápiz cambia su icono y color. “Otros” siempre va al final.</p>
       {editando && <MedioForm key={editando === 'nuevo' ? 'nuevo' : editando.nombre} store={store} medio={editando === 'nuevo' ? null : editando} existentes={raw} onClose={() => setEditando(null)} />}
     </div>

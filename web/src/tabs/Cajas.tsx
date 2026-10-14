@@ -16,7 +16,6 @@ import { CajaModal } from '../components/cajas'
 import { FuentesSeccion, Toggle } from '../components/fuentes'
 import { MenuAcciones } from '../components/MenuAcciones'
 import { dependenciasCaja } from '../lib/dependencias'
-import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch } from '../components/ui'
 
 type Alcance = Exclude<FiltroCampo, 'Todos'>
@@ -103,11 +102,9 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
 
   return (
     <div className="space-y-4">
-      <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length} />
+      <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length}
+        onAjustar={c.general && c.origen !== 'fuentes' ? () => setAjustar({ caja: c.general!, asignado: c.presupuesto }) : undefined} />
       <FuentesSeccion store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
-      <PresupuestoConsolidado c={c} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
-        accion={c.general && c.origen !== 'fuentes' ? <button type="button" onClick={() => setAjustar({ caja: c.general!, asignado: c.presupuesto })}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-2 text-xs font-medium hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar presupuesto</button> : undefined} />
 
       <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -184,8 +181,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
 
 /* ============================== Cabecera y caja general ============================== */
 
-function Cabecera({ c, money, filters, setFilters, today, n }: {
-  c: CajasResumen; money: (n: number) => string; filters: Filters; setFilters: (f: Filters) => void; today: string; n: number
+function Cabecera({ c, money, filters, setFilters, today, n, onAjustar }: {
+  c: CajasResumen; money: (n: number) => string; filters: Filters; setFilters: (f: Filters) => void; today: string; n: number; onAjustar?: () => void
 }) {
   const nf = c.fuentes.lista.length
   return (
@@ -203,6 +200,7 @@ function Cabecera({ c, money, filters, setFilters, today, n }: {
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className="w-full sm:w-72"><PeriodPicker value={filters} today={today} onChange={p => setFilters({ ...filters, ...p })} /></div>
         <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fuente{nf === 1 ? '' : 's'} · {n} subcaja{n === 1 ? '' : 's'}</span>
+        {onAjustar && <button type="button" onClick={onAjustar} className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-xs font-medium text-ink hover:bg-bg"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="cajas-resumen">
         <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fuentes' ? money(c.presupuesto) : 'Sin definir'} />

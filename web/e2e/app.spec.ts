@@ -6,6 +6,18 @@ const go = (page: Page, tab: string) => page.getByRole('navigation', { name: 'Se
 const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
 const total = async (page: Page) => money(await kpi(page, 'Total gastado').innerText())
 const dialog = (page: Page) => page.getByRole('dialog')
+const TABS_HASH: Record<string, string> = { cajas: 'Cajas', gastos: 'Gastos', 'catálogo': 'Catálogo', catalogo: 'Catálogo' }
+/** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
+async function cons(page: Page, id: string) {
+  const el = page.getByTestId(`cons-${id}`)
+  const leer = async () => money(await el.locator('p').nth(1).innerText())
+  const hash = page.url().split('#')[1] ?? ''
+  const actual = await page.locator('nav[aria-label="Secciones"] [aria-current="page"]').innerText().catch(() => '')
+  if (!actual || /dashboard/i.test(actual) || (!actual && !hash)) { await expect(el).toBeVisible(); return leer() }
+  await go(page, 'Dashboard'); await expect(el).toBeVisible()
+  const v = await leer()
+  await go(page, actual.trim()); return v
+}
 
 async function pickMulti(page: Page, label: string, option: string) {
   await page.getByRole('button', { name: label, exact: true }).click()
@@ -547,7 +559,9 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
     // v1.11: los medios de pago ya no se administran en Configuración, sino en la pestaña Catálogo
     await expect(page.getByLabel('Nuevo medio de pago')).toHaveCount(0)
     await go(page, 'Catálogo')
-    await page.getByRole('button', { name: 'Nuevo medio de pago', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Nuevo medio de pago', exact: true })).toHaveCount(0)   // sin botón duplicado debajo de las tarjetas
+    await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Nuevo medio de pago' }).click()
     await dialog(page).getByLabel('Nombre del medio de pago').fill('Tarjeta')
     await dialog(page).getByRole('button', { name: 'Crear medio de pago' }).click()
     const medios = page.getByRole('list', { name: 'Medios de pago' }).getByRole('listitem')
@@ -1082,7 +1096,7 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     for (const vp of [{ width: 360, height: 780 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(vp)
       await page.goto('/?demo=60&cajas=10#cajas')
-      await expect(page.getByTestId('caja-general')).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })
@@ -1090,7 +1104,6 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
 
 // ───────────────────────────── v1.8 ─────────────────────────────
 test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
-  const cons = (page: Page, id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
   const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
   const saludValor = (page: Page, id: string) => page.getByTestId(id).innerText().then(money)
 
@@ -1110,7 +1123,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivada' })).toBeVisible()
     // Dashboard y Salud financiera usan el mismo cálculo
     await go(page, 'Dashboard')
-    expect(money(await page.getByTestId('cons-presupuesto-consolidado').locator('p').nth(1).innerText())).toBe(3780)
+    expect(await cons(page, 'presupuesto-consolidado')).toBe(3780)
     expect(money(await kpi(page, 'Disponible').innerText())).toBeCloseTo(3780 - gastado, 2)
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
@@ -1121,7 +1134,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await fuente(page, 'Extra 1').getByRole('switch', { name: 'Activar Extra 1' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await go(page, 'Dashboard')
-    expect(money(await page.getByTestId('cons-presupuesto-consolidado').locator('p').nth(1).innerText())).toBe(4780)
+    expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)
   })
 
   test('por mes: Extra 1 no se arrastra; ajustar General solo en noviembre no cambia octubre', async ({ page }) => {
@@ -1287,10 +1300,12 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
       await page.goto(q)
       await expect(page.getByTestId('consolidado')).toBeVisible()
       const dash = await celdas(page), dispDash = await page.getByTestId('disponible-consolidado').innerText()
-      await go(page, 'Cajas')
-      await expect(page.getByTestId('consolidado')).toBeVisible()
-      expect(await celdas(page)).toEqual(dash)
-      expect(await page.getByTestId('disponible-consolidado').innerText()).toBe(dispDash)
+      await go(page, 'Cajas')                                                                   // Cajas ya no repite el panel: sus indicadores superiores coinciden con el Dashboard
+      await expect(page.getByTestId('consolidado')).toHaveCount(0)
+      const res = (l: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
+      expect(await res('Presupuesto consolidado')).toBe(money(dash['cons-presupuesto-consolidado']))
+      expect(await res('Reservado en subcajas')).toBe(money(dash['cons-reservado-en-subcajas']))
+      await go(page, 'Dashboard')
       await go(page, 'Salud financiera')
       await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
       expect(money(await page.getByTestId('pres-presupuesto').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
@@ -1307,8 +1322,8 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     await expect.poll(async () => money(await page.getByTestId('disponible-consolidado').innerText())).toBeCloseTo(d0 - 40, 2)
     const dash = await celdas(page)
     await go(page, 'Cajas')
-    await expect(page.getByTestId('consolidado')).toBeVisible()
-    expect(await celdas(page)).toEqual(dash)
+    await expect(page.getByTestId('consolidado')).toHaveCount(0)
+    expect(money(await page.getByTestId('cajas-resumen').locator('dt', { hasText: 'Presupuesto consolidado' }).locator('xpath=following-sibling::dd[1]').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
     expect(((await calls(page)).data ?? 0) - (c0.data ?? 0)).toBe(0)                                  // sin lecturas extra del Sheet
   })
 
@@ -1388,7 +1403,6 @@ test('compromisos: panel compacto — resumen, orden por estado, cubiertos contr
 })
 
 test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantillas con tipo y recurrente', () => {
-  const cons = (page: Page, id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
   const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
   const disponible = async (page: Page, n: string) => money(/disponible\s+(-?S\/\s*[\d,.]+)/.exec(await fuente(page, n).innerText())![1])
 
@@ -1668,12 +1682,12 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await go(page, 'Catálogo')
     const antes = await ico()
     await go(page, 'Configuración')
-    await page.getByRole('button', { name: /Completar vacíos/ }).click()
+    await page.getByRole('button', { name: 'Ejecutar completarVacios', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: /Hoja completada: \d+ fila/ })).toBeVisible({ timeout: 15_000 })
     await go(page, 'Catálogo')
     expect(await ico()).toBe(antes)
     await go(page, 'Configuración')
-    await page.getByRole('button', { name: /Completar vacíos/ }).click()
+    await page.getByRole('button', { name: 'Ejecutar completarVacios', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: 'La hoja ya no tiene celdas vacías por completar.' })).toBeVisible({ timeout: 15_000 })
   })
 
@@ -1726,7 +1740,7 @@ test.describe('v1.12', () => {
   })
 
   test('Presupuesto consolidado: el icono ⓘ muestra "Cómo se calcula" al pasar, tocar y con teclado', async ({ page }) => {
-    await page.goto('/?demo=60&fuentes=3#cajas')
+    await page.goto('/?demo=60&fuentes=3')
     const b = page.getByRole('region', { name: 'Presupuesto consolidado' }).getByRole('button', { name: /Información: Cómo se calcula/ })
     await expect(b).toBeVisible({ timeout: 15_000 })
     await b.hover()
@@ -1747,6 +1761,10 @@ test.describe('v1.12', () => {
     await go(page, 'Configuración')
     const panel = page.getByTestId('funciones-backend')
     await expect(panel).toBeVisible()
+    // agrupadas en acordeones: solo Mantenimiento abre por defecto; se abren y cierran
+    await expect(panel.getByRole('button', { name: /^Mantenimiento de la hoja/ })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true })).toHaveCount(0)
+    for (const g of ['Conexión y archivos', 'Atajo de iPhone', 'Datos de prueba']) await panel.getByRole('button', { name: new RegExp(`^${g}`) }).click()
     for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'borrarDatosPrueba'])
       await expect(page.getByRole('button', { name: `Ejecutar ${f}`, exact: true })).toBeVisible()
     // respuesta simple en el área de resultado
@@ -1765,13 +1783,19 @@ test.describe('v1.12', () => {
     await page.getByRole('button', { name: 'Ejecutar crearTokenAtajo', exact: true }).click()
     await page.getByRole('button', { name: 'Confirmar' }).click()
     await expect(res).toContainText('atj_demo_no_real')
-    // la administración diaria sigue en su sección
-    await expect(page.getByRole('button', { name: /Completar vacíos/ }).first()).toBeVisible()
+    // Completar vacíos existe una sola vez (antes estaba también en Administración de datos)
+    await expect(page.getByRole('button', { name: /Completar vacíos/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Ejecutar completarVacios', exact: true })).toHaveCount(1)
+    // consola: copiar, expandir y contraer
+    await page.getByRole('button', { name: 'Expandir resultado' }).click()
+    await expect(page.getByRole('button', { name: 'Contraer resultado' })).toBeVisible()
+    await page.getByRole('button', { name: 'Contraer resultado' }).click()
+    await expect(res.locator('pre')).toHaveClass(/max-h-56/)
+    await expect(res.getByRole('button', { name: 'Copiar resultado' })).toBeVisible()
   })
 })
 
 test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clonar, Eliminar, ON/OFF)', () => {
-  const cons = (page: Page, id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
   const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
   const nombresFuentes = (page: Page) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente-nombre').allInnerTexts()
   const nFuentes = async (page: Page) => Number(await page.getByTestId('n-fuentes').innerText())
