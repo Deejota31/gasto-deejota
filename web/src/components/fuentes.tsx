@@ -1,15 +1,17 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
-  Info, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Search, Star,
+  Copy, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2,
 } from 'lucide-react'
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
-import { monthLabel } from '../lib/dates'
+import { monthLabel, todayIn } from '../lib/dates'
 import { normName } from '../lib/orden'
 import { fuenteLook, medioLook } from '../lib/visual'
 import type { AppStore } from '../lib/store'
-import type { Fuente, FuenteMes, Recurrencia } from '../lib/types'
-import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch, useDismiss } from './ui'
+import type { AppData, Fuente, FuenteMes, Recurrencia } from '../lib/types'
+import { dependenciasFuente } from '../lib/dependencias'
+import { MenuAcciones } from './MenuAcciones'
+import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 
 /**
  * Fuentes de dinero (v1.8): General, Sodexo, Extra 1… Cada fuente activa suma su importe del mes al presupuesto
@@ -36,7 +38,8 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
   const [estado, setEstado] = useState<'todas' | 'activas' | 'inactivas'>('todas')
   const [vista, setVista] = useState<'grid' | 'lista'>('grid')
   const [verTodas, setVerTodas] = useState(false)
-  const [form, setForm] = useState<{ fuente: Fuente | null; key: number } | null>(null)
+  const [form, setForm] = useState<{ fuente: Fuente | null; clonDe?: Fuente | null; key: number } | null>(null)
+  const [borrar, setBorrar] = useState<FuenteResumen | null>(null)
   const [desactivar, setDesactivar] = useState<FuenteResumen | null>(null)
   const general = c.general
   const migrada = fuentes.some(r => r.fuente.id === FUENTE_GENERAL_ID)
@@ -53,6 +56,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
   const ids = fuentes.map(r => r.fuente.id)
 
   const abrir = (fuente: Fuente | null) => setForm({ fuente, key: Date.now() })
+  const clonar = (fuente: Fuente) => setForm({ fuente: null, clonDe: fuente, key: Date.now() })
   const mover = (id: string, delta: number) => {
     const xs = [...ids]
     const i = xs.indexOf(id), j = i + delta
@@ -134,13 +138,15 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de fuentes">
           {mostradas.map(r => <TarjetaFuente key={r.fuente.id} r={r} todas={todas} money={money} mes={mes} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
             acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
-              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} />} />)}
+              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)}
+              onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />} />)}
         </ul>
       ) : (
         <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de fuentes">
           {mostradas.map(r => <FilaFuente key={r.fuente.id} r={r} todas={todas} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
             acciones={<AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
-              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} />} />)}
+              onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)}
+              onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />} />)}
         </ul>
       ))}
 
@@ -157,8 +163,9 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         </div>
       )}
 
-      {form && <FuenteForm key={form.key} store={store} fuente={form.fuente} fuentes={fuentes.map(r => r.fuente)} meses={data.fuentesMeses ?? []} mes={mes} hoyMes={hoyMes}
+      {form && <FuenteForm key={form.key} store={store} fuente={form.fuente} clonDe={form.clonDe ?? null} fuentes={fuentes.map(r => r.fuente)} meses={data.fuentesMeses ?? []} mes={mes} hoyMes={hoyMes}
         monedas={monedasDe(data.config)} medios={data.medios.map(m => m.nombre)} primera={c.origen === 'caja-general'} general={general ? Math.round(general.presupuesto * 100) : 0} money={money} onClose={() => setForm(null)} />}
+      {borrar && <BorrarFuente store={store} r={borrar} data={data} money={money} onClose={() => setBorrar(null)} onDesactivar={() => { const x = borrar; setBorrar(null); if (x.fuente.activo) alternar(x) }} />}
       {desactivar && <DesactivarFuente r={desactivar} c={c} money={money} periodo={periodo} onClose={() => setDesactivar(null)}
         onConfirm={() => { guardarEstado(desactivar.fuente, false); setDesactivar(null) }} />}
     </section>
@@ -175,7 +182,7 @@ function estadoFuente(r: FuenteResumen) {
   return { txt: 'Activa', tono: TONO.ok }
 }
 
-function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: () => void; label: string; disabled?: boolean }) {
+export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: () => void; label: string; disabled?: boolean }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} title={on ? 'Activa: suma al presupuesto' : 'Inactiva: no suma'} disabled={disabled} onClick={onChange}
       className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-1 py-1 text-[11px] font-bold disabled:opacity-50">
@@ -195,7 +202,7 @@ function Badges({ r }: { r: FuenteResumen }) {
       <span className={chip} style={{ color: e.tono.fg, background: e.tono.bg }} data-testid="estado-fuente">{e.txt}</span>
       {r.principal && <span className={chip} style={{ color: TONO.info.fg, background: TONO.info.bg }} title="Recibe los gastos que no tienen una fuente por medio de pago"><Star className="size-2.5" /> Principal</span>}
       {r.fuente.medioPago && <span className={chip} style={{ color: '#4D7C0F', background: '#F0F9E0' }} title={`Los gastos pagados con ${r.fuente.medioPago} se atribuyen a esta fuente`}><CreditCard className="size-2.5" /> {r.fuente.medioPago}</span>}
-      {r.ajustado && <span className={chip} style={{ color: TONO.atencion.fg, background: TONO.atencion.bg }} title="Este período tiene un importe propio">Ajustado</span>}
+      {r.ajustado && <span className={chip} style={{ color: TONO.atencion.fg, background: TONO.atencion.bg }} title={`Importe base registrado: ${r.fuente.moneda} ${r.fuente.monto.toFixed(2)}. Este período usa un importe propio (ajuste por mes, hoja FUENTES_MESES).`}>Ajustado</span>}
     </span>
   )
 }
@@ -220,6 +227,7 @@ function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones }: { r: 
           <div className="min-w-0">
             <p className="text-[11px] text-muted">{mes ? `Aporta en ${monthLabel(mes, true)}` : 'Aporta en el período'}</p>
             <p className={`tabular truncate text-xl font-bold ${f.activo ? 'text-ink' : 'text-muted line-through decoration-1'}`} data-testid="fuente-aporte">{money(r.asignado)}</p>
+            {r.ajustado && <p className="tabular truncate text-[10px] text-muted" data-testid="fuente-base" title="Importe base de la hoja FUENTES; el período usa un ajuste de FUENTES_MESES">Base {f.moneda} {f.monto.toFixed(2)} · ajuste de este período</p>}
           </div>
           <Toggle on={f.activo} onChange={onToggle} label={`${f.activo ? 'Desactivar' : 'Activar'} ${f.nombre}`} disabled={busy} />
         </div>
@@ -260,26 +268,54 @@ function FilaFuente({ r, todas, money, busy, onToggle, acciones }: { r: FuenteRe
   )
 }
 
-function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown }: {
-  f: Fuente; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void
+function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete }: {
+  f: Fuente; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  const ref = useDismiss(open, close)
-  const item = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg disabled:opacity-40'
-  const run = (fn: () => void) => () => { setOpen(false); fn() }
   return (
-    <div ref={ref} className="relative flex shrink-0 items-center gap-1">
+    <div className="relative flex shrink-0 items-center gap-1">
       <button type="button" aria-label={`Editar fuente ${f.nombre}`} title="Editar" onClick={onEdit} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg hover:text-navy"><Pencil className="size-4" /></button>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`Más acciones de la fuente ${f.nombre}`} onClick={() => setOpen(o => !o)}
-        className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg"><MoreHorizontal className="size-4" /></button>
-      {open && (
-        <div role="menu" className="absolute top-10 right-0 z-30 w-44 rounded-xl border border-line bg-card p-1 shadow-xl">
-          <button role="menuitem" type="button" className={item} disabled={!puedeOrdenar || first} onClick={run(onUp)}><ArrowUp className="size-3.5 text-muted" /> Subir</button>
-          <button role="menuitem" type="button" className={item} disabled={!puedeOrdenar || last} onClick={run(onDown)}><ArrowDown className="size-3.5 text-muted" /> Bajar</button>
-        </div>
-      )}
+      <MenuAcciones label={`Más acciones de la fuente ${f.nombre}`} acciones={[
+        { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },
+        { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },
+        { key: 'clone', label: 'Clonar', icon: <Copy className="size-3.5" />, onClick: onClone },
+        { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-3.5" />, onClick: onDelete, danger: true },
+      ]} />
     </div>
+  )
+}
+
+/** Eliminar: verifica dependencias (gastos atribuidos en todo el historial, importes por mes). Con gastos NO se elimina: se ofrece desactivar. */
+function BorrarFuente({ store, r, data, money, onClose, onDesactivar }: {
+  store: AppStore; r: FuenteResumen; data: AppData; money: (n: number) => string; onClose: () => void; onDesactivar: () => void
+}) {
+  const f = r.fuente
+  const deps = useMemo(() => dependenciasFuente(f, data, todayIn()), [f, data])
+  const bloqueada = deps.gastos > 0
+  return (
+    <Modal open onClose={onClose} size="sm" title={bloqueada ? `No se puede eliminar ${f.nombre}` : `Eliminar ${f.nombre}`} icon={<Trash2 className="size-5" />}
+      footer={bloqueada
+        ? <><Button variant="outline" onClick={onClose}>Cerrar</Button>{f.activo && <Button onClick={onDesactivar}>Desactivar en su lugar</Button>}</>
+        : <><Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={store.pending.has(`fuente:${f.id}`)} onClick={() => {
+            const ok = store.track(`fuente:${f.id}`, { pending: `Eliminando ${f.nombre}…`, ok: `${f.nombre} eliminada. Ningún gasto se borró.`, error: `No se pudo eliminar ${f.nombre}.` },
+              () => store.actions.deleteFuente(f.id))
+            if (ok) onClose()
+          }}><Trash2 className="size-4" /> Eliminar</Button></>}>
+      <div className="space-y-3 text-sm" data-testid="eliminar-fuente">
+        <p className="font-semibold">“{f.nombre}” · {recurrenciaTxt(f)}{f.medioPago ? ` · ${f.medioPago}` : ''}</p>
+        {bloqueada ? (
+          <p className="rounded-xl px-3 py-2 text-xs" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }} data-testid="fuente-con-gastos">
+            Tiene {deps.gastos} gasto(s) atribuido(s) en tu historial. Para no perder la trazabilidad no se elimina.
+            {f.activo ? ' Puedes desactivarla: deja de sumar al presupuesto, conserva su historial y puedes reactivarla cuando quieras.' : ' Ya está inactiva: queda guardada sin sumar al presupuesto.'}
+          </p>
+        ) : (
+          <>
+            <p className="text-muted">No tiene gastos atribuidos. Se eliminará la fuente{deps.ajustes ? ` y sus ${deps.ajustes} importe(s) por mes` : ''}; ningún gasto se borra.</p>
+            {f.activo && r.aporta > 0 && <p className="text-xs text-muted">En este período el presupuesto consolidado bajará en <b className="tabular">{money(r.aporta)}</b>.</p>}
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -303,23 +339,25 @@ function DesactivarFuente({ r, c, money, periodo, onClose, onConfirm }: { r: Fue
 
 /* ============================== Crear / editar ============================== */
 
-function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medios, primera, general, money, onClose }: {
-  store: AppStore; fuente: Fuente | null; fuentes: Fuente[]; meses: FuenteMes[]; mes: string | null; hoyMes: string; monedas: string[]; medios: string[]
+function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes, monedas, medios, primera, general, money, onClose }: {
+  store: AppStore; fuente: Fuente | null; clonDe?: Fuente | null; fuentes: Fuente[]; meses: FuenteMes[]; mes: string | null; hoyMes: string; monedas: string[]; medios: string[]
   primera: boolean; general: number; money: (n: number) => string; onClose: () => void
 }) {
   const editar = !!fuente
   // ID fijo mientras el formulario está abierto: guardar dos veces (doble clic, reintento) actualiza la misma fuente.
   const [id] = useState(() => fuente?.id ?? `f-${crypto.randomUUID().slice(0, 12)}`)
   const mesRef = mes ?? hoyMes
-  const [nombre, setNombre] = useState(fuente?.nombre ?? '')
-  const [moneda, setMoneda] = useState(fuente?.moneda ?? monedas[0] ?? 'PEN')
-  const [recurrencia, setRecurrencia] = useState<Recurrencia>(fuente?.recurrencia ?? 'mensual')
-  const [mesAplic, setMesAplic] = useState(fuente ? fuente.mes : mesRef)
-  const [medio, setMedio] = useState(fuente?.medioPago ?? '')
-  const [activo, setActivo] = useState(fuente?.activo ?? true)
+  // Clonar: parte de la configuración de la original (sin gastos ni importes por mes) y nace INACTIVA: no suma dinero
+  // al presupuesto hasta que el usuario la active y confirme el importe.
+  const [nombre, setNombre] = useState(fuente?.nombre ?? (clonDe ? `${clonDe.nombre.slice(0, 31)} (Copia)` : ''))
+  const [moneda, setMoneda] = useState(fuente?.moneda ?? clonDe?.moneda ?? monedas[0] ?? 'PEN')
+  const [recurrencia, setRecurrencia] = useState<Recurrencia>(fuente?.recurrencia ?? clonDe?.recurrencia ?? 'mensual')
+  const [mesAplic, setMesAplic] = useState(fuente ? fuente.mes : clonDe ? clonDe.mes : mesRef)
+  const [medio, setMedio] = useState(fuente?.medioPago ?? clonDe?.medioPago ?? '')
+  const [activo, setActivo] = useState(fuente?.activo ?? (clonDe ? false : true))
   // Importe: al crear es el importe base; al editar es el del mes elegido (solo ese mes o desde ese mes).
   const actualMes = fuente && mes ? fuenteMontoMes(fuente, mes, meses) : null
-  const [monto, setMonto] = useState(fuente ? String(actualMes ? actualMes.monto : fuente.monto) : '')
+  const [monto, setMonto] = useState(fuente ? String(actualMes ? actualMes.monto : fuente.monto) : clonDe ? String(clonDe.monto) : '')
   const [modo, setModo] = useState<'solo' | 'desde'>('solo')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const tieneSolo = !!fuente && !!mes && meses.some(m => m.fuenteId === fuente.id && m.mes === mes && m.modo === 'solo')
@@ -352,7 +390,7 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
     const msgMes = cambiaImporteMes ? (modo === 'desde' ? ` Importe desde ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.` : ` Importe de ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.`) : ''
     const ok = store.track(`fuente:${id}`, editar
       ? { pending: `Guardando ${base.nombre}…`, ok: `${base.nombre} actualizada.${msgMes}`, error: `No se pudo actualizar ${base.nombre}.` }
-      : { pending: `Creando ${base.nombre}…`, ok: `${base.nombre} creada: suma ${money(Math.round(n * 100))} ${recurrencia === 'unica' ? `en ${monthLabel(mesAplic, true)}` : 'al mes'}.`, error: `No se pudo crear ${base.nombre}.` },
+      : { pending: `Creando ${base.nombre}…`, ok: activo ? `${base.nombre} creada: suma ${money(Math.round(n * 100))} ${recurrencia === 'unica' ? `en ${monthLabel(mesAplic, true)}` : 'al mes'}.` : `${base.nombre} creada inactiva: no suma al presupuesto hasta que la actives.`, error: `No se pudo crear ${base.nombre}.` },
     async () => {
       if (cambiaConfig) await store.actions.saveFuente(base)
       if (cambiaImporteMes) await store.actions.saveFuenteMes({ fuenteId: id, mes: mes!, monto: n, modo: recurrencia === 'unica' ? 'solo' : modo })
@@ -366,15 +404,20 @@ function FuenteForm({ store, fuente, fuentes, meses, mes, hoyMes, monedas, medio
   }
 
   return (
-    <Modal open onClose={onClose} size="md" title={editar ? `Editar ${fuente!.nombre}` : 'Nueva fuente'} icon={<CircleDollarSign className="size-5" />}
+    <Modal open onClose={onClose} size="md" title={editar ? `Editar ${fuente!.nombre}` : clonDe ? `Clonar ${clonDe.nombre}` : 'Nueva fuente'} icon={<CircleDollarSign className="size-5" />}
       subtitle="Dinero que suma a tu presupuesto consolidado. No crea gastos ni ingresos contables."
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : 'Crear fuente'}</Button></>}>
+      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : clonDe ? 'Crear copia' : 'Crear fuente'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
           <span className="grid size-11 place-items-center rounded-2xl bg-card" style={{ color }}><Icon className="size-5" /></span>
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{nombre.trim() || 'Nueva fuente'}</p>
             <p className="truncate text-[11px] text-muted">{recurrencia === 'unica' ? `Solo ${MES_RE.test(mesAplic) ? monthLabel(mesAplic, true) : '—'}` : mesAplic ? `Todos los meses desde ${monthLabel(mesAplic, true)}` : 'Todos los meses'}</p></div>
         </div>
+        {clonDe && (
+          <ErrorBox tone="warning" message={activo
+            ? `Al crearla, esta copia sumará ${money(Math.round((Number(monto.replace(',', '.')) || 0) * 100))} al presupuesto consolidado (dinero adicional). Revisa el importe o déjala inactiva.`
+            : `Es una copia de “${clonDe.nombre}”: no copia gastos ni importes por mes y nace inactiva, así que no suma dinero al presupuesto hasta que la actives.`} />
+        )}
         {primera && !editar && general > 0 && (
           <ErrorBox tone="warning" message={`Es tu primera fuente: desde ahora el presupuesto será la suma de fuentes y la caja general (${money(general)}/mes) deja de sumar. Si ese dinero sigue disponible, crea primero la fuente General desde el aviso de la pestaña.`} />
         )}

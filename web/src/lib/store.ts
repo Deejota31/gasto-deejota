@@ -87,6 +87,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<Date | null>(null)
+  /** true solo tras una lectura exitosa de la hoja en esta sesión; el respaldo del navegador nunca cuenta como confirmado. */
+  const [confirmado, setConfirmado] = useState(false)
   const loadingRef = useRef(false)
   // Cambios confirmados mientras una lectura completa estaba en curso: se vuelven a aplicar sobre su resultado
   // para que una respuesta tardía no pise datos más recientes. Todos los parches son idempotentes (upsert por clave).
@@ -137,10 +139,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const ordenVigente = ordenVersion.current === ordenAlEmpezar && !inflight.current.has('gastos:orden')
       if (ordenVigente) setOrdenGastos(ordenMap(raw))
       setLastSync(new Date())
+      setConfirmado(true)
       writeSnapshot(conn, ordenVigente ? merged : { ...merged, ordenGastos: [...ordenRef.current] })
       return true
     } catch (e) {
       setError((e as Error).message)
+      setConfirmado(false) // la lectura falló: lo que se ve puede estar desactualizado y así se indica
       return false
     } finally {
       loadingRef.current = false
@@ -152,7 +156,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     const s = readSnapshot(conn)
     setData(s && normalize(s))
     setOrdenGastos(ordenMap(s))
-    void refresh(false)
+    setConfirmado(false)
+    // Siempre lectura fresca al abrir/recargar: la caché del servidor (10 min) no ve las ediciones hechas a mano en la
+    // hoja y mostraba registros ya eliminados. El respaldo del navegador solo sirve para pintar mientras llega la lectura.
+    void refresh(true)
   }, [refresh, conn])
 
   const patch = useCallback((fn: (d: AppData) => AppData) => {
@@ -238,6 +245,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       await api.saveFuenteMes(m, quitar)
       const mismo = (x: FuenteMes) => x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo
       patch(d => ({ ...d, fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => !mismo(x)), ...(quitar ? [] : [m])] }))
+    },
+    /** Elimina una fuente y sus importes por mes. Los gastos no se tocan (la atribución se calcula, no se guarda). */
+    async deleteFuente(id: string) {
+      await api.deleteFuente(id)
+      patch(d => ({ ...d, fuentes: (d.fuentes ?? []).filter(x => x.id !== id), fuentesMeses: (d.fuentesMeses ?? []).filter(x => x.fuenteId !== id) }))
     },
     /** Orden de las fuentes: se ve al instante; si falla, vuelve al anterior. */
     async reorderFuentes(ids: string[]) {
@@ -421,7 +433,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   }, [api, guardarOrden])
 
   return {
-    data, loading, error, lastSync, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions,
+    data, loading, error, lastSync, confirmado, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions,
     lote, setLote, nuevoLote, registrarLote, ordenGastos, reorderGastos, isDemo: !conn && !apiOverride,
   }
 }

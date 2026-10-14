@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.12.0';
+var APP_VERSION = '1.13.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -788,6 +788,7 @@ var ACTIONS = {
   saveFuente: saveFuente_,
   saveFuenteMes: saveFuenteMes_,
   reorderFuentes: reorderFuentes_,
+  deleteFuente: deleteFuente_,
   migrarGeneralAFuente: migrarGeneralAFuente_,
   completarVacios: completarVacios_,
   carpetaRespaldo: carpetaRespaldoInfo_,
@@ -1422,6 +1423,18 @@ function saveFuenteMes_(p) {
   var row = [fuenteId, mes, amount_(p.monto, true), modo, new Date().toISOString()];
   if (idx >= 0) h.meses.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(h.meses, [row]);
   return [fuenteId, mes, row[2], modo];
+}
+
+// Elimina una fuente y sus importes por mes (FUENTES_MESES). Ningún gasto guarda el ID de una fuente (la atribución se
+// calcula), así que no se toca ningún gasto. La web ya verifica dependencias antes de pedirlo; aquí queda idempotente.
+function deleteFuente_(p) {
+  var id = text_(p.id, 'ID de fuente', 64, true);
+  var h = fuentesSheets_();
+  var row = findRowByValue_(h.fuentes, 1, id);
+  if (!row) return { id: id, eliminada: false, ajustes: 0 };
+  h.fuentes.deleteRow(row);
+  var ajustes = borrarFilasSi_(h.meses, SHEETS.FUENTES_MESES.length, function (r) { return str_(r[0]) === id; });
+  return { id: id, eliminada: true, ajustes: ajustes };
 }
 
 function reorderFuentes_(p) {

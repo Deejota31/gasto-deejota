@@ -28,6 +28,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.13.0
+
+- **Sincronización con Google Sheets corregida (causa raíz):** la web abría con la lectura en caché del servidor (10 min) y con una copia local, así que fuentes borradas a mano en la hoja seguían apareciendo. Ahora cada apertura/"Actualizar" lee la hoja directamente, la hoja manda (se reconcilia por ID: altas, ediciones y bajas), se conservan tus cambios pendientes y, si la lectura falla, aparece un aviso "datos sin confirmar" en vez de mostrar la copia como vigente. Refrescar nunca escribe en la hoja.
+- **Fuentes de dinero:** el menú ⋯ trae Subir, Bajar, Clonar y Eliminar. Clonar abre una vista previa editable (copia inactiva, sin gastos ni dinero). Eliminar pide confirmación, revisa dependencias y, si hay gastos atribuidos, no borra nada y ofrece desactivar. Nunca se borra un gasto.
+- **Subcajas:** interruptor ON/OFF (columna `Activo` de `CAJAS`) y el mismo menú de 4 acciones en tarjetas y lista. Clonar copia la configuración con monto 0 e inactiva; eliminar revisa dependencias y ofrece desactivar. Desactivar no crea ni borra dinero.
+- Nueva acción de backend `deleteFuente`.
+
+### Despliegue de v1.13.0
+
+1. Copia `apps-script/Code.gs` a Apps Script y publica una **nueva versión** (necesaria para eliminar fuentes desde la web).
+
 ## Novedades v1.12.0
 
 - **Globos de información corregidos:** el ⓘ (p. ej. "Caja mensual" o "Presupuesto consolidado") siempre se muestra por encima de las tarjetas vecinas y no se recorta; abre con el mouse, con el toque y con el teclado.

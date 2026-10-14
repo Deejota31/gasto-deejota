@@ -1025,14 +1025,13 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await d.getByRole('button', { name: 'Guardar cambios' }).click()
     await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 + 60, 2)
     // desactivar: deja de reservar
-    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
-    await page.getByRole('menuitem', { name: 'Desactivar' }).click()
+    await tarjeta(page, 'Caja Línea Celular').getByRole('switch', { name: /Desactivar Caja Línea Celular/ }).click()
     await expect(tarjeta(page, 'Caja Línea Celular').getByTestId('estado-caja')).toHaveText('Inactiva')
     await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)
     // eliminar con confirmación
     await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
-    await expect(d.getByText('No se borra ningún gasto ni la caja general.', { exact: false })).toBeVisible()
+    await expect(d.getByText('ningún gasto se borra', { exact: false })).toBeVisible()
     await d.getByRole('button', { name: 'Eliminar', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular eliminada. Ningún gasto se borró.' })).toBeVisible()
     await expect(tarjeta(page, 'Caja Línea Celular')).toHaveCount(0)
@@ -1768,5 +1767,219 @@ test.describe('v1.12', () => {
     await expect(res).toContainText('atj_demo_no_real')
     // la administración diaria sigue en su sección
     await expect(page.getByRole('button', { name: /Completar vacíos/ }).first()).toBeVisible()
+  })
+})
+
+test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clonar, Eliminar, ON/OFF)', () => {
+  const cons = (page: Page, id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
+  const fuente = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente').filter({ has: page.getByTestId('fuente-nombre').getByText(n, { exact: true }) })
+  const nombresFuentes = (page: Page) => page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente-nombre').allInnerTexts()
+  const nFuentes = async (page: Page) => Number(await page.getByTestId('n-fuentes').innerText())
+  const menuF = (page: Page, n: string) => page.getByRole('button', { name: `Más acciones de la fuente ${n}`, exact: true })
+  const menuC = (page: Page, n: string) => page.getByRole('button', { name: `Más acciones de ${n}`, exact: true })
+  const resumen = (page: Page, label: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
+  const caja = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
+  const actualizar = async (page: Page) => { await page.getByRole('button', { name: 'Actualizar datos' }).click(); await expect(page.getByRole('button', { name: 'Actualizar datos' })).toBeEnabled({ timeout: 15_000 }) }
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3#cajas')
+    await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
+  })
+
+  test('fuentes: el menú ⋯ trae Subir, Bajar, Clonar y Eliminar (en ese orden), no se corta y respeta primero/último', async ({ page }) => {
+    await menuF(page, 'General').click()
+    await expect(page.getByRole('menuitem')).toHaveCount(4)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()          // primera
+    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeEnabled()
+    const vp = page.viewportSize()!
+    const box = (await page.getByRole('menu').boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0); expect(box.y).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(vp.width); expect(box.y + box.height).toBeLessThanOrEqual(vp.height)
+    // nada tapa el menú (no queda cortado por la tarjeta)
+    const c = { x: box.x + box.width / 2, y: box.y + box.height - 8 }
+    expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[role="menu"]'), c)).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await menuF(page, 'Extra 1').scrollIntoViewIfNeeded()
+    await menuF(page, 'Extra 1').click()
+    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled()          // última
+    await page.keyboard.press('Escape')
+  })
+
+  test('fuentes: Subir/Bajar cambian el orden y se conserva al releer los datos', async ({ page }) => {
+    expect(await nombresFuentes(page)).toEqual(['General', 'Sodexo', 'Extra 1'])
+    await menuF(page, 'General').click()
+    await page.getByRole('menuitem', { name: 'Bajar' }).click()
+    await expect.poll(() => nombresFuentes(page)).toEqual(['Sodexo', 'General', 'Extra 1'])
+    await actualizar(page)
+    expect(await nombresFuentes(page)).toEqual(['Sodexo', 'General', 'Extra 1'])
+    await menuF(page, 'Extra 1').click()
+    await page.getByRole('menuitem', { name: 'Subir' }).click()
+    await expect.poll(() => nombresFuentes(page)).toEqual(['Sodexo', 'Extra 1', 'General'])
+    await actualizar(page)
+    expect(await nombresFuentes(page)).toEqual(['Sodexo', 'Extra 1', 'General'])
+  })
+
+  test('fuentes: clonar propone "(Copia)", nace inactiva, no suma dinero ni copia gastos y un doble clic no la duplica', async ({ page }) => {
+    const dispSodexo = (await fuente(page, 'Sodexo').innerText()).match(/disponible\s+(S\/\s*[\d,.]+)/)![1]
+    await menuF(page, 'Sodexo').click()
+    await page.getByRole('menuitem', { name: 'Clonar' }).click()
+    const d = dialog(page)
+    await expect(d.getByRole('heading', { name: 'Clonar Sodexo' })).toBeVisible()
+    await expect(d.getByLabel('Nombre de la fuente')).toHaveValue('Sodexo (Copia)')
+    await expect(d.getByLabel('Monto')).toHaveValue('280')
+    await expect(d.getByRole('switch', { name: 'Fuente activa' })).toHaveAttribute('aria-checked', 'false')
+    await expect(d).toContainText('nace inactiva')
+    await d.getByLabel('Nombre de la fuente').fill('Sodexo clon')                       // editable antes de confirmar
+    await d.getByRole('button', { name: 'Crear copia' }).dblclick()
+    await expect(page.getByRole('status').filter({ hasText: 'Sodexo clon creada inactiva' })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => nFuentes(page)).toBe(4)
+    expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)                      // no sumó dinero
+    await expect(fuente(page, 'Sodexo clon')).toContainText('Inactiva')
+    expect((await fuente(page, 'Sodexo').innerText()).match(/disponible\s+(S\/\s*[\d,.]+)/)![1]).toBe(dispSodexo)   // sus gastos siguen en la original
+    await actualizar(page)
+    expect(await nFuentes(page)).toBe(4)                                                // ni un registro duplicado
+    // activar la copia sí suma, previo aviso explícito en el formulario
+    await page.getByRole('button', { name: 'Editar fuente Sodexo clon' }).click()
+    await dialog(page).getByRole('button', { name: 'Cancelar' }).click()
+  })
+
+  test('fuentes: eliminar sin gastos pide confirmación, borra y actualiza totales; con gastos NO elimina y ofrece desactivar', async ({ page }) => {
+    // crear una fuente libre nueva (sin gastos) y eliminarla
+    await page.getByRole('button', { name: 'Nueva fuente' }).click()
+    await dialog(page).getByLabel('Nombre de la fuente').fill('Temporal')
+    await dialog(page).getByLabel('Monto').fill('100')
+    await dialog(page).getByRole('button', { name: 'Crear fuente' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Temporal creada' })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4880)
+    await menuF(page, 'Temporal').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    const d = dialog(page)
+    await expect(d.getByRole('heading', { name: 'Eliminar Temporal' })).toBeVisible()
+    await expect(d).toContainText('No tiene gastos atribuidos')
+    await d.getByRole('button', { name: 'Cancelar' }).click()
+    expect(await nFuentes(page)).toBe(4)                                               // cancelar no borra nada
+    await menuF(page, 'Temporal').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    await dialog(page).getByRole('button', { name: 'Eliminar' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Temporal eliminada. Ningún gasto se borró.' })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => nFuentes(page)).toBe(3)
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
+    await actualizar(page)
+    expect(await nFuentes(page)).toBe(3)
+    expect(await nombresFuentes(page)).not.toContain('Temporal')
+    // Sodexo tiene gastos atribuidos: no se elimina, se ofrece desactivar
+    const gastosAntes = await page.evaluate(() => 0)
+    void gastosAntes
+    await menuF(page, 'Sodexo').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    const b = dialog(page)
+    await expect(b.getByRole('heading', { name: 'No se puede eliminar Sodexo' })).toBeVisible()
+    await expect(b.getByTestId('fuente-con-gastos')).toContainText('gasto(s) atribuido(s)')
+    await expect(b.getByRole('button', { name: 'Eliminar', exact: true })).toHaveCount(0)
+    await b.getByRole('button', { name: 'Desactivar en su lugar' }).click()
+    await dialog(page).getByRole('button', { name: 'Desactivar', exact: true }).click()
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4500)
+    await expect(fuente(page, 'Sodexo')).toContainText('Inactiva')
+    expect(await nFuentes(page)).toBe(3)
+  })
+
+  test('subcajas: interruptor ON/OFF persiste, no crea ni quita dinero y recalcula reservado y libre', async ({ page }) => {
+    await expect(caja(page, 'Caja Auto')).toBeVisible()
+    const res0 = await resumen(page, 'Reservado en subcajas'), libre0 = await resumen(page, 'Libre inicial'), cons0 = await cons(page, 'presupuesto-consolidado')
+    const sw = page.getByRole('switch', { name: 'Desactivar Caja Auto' })
+    await expect(sw).toHaveAttribute('aria-checked', 'true')
+    await sw.click()
+    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
+    await expect(caja(page, 'Caja Auto').getByTestId('estado-caja')).toHaveText(/Inactiva/)
+    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 - 600, 2)
+    expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 + 600, 2)        // lo reservado vuelve al libre: ni se crea ni se pierde
+    expect(await cons(page, 'presupuesto-consolidado')).toBe(cons0)                  // el consolidado no cambia
+    await actualizar(page)                                                           // persistencia tras releer
+    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
+    await page.getByRole('switch', { name: 'Activar Caja Auto' }).click()
+    await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toHaveAttribute('aria-checked', 'true')
+    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)
+  })
+
+  test('subcajas: menú ⋯ con Subir, Bajar, Clonar y Eliminar; clonar no copia monto ni gastos; filtros bloquean el orden; vista lista', async ({ page }) => {
+    const nombres = () => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').locator('p.truncate.text-sm, p.truncate.font-semibold').allInnerTexts()
+    await menuC(page, 'Caja Auto').scrollIntoViewIfNeeded()
+    await page.waitForTimeout(400)
+    await menuC(page, 'Caja Auto').click()
+    await expect(page.getByRole('menuitem')).toHaveCount(4)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await page.keyboard.press('Escape')
+    // Subir / Bajar con persistencia
+    const antes = await nombres()
+    const i = antes.indexOf('Caja Auto')
+    await menuC(page, 'Caja Auto').click()
+    await page.getByRole('menuitem', { name: 'Bajar' }).click()
+    await expect.poll(async () => (await nombres()).indexOf('Caja Auto')).toBe(i + 1)
+    await actualizar(page)
+    expect((await nombres()).indexOf('Caja Auto')).toBe(i + 1)
+    // clonar
+    const res0 = await resumen(page, 'Reservado en subcajas')
+    await menuC(page, 'Caja Auto').click()
+    await page.getByRole('menuitem', { name: 'Clonar' }).click()
+    const d = dialog(page)
+    await expect(d.getByRole('heading', { name: 'Clonar Caja Auto' })).toBeVisible()
+    await expect(d.getByLabel('Nombre', { exact: true })).toHaveValue('Caja Auto (Copia)')
+    await expect(d.getByLabel('Monto asignado por mes')).toHaveValue('0')
+    await expect(d.getByRole('switch', { name: 'Caja activa' })).toHaveAttribute('aria-checked', 'false')
+    await expect(d.locator('#caja-valor')).toHaveValue('Auto')
+    await d.getByRole('button', { name: 'Crear copia' }).dblclick()
+    await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) creada inactiva' })).toBeVisible({ timeout: 15_000 })
+    await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(1)
+    await expect(caja(page, 'Caja Auto (Copia)').getByTestId('estado-caja')).toHaveText(/Inactiva/)
+    expect(await resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)        // la copia no reserva dinero adicional
+    // con búsqueda activa no se puede reordenar
+    await page.getByLabel('Buscar caja').fill('Auto')
+    await menuC(page, 'Caja Auto').click()
+    await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
+    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await page.getByLabel('Buscar caja').fill('')
+    // vista lista: mismo interruptor y mismo menú
+    await page.getByRole('radio', { name: 'Lista' }).click()
+    await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toBeVisible()
+    await menuC(page, 'Caja Auto (Copia)').click()
+    await expect(page.getByRole('menuitem')).toHaveCount(4)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    // la copia está inactiva (no toma gastos): se puede eliminar
+    await expect(dialog(page)).toContainText('Está inactiva')
+    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) eliminada. Ningún gasto se borró.' })).toBeVisible({ timeout: 15_000 })
+    await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(0)
+    // la original está activa y tiene gastos: no se elimina, se ofrece desactivar
+    await menuC(page, 'Caja Auto').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    await expect(dialog(page).getByTestId('caja-con-gastos')).toContainText('gasto(s)')
+    await dialog(page).getByRole('button', { name: 'Desactivar en su lugar' }).click()
+    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    // ya inactiva sí se puede eliminar, y sus gastos no se borran
+    await menuC(page, 'Caja Auto').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
+    await expect(caja(page, 'Caja Auto')).toHaveCount(0)
+    await go(page, 'Dashboard')
+    expect(await total(page)).toBeGreaterThan(0)                                   // los gastos siguen ahí
+  })
+
+  test('fallo de Apps Script: una operación que falla restaura la interfaz y no duplica nada', async ({ page }) => {
+    await page.goto('/?demo=60&fuentes=3&falla=1#cajas')
+    await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
+    const orden0 = await nombresFuentes(page)
+    await menuF(page, 'General').click()
+    await page.getByRole('menuitem', { name: 'Bajar' }).click()
+    await expect(page.getByRole('alert').filter({ hasText: 'No se pudo guardar el orden de las fuentes' })).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => nombresFuentes(page)).toEqual(orden0)                  // se restauró el orden anterior
+    await menuF(page, 'Extra 1').click()
+    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
+    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
+    await expect(page.getByRole('alert').filter({ hasText: 'No se pudo eliminar Extra 1' })).toBeVisible({ timeout: 15_000 })
+    expect(await nFuentes(page)).toBe(3)                                          // la fuente sigue ahí
   })
 })

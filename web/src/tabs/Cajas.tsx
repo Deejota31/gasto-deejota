@@ -1,21 +1,23 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
-  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Layers, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Power, Search,
+  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Plus, Power, Search,
   Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info,
 } from 'lucide-react'
 import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
-import type { Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
+import type { AppData, Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { cajaLook, COLORS, sortMedios } from '../lib/visual'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
-import { FuentesSeccion } from '../components/fuentes'
+import { FuentesSeccion, Toggle } from '../components/fuentes'
+import { MenuAcciones } from '../components/MenuAcciones'
+import { dependenciasCaja } from '../lib/dependencias'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
-import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch, useDismiss } from '../components/ui'
+import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch } from '../components/ui'
 
 type Alcance = Exclude<FiltroCampo, 'Todos'>
 const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
@@ -51,7 +53,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   const [estado, setEstado] = useState<'activas' | 'inactivas' | 'todas'>('todas')
   const [orden, setOrden] = useState<Orden>('manual')
   const [vista, setVista] = useState<'grid' | 'lista'>('grid')
-  const [form, setForm] = useState<{ caja: Caja | null } | null>(null)
+  const [form, setForm] = useState<{ caja: Caja | null; clonDe?: Caja | null } | null>(null)
   const [borrar, setBorrar] = useState<Caja | null>(null)
   const [ajustar, setAjustar] = useState<{ caja: Caja; asignado: number } | null>(null)
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
@@ -95,7 +97,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   }
   const activar = (caja: Caja) => {
     const on = !cajaActiva(caja)
-    store.track(`caja:${caja.id}`, { pending: on ? 'Activando caja…' : 'Desactivando caja…', ok: `${caja.nombre} ${on ? 'activada' : 'desactivada'}.`, error: `No se pudo ${on ? 'activar' : 'desactivar'} ${caja.nombre}.` },
+    store.track(`caja:${caja.id}`, { pending: on ? 'Activando caja…' : 'Desactivando caja…', ok: `${caja.nombre} ${on ? 'activada: vuelve a reservar su monto' : 'desactivada: libera su reserva'}. No se creó ni se perdió dinero ni gastos.`, error: `No se pudo ${on ? 'activar' : 'desactivar'} ${caja.nombre}.` },
       () => store.actions.saveCaja({ ...caja, activo: on }))
   }
 
@@ -158,10 +160,10 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
         ) : vista === 'grid' ? (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de cajas">
             {visibles.map(i => (
-              <TarjetaCaja key={i.caja.id} i={i} catalogo={catalogo} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)}
+              <TarjetaCaja key={i.caja.id} i={i} catalogo={catalogo} money={money} solapes={solapes.get(i.caja.id)} busy={store.pending.has(`caja:${i.caja.id}`)} onToggle={() => activar(i.caja)}
                 acciones={<Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
                   onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
-                  onToggle={() => activar(i.caja)} onDelete={() => setBorrar(i.caja)} />}
+                  onClone={() => setForm({ caja: null, clonDe: i.caja })} onDelete={() => setBorrar(i.caja)} />}
                 onAjustar={() => i.r && setAjustar({ caja: i.caja, asignado: i.r.asignado })} />
             ))}
           </ul>
@@ -169,12 +171,12 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
           <ListaCajas items={visibles} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending}
             acciones={i => <Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
               onEdit={() => setForm({ caja: i.caja })} onUp={() => mover(i.caja.id, -1)} onDown={() => mover(i.caja.id, 1)}
-              onToggle={() => activar(i.caja)} onDelete={() => setBorrar(i.caja)} />} />
+              onClone={() => setForm({ caja: null, clonDe: i.caja })} onDelete={() => setBorrar(i.caja)} />} onToggle={i => activar(i.caja)} />
         )}
       </section>
 
-      {form && <CajaForm store={store} caja={form.caja} cajas={data.cajas} catalogo={catalogo} medios={sortMedios(data.medios.map(m => m.nombre))} onClose={() => setForm(null)} />}
-      {borrar && <BorrarCaja store={store} caja={borrar} onClose={() => setBorrar(null)} />}
+      {form && <CajaForm store={store} caja={form.caja} clonDe={form.clonDe ?? null} cajas={data.cajas} catalogo={catalogo} medios={sortMedios(data.medios.map(m => m.nombre))} onClose={() => setForm(null)} />}
+      {borrar && <BorrarCaja store={store} caja={data.cajas.find(x => x.id === borrar.id) ?? borrar} data={data} onClose={() => setBorrar(null)} onDesactivar={() => { const x = borrar; setBorrar(null); if (cajaActiva(x)) activar(x) }} />}
       {ajustar && <CajaModal store={store} target={ajustar} cajas={c} mes={mes} money={money} onClose={() => setAjustar(null)} />}
     </div>
   )
@@ -236,8 +238,8 @@ function estadoDe(i: Item, money: (n: number) => string) {
 const resumirNombres = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 3).join(', ')} y ${xs.length - 3} más`)
 const alcanceTxt = (c: Caja) => `${c.filtroCampo} · ${c.filtroValor}`
 
-function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar }: {
-  i: Item; catalogo: CatalogoItem[]; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void
+function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, onToggle }: {
+  i: Item; catalogo: CatalogoItem[]; money: (n: number) => string; solapes?: string[]; busy: boolean; acciones: ReactNode; onAjustar: () => void; onToggle: () => void
 }) {
   const { caja, r } = i
   const { Icon, color } = cajaLook(caja, catalogo)
@@ -260,6 +262,7 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar }:
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ color: e.tono.fg, background: e.tono.bg }} data-testid="estado-caja"><e.Icon className="size-3" />{e.txt}</span>
           {busy && <span className="text-[11px] text-muted">Guardando…</span>}
+          <span className="ml-auto"><Toggle on={cajaActiva(caja)} onChange={onToggle} label={`${cajaActiva(caja) ? 'Desactivar' : 'Activar'} ${caja.nombre}`} disabled={busy} /></span>
         </div>
         {caja.descripcion && <p className="mt-2 line-clamp-2 text-xs text-muted">{caja.descripcion}</p>}
         {r ? (
@@ -296,8 +299,8 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar }:
   )
 }
 
-function ListaCajas({ items, catalogo, money, solapes, pending, acciones }: {
-  items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode
+function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onToggle }: {
+  items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode; onToggle: (i: Item) => void
 }) {
   return (
     <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de cajas">
@@ -306,7 +309,7 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones }: {
         const { Icon, color } = cajaLook(caja, catalogo)
         const e = estadoDe(i, money)
         return (
-          <li key={caja.id} data-testid="caja" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
+          <li key={caja.id} data-testid="caja" className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
             <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
             <div className="min-w-0">
               <p className="flex items-center gap-2 truncate text-sm font-semibold">{caja.nombre}
@@ -321,6 +324,7 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones }: {
               </>) : <span className="text-[11px] text-muted">Inactiva</span>}
             </div>
             <span className="tabular hidden text-right text-sm font-bold sm:block" style={{ color: r && r.disponible < 0 ? TONO.alerta.fg : 'var(--ink)' }}>{r?.asignado ? money(r.disponible) : '—'}</span>
+            <Toggle on={cajaActiva(caja)} onChange={() => onToggle(i)} label={`${cajaActiva(caja) ? 'Desactivar' : 'Activar'} ${caja.nombre}`} disabled={pending.has(`caja:${caja.id}`)} />
             {acciones(i)}
           </li>
         )
@@ -329,27 +333,19 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones }: {
   )
 }
 
-function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onToggle, onDelete }: {
-  caja: Caja; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onToggle: () => void; onDelete: () => void
+function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete }: {
+  caja: Caja; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  const ref = useDismiss(open, close)
-  const item = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg disabled:opacity-40'
-  const run = (fn: () => void) => () => { setOpen(false); fn() }
+  const sinOrden = puedeOrdenar ? undefined : 'Usa “Orden manual” y quita la búsqueda y los filtros para reordenar'
   return (
-    <div ref={ref} className="relative flex shrink-0 items-center gap-1">
+    <div className="relative flex shrink-0 items-center gap-1">
       <button type="button" aria-label={`Editar ${caja.nombre}`} onClick={onEdit} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg hover:text-navy"><Pencil className="size-4" /></button>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`Más acciones de ${caja.nombre}`} onClick={() => setOpen(o => !o)}
-        className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg"><MoreHorizontal className="size-4" /></button>
-      {open && (
-        <div role="menu" className="absolute top-10 right-0 z-30 w-48 rounded-xl border border-line bg-card p-1 shadow-xl">
-          <button role="menuitem" type="button" className={item} disabled={!puedeOrdenar || first} onClick={run(onUp)}><ArrowUp className="size-3.5 text-muted" /> Subir</button>
-          <button role="menuitem" type="button" className={item} disabled={!puedeOrdenar || last} onClick={run(onDown)}><ArrowDown className="size-3.5 text-muted" /> Bajar</button>
-          <button role="menuitem" type="button" className={item} onClick={run(onToggle)}><Power className="size-3.5 text-muted" /> {cajaActiva(caja) ? 'Desactivar' : 'Activar'}</button>
-          <button role="menuitem" type="button" className={`${item} text-[#D2463C]`} onClick={run(onDelete)}><Trash2 className="size-3.5" /> Eliminar</button>
-        </div>
-      )}
+      <MenuAcciones label={`Más acciones de ${caja.nombre}`} acciones={[
+        { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: sinOrden },
+        { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: sinOrden },
+        { key: 'clone', label: 'Clonar', icon: <Copy className="size-3.5" />, onClick: onClone },
+        { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-3.5" />, onClick: onDelete, danger: true },
+      ]} />
     </div>
   )
 }
@@ -399,17 +395,21 @@ function opcionesValor(campo: Alcance, catalogo: CatalogoItem[], medios: string[
   return medios
 }
 
-function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
-  store: AppStore; caja: Caja | null; cajas: Caja[]; catalogo: CatalogoItem[]; medios: string[]; onClose: () => void
+function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose }: {
+  store: AppStore; caja: Caja | null; clonDe?: Caja | null; cajas: Caja[]; catalogo: CatalogoItem[]; medios: string[]; onClose: () => void
 }) {
   const editar = !!caja
   const [id] = useState(() => caja?.id ?? `caja-${crypto.randomUUID().slice(0, 8)}`)
-  const [nombre, setNombre] = useState(caja?.nombre ?? '')
-  const [monto, setMonto] = useState(caja ? String(caja.presupuesto) : '')
-  const [campo, setCampo] = useState<Alcance>(caja && caja.filtroCampo !== 'Todos' ? caja.filtroCampo : 'Categoría')
-  const [valor, setValor] = useState(caja?.filtroValor ?? '')
-  const [descripcion, setDescripcion] = useState(caja?.descripcion ?? '')
-  const [activo, setActivo] = useState(caja ? cajaActiva(caja) : true)
+  // Clonar: copia alcance y descripción; el monto asignado NO se copia (empieza en 0, editable) y la copia nace inactiva:
+  // así no reserva dinero ni compite por los mismos gastos hasta que el usuario la confirme.
+  const origen = caja ?? clonDe
+  const money = (c: number) => formatMoney(c, store.data?.config.moneda || 'PEN')
+  const [nombre, setNombre] = useState(caja?.nombre ?? (clonDe ? `${clonDe.nombre.slice(0, 31)} (Copia)` : ''))
+  const [monto, setMonto] = useState(caja ? String(caja.presupuesto) : clonDe ? '0' : '')
+  const [campo, setCampo] = useState<Alcance>(origen && origen.filtroCampo !== 'Todos' ? origen.filtroCampo : 'Categoría')
+  const [valor, setValor] = useState(origen?.filtroValor ?? '')
+  const [descripcion, setDescripcion] = useState(origen?.descripcion ?? '')
+  const [activo, setActivo] = useState(caja ? cajaActiva(caja) : clonDe ? false : true)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const opciones = useMemo(() => {
     const xs = opcionesValor(campo, catalogo, medios)
@@ -442,20 +442,25 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
     const data: Caja = { ...borrador, nombre: nombre.trim(), presupuesto: Math.round(Number(m.replace(',', '.')) * 100) / 100, orden, descripcion: descripcion.trim() }
     const ok = store.track(`caja:${id}`, editar
       ? { pending: `Guardando ${data.nombre}…`, ok: `${data.nombre} actualizada correctamente.`, error: `No se pudo actualizar ${data.nombre}.` }
-      : { pending: `Creando ${data.nombre}…`, ok: `${data.nombre} creada correctamente.`, error: `No se pudo crear ${data.nombre}.` },
+      : { pending: `Creando ${data.nombre}…`, ok: clonDe ? `${data.nombre} creada${activo ? '' : ' inactiva: no reserva dinero hasta que la actives'}.` : `${data.nombre} creada correctamente.`, error: `No se pudo crear ${data.nombre}.` },
     () => store.actions.saveCaja(data))
     if (ok) onClose()
   }
 
   return (
-    <Modal open onClose={onClose} size="md" title={editar ? `Editar ${caja!.nombre}` : 'Nueva caja'} icon={<Wallet className="size-5" />}
+    <Modal open onClose={onClose} size="md" title={editar ? `Editar ${caja!.nombre}` : clonDe ? `Clonar ${clonDe.nombre}` : 'Nueva caja'} icon={<Wallet className="size-5" />}
       subtitle="Una reserva dentro de tu presupuesto consolidado que junta sola los gastos de su alcance."
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : 'Crear caja'}</Button></>}>
+      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : clonDe ? 'Crear copia' : 'Crear caja'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
           <span className="grid size-11 place-items-center rounded-2xl bg-card" style={{ color }}><IconoCaja className="size-5" /></span>
           <div className="min-w-0"><p className="truncate text-sm font-semibold">{borrador.nombre}</p><p className="truncate text-[11px] text-muted">{valor ? `${campo} · ${valor}` : 'Elige el alcance'}</p></div>
         </div>
+        {clonDe && (
+          <ErrorBox tone="warning" message={activo
+            ? `Al crearla, esta copia reservará ${money(Math.round((Number(monto.replace(',', '.')) || 0) * 100))} por mes del libre de tu presupuesto. Revisa el monto y el alcance.`
+            : `Es una copia de “${clonDe.nombre}”: no copia gastos ni su monto asignado y nace inactiva, así que no reserva dinero hasta que la actives.`} />
+        )}
         <Field label="Nombre" error={errors.nombre} htmlFor="caja-nombre">
           <input id="caja-nombre" className={inputCls} maxLength={40} placeholder="Ej. Caja Salud" value={nombre} onChange={e => setNombre(e.target.value)} />
         </Field>
@@ -502,19 +507,30 @@ function CajaForm({ store, caja, cajas, catalogo, medios, onClose }: {
   )
 }
 
-function BorrarCaja({ store, caja, onClose }: { store: AppStore; caja: Caja; onClose: () => void }) {
+function BorrarCaja({ store, caja, data, onClose, onDesactivar }: { store: AppStore; caja: Caja; data: AppData; onClose: () => void; onDesactivar: () => void }) {
+  const deps = useMemo(() => dependenciasCaja(caja, data), [caja, data])
+  // Una subcaja inactiva no toma ningún gasto (el motor la ignora): solo bloquea la activa con gastos de su alcance.
+  const bloqueada = cajaActiva(caja) && deps.gastos > 0
   return (
-    <Modal open onClose={onClose} size="sm" title="Eliminar caja" icon={<Trash2 className="size-5" />}
-      footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button>
-        <Button variant="danger" onClick={() => {
-          store.track(`caja:${caja.id}`, { pending: `Eliminando ${caja.nombre}…`, ok: `${caja.nombre} eliminada. Ningún gasto se borró.`, error: `No se pudo eliminar ${caja.nombre}.` },
-            () => store.actions.deleteCaja(caja.id))
-          onClose()
-        }}><Trash2 className="size-4" /> Eliminar</Button></>}>
-      <div className="space-y-2 text-sm">
-        <p className="font-semibold">¿Eliminar “{caja.nombre}”?</p>
-        <p className="text-muted">No se borra ningún gasto ni la caja general. Sus gastos pasarán a “gastado fuera de subcajas” (o a otra caja que coincida) y su reserva vuelve al libre de la caja general.</p>
-        <p className="text-xs text-muted">Si solo quieres pausarla, desactívala desde el menú ⋯.</p>
+    <Modal open onClose={onClose} size="sm" title={bloqueada ? `No se puede eliminar ${caja.nombre}` : 'Eliminar caja'} icon={<Trash2 className="size-5" />}
+      footer={bloqueada
+        ? <><Button variant="outline" onClick={onClose}>Cerrar</Button><Button onClick={onDesactivar}>Desactivar en su lugar</Button></>
+        : <><Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" disabled={store.pending.has(`caja:${caja.id}`)} onClick={() => {
+            const ok = store.track(`caja:${caja.id}`, { pending: `Eliminando ${caja.nombre}…`, ok: `${caja.nombre} eliminada. Ningún gasto se borró.`, error: `No se pudo eliminar ${caja.nombre}.` },
+              () => store.actions.deleteCaja(caja.id))
+            if (ok) onClose()
+          }}><Trash2 className="size-4" /> Eliminar</Button></>}>
+      <div className="space-y-2 text-sm" data-testid="eliminar-caja">
+        <p className="font-semibold">“{caja.nombre}” · {alcanceTxt(caja)}</p>
+        {bloqueada ? (
+          <p className="rounded-xl px-3 py-2 text-xs" style={{ background: TONO.atencion.bg, color: TONO.atencion.fg }} data-testid="caja-con-gastos">
+            Está activa y su alcance coincide con {deps.gastos} gasto(s) de tu historial. Para no perder el seguimiento no se elimina.
+            Desactívala: libera su reserva al libre, conserva su configuración y los gastos y podrás eliminarla o reactivarla cuando quieras.
+          </p>
+        ) : (
+          <p className="text-muted">{cajaActiva(caja) ? 'No coincide con ningún gasto.' : 'Está inactiva: no toma ningún gasto.'} Se eliminará la subcaja{deps.presupuestos ? ` y sus ${deps.presupuestos} ajuste(s) mensual(es)` : ''}; su reserva vuelve al libre de la caja general y ningún gasto se borra.</p>
+        )}
       </div>
     </Modal>
   )

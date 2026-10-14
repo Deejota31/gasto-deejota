@@ -1235,4 +1235,100 @@ describe('backend Apps Script', () => {
       expect(d.data.gastos).toBeGreaterThanOrEqual(0)
     })
   })
+
+  describe('v1.12 sincronización con la hoja y administración de fuentes/subcajas', () => {
+    const fu = (id: string, nombre: string, orden: number, extra: Record<string, unknown> = {}) =>
+      b.post('saveFuente', { id, nombre, monto: 100, moneda: 'PEN', color: '#1E3A8A', orden, recurrencia: 'mensual', mes: '', ...extra })
+
+    it('una edición manual en la hoja se ve con fresh:true y NO se queda en la caché; la lectura normal sigue siendo la del servidor', () => {
+      for (const [id, n, o] of [['f-1', 'General', 1], ['f-2', 'Sodexo', 2], ['f-3', 'Carpeta Tesis', 3], ['f-4', 'Viaje a Ica', 4], ['f-5', 'hola', 5], ['f-6', 'bono', 6]] as const) fu(id, n, o)
+      expect(b.post('data', { fresh: true }).data.fuentes).toHaveLength(6)
+      b.post('data')                                           // llena la caché
+      const sh = b.ss.getSheetByName('FUENTES')!
+      // El usuario borra "hola" y "bono" directamente en Google Sheets (sin pasar por la web).
+      for (const id of ['f-5', 'f-6']) sh.deleteRow(sh.rows.findIndex(r => r[0] === id) + 1)
+      expect(b.post('data').data.fuentes).toHaveLength(6)      // caché del servidor: por eso la web ya no la usa al abrir
+      const fresco = b.post('data', { fresh: true }).data
+      expect(fresco.fuentes.map((f: unknown[]) => f[1])).toEqual(['General', 'Sodexo', 'Carpeta Tesis', 'Viaje a Ica'])
+      expect(b.post('data').data.fuentes).toHaveLength(4)      // y la lectura fresca renueva la caché
+    })
+
+    it('cambios manuales: monto, TRUE/FALSE, orden, alta externa y borrado de varias filas se reflejan por ID', () => {
+      fu('f-1', 'General', 1); fu('f-2', 'Sodexo', 2); fu('f-3', 'Tesis', 3); fu('f-4', 'Ica', 4)
+      const sh = b.ss.getSheetByName('FUENTES')!
+      const fila = (id: string) => sh.rows.find(r => r[0] === id)!
+      fila('f-2')[2] = 282.9          // monto
+      fila('f-3')[6] = false          // activo
+      fila('f-1')[7] = 9              // orden
+      sh.rows.push(['f-9', 'Alta manual', 55, 'PEN', '#16A085', 'auto', true, 5, 'mensual', '', 'Libre', '', ''])
+      sh.deleteRow(sh.rows.findIndex(r => r[0] === 'f-4') + 1)
+      const d = b.post('data', { fresh: true }).data.fuentes as unknown[][]
+      expect(d.map(f => f[0]).sort()).toEqual(['f-1', 'f-2', 'f-3', 'f-9'])
+      expect(d.find(f => f[0] === 'f-2')![2]).toBe(282.9)
+      expect(d.find(f => f[0] === 'f-3')![6]).toBe(false)
+      expect(d.find(f => f[0] === 'f-1')![7]).toBe(9)
+      expect(d.find(f => f[0] === 'f-9')!.slice(0, 11)).toEqual(['f-9', 'Alta manual', 55, 'PEN', '#16A085', '', true, 5, 'mensual', '', ''])
+    })
+
+    it('deleteFuente quita la fuente y sus importes por mes, es idempotente y no toca gastos ni otras fuentes', () => {
+      fu('f-1', 'General', 1); fu('f-2', 'Sodexo', 2, { medioPago: 'Sodexo' })
+      b.post('saveFuenteMes', { fuenteId: 'f-2', mes: '2026-10', monto: 282.9, modo: 'solo' })
+      b.post('saveFuenteMes', { fuenteId: 'f-1', mes: '2026-10', monto: 150, modo: 'solo' })
+      b.post('saveGasto', gasto({ medioPago: 'Sodexo' }))
+      const r = b.post('deleteFuente', { id: 'f-2' })
+      expect(r.data).toEqual({ id: 'f-2', eliminada: true, ajustes: 1 })
+      expect(b.post('deleteFuente', { id: 'f-2' }).data).toEqual({ id: 'f-2', eliminada: false, ajustes: 0 })
+      const d = b.post('data', { fresh: true }).data
+      expect(d.fuentes.map((f: unknown[]) => f[0])).toEqual(['f-1'])
+      expect(d.fuentesMeses.map((m: unknown[]) => m[0])).toEqual(['f-1'])
+      expect(d.gastos).toHaveLength(1)
+      expect(b.post('deleteFuente', {}).error.code).toBe('VALIDATION')
+      expect(b.post('deleteFuente', { id: 'f-1' }, 'malo').error.code).toBe('UNAUTHORIZED')
+    })
+
+    it('clonar = guardar otra fuente con ID nuevo: no copia gastos ni importes por mes y un reintento con el mismo ID no duplica', () => {
+      fu('f-1', 'Sodexo', 1, { medioPago: 'Sodexo' })
+      b.post('saveFuenteMes', { fuenteId: 'f-1', mes: '2026-10', monto: 300, modo: 'solo' })
+      b.post('saveGasto', gasto({ medioPago: 'Sodexo' }))
+      for (let n = 0; n < 3; n++) fu('f-copia', 'Sodexo (Copia)', 2, { activo: false })     // reintentos / doble clic
+      const d = b.post('data', { fresh: true }).data
+      expect(d.fuentes.map((f: unknown[]) => f[1])).toEqual(['Sodexo', 'Sodexo (Copia)'])
+      expect(d.fuentes.find((f: unknown[]) => f[0] === 'f-copia')[6]).toBe(false)           // nace inactiva
+      expect(d.fuentesMeses.filter((m: unknown[]) => m[0] === 'f-copia')).toHaveLength(0)
+      expect(d.gastos).toHaveLength(1)
+      expect(fu('f-otra', 'sodexo (copia)', 3).error.code).toBe('VALIDATION')              // el nombre sigue siendo único
+    })
+
+    it('el orden y el ON/OFF de fuentes y subcajas se guardan en la hoja y sobreviven a una lectura fresca', () => {
+      fu('f-1', 'A', 1); fu('f-2', 'B', 2); fu('f-3', 'C', 3)
+      b.post('reorderFuentes', { ids: ['f-3', 'f-1', 'f-2'] })
+      fu('f-2', 'B', 3, { activo: false })
+      const caja = (id: string, valor: string, orden: number, activo = true) => b.post('saveCaja', { id, nombre: id, presupuesto: 10, filtroCampo: 'Categoría', filtroValor: valor, color: '#64748b', orden, activo })
+      caja('c-1', 'Auto', 2); caja('c-2', 'Salud', 3)
+      b.post('reorderCajas', { ids: ['c-2', 'c-1'] })
+      caja('c-1', 'Auto', 3, false)
+      const d = b.post('data', { fresh: true }).data
+      const orden = (xs: unknown[][], k: number) => [...xs].sort((x, y) => Number(x[k]) - Number(y[k])).map(x => x[0])
+      expect(orden(d.fuentes, 7)).toEqual(['f-3', 'f-1', 'f-2'])
+      expect(d.fuentes.find((f: unknown[]) => f[0] === 'f-2')[6]).toBe(false)
+      expect(orden(d.cajas.filter((c: unknown[]) => String(c[0]).startsWith('c-')), 6)).toEqual(['c-2', 'c-1'])
+      expect(d.cajas.find((c: unknown[]) => c[0] === 'c-1')[7]).toBe(false)
+      expect(b.ss.getSheetByName('CAJAS')!.rows.find(r => r[0] === 'c-1')![7]).toBe(false)   // TRUE/FALSE real en la hoja
+    })
+
+    it('clonar una subcaja guarda otra fila con ID nuevo, inactiva y sin monto; eliminar la subcaja no borra gastos', () => {
+      const o = { presupuesto: 250, filtroCampo: 'Ámbito', filtroValor: 'Familia', color: '#64748b', orden: 3 }
+      expect(b.post('saveCaja', { id: 'c-auto', nombre: 'Familia', ...o }).error).toBeUndefined()
+      expect(b.post('saveGasto', gasto()).error).toBeUndefined()
+      const copia = { ...o, id: 'c-copia', nombre: 'Familia (Copia)', presupuesto: 0, activo: false }
+      expect(b.post('saveCaja', copia).error).toBeUndefined()      // mismo alcance que la original: permitido porque nace inactiva
+      b.post('saveCaja', copia)                                    // reintento con el mismo ID: no duplica
+      expect(b.post('data', { fresh: true }).data.cajas.filter((c: unknown[]) => c[1] === 'Familia (Copia)')).toHaveLength(1)
+      expect(b.post('saveCaja', { ...copia, id: 'c-otra', nombre: 'Otra', activo: true }).error.code).toBe('VALIDATION')   // dos activas con el mismo alcance
+      expect(b.post('deleteCaja', { id: 'c-auto' }).data.eliminada).toBe(true)
+      const d = b.post('data', { fresh: true }).data
+      expect(d.gastos).toHaveLength(1)
+      expect(d.cajas.map((c: unknown[]) => c[0])).not.toContain('c-auto')
+    })
+  })
 })

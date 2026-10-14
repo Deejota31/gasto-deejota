@@ -1,0 +1,66 @@
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { MoreHorizontal } from 'lucide-react'
+
+export interface AccionMenu { key: string; label: string; icon: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; title?: string }
+
+/**
+ * Menú ⋯ de las tarjetas (Fuentes y Subcajas). Se dibuja en un portal con position: fixed: las tarjetas tienen
+ * overflow-hidden y un menú absoluto quedaba cortado. Se abre hacia arriba si abajo no cabe y se cierra con Esc,
+ * al tocar fuera, al desplazar o al cambiar el tamaño de la ventana.
+ */
+export function MenuAcciones({ label, acciones }: { label: string; acciones: AccionMenu[] }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open || !btn.current) return
+    const place = () => {
+      const r = btn.current!.getBoundingClientRect()
+      const w = 192, h = menu.current?.offsetHeight ?? acciones.length * 38 + 8
+      const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))
+      const abajo = r.bottom + 4 + h <= window.innerHeight - 8 || r.top < window.innerHeight - r.bottom
+      setPos({ left, top: abajo ? r.bottom + 4 : Math.max(8, r.top - 4 - h) })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open, acciones.length])
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      if (!btn.current?.contains(t) && !menu.current?.contains(t)) close()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { close(); btn.current?.focus() } }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', close, true) }
+  }, [open])
+
+  const item = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg disabled:cursor-not-allowed disabled:opacity-40'
+  return (
+    <>
+      <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={() => setOpen(o => !o)}
+        className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg"><MoreHorizontal className="size-4" /></button>
+      {open && createPortal(
+        <div ref={menu} role="menu" aria-label={label} style={{ top: pos?.top ?? -9999, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+          className="fixed z-[150] w-48 rounded-xl border border-line bg-card p-1 shadow-xl">
+          {acciones.map((a, i) => (
+            <div key={a.key}>
+              {a.danger && i > 0 && <div className="my-1 h-px bg-line" role="separator" />}
+              <button role="menuitem" type="button" title={a.title} disabled={a.disabled} className={`${item} ${a.danger ? 'font-medium text-[#C0362C] hover:bg-[#FDECEC]' : ''}`}
+                onClick={() => { setOpen(false); a.onClick() }}>
+                <span className={a.danger ? '' : 'text-muted'}>{a.icon}</span> {a.label}
+              </button>
+            </div>
+          ))}
+        </div>, document.body)}
+    </>
+  )
+}
