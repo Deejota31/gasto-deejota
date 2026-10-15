@@ -3,8 +3,7 @@ import { Download, History, Landmark, Layers, Plus, Search } from 'lucide-react'
 import type { AppStore } from '../../lib/store'
 import { formatDate, monthEnd, monthLabel } from '../../lib/dates'
 import {
-  calcularSaldos, cortePersonas, difTxt, ESTADO_TXT, ESTADO_VISUAL_TXT, estaDesactualizada, fechaEnTz, gruposDeTrabajo, historialCsv, montoTxt,
-  porcentajeDif, signoDe, verificaciones, visualDe, vigentePorGrupo, type EstadoVisual, type SaldoCalculado, type Verificacion,
+  cortePersonas, difTxt, ESTADO_TXT, ESTADO_VISUAL_TXT, historialCsv, montoTxt, porcentajeDif, resumenConciliacion, estaDesactualizada, signoDe, type Verificacion,
 } from '../../lib/conciliacion'
 import { Button, DateField, Empty, InfoTooltip, SelectField, inputCls } from '../ui'
 import { Chip, mesesDisponibles } from './piezas'
@@ -41,42 +40,9 @@ export function Conciliacion({ store, today, onRevisarGastos, onNuevoGasto, onIr
   const [fGrupo, setFGrupo] = useState('')
   const [q, setQ] = useState('')
 
-  const conc = data.conciliaciones
-  const grupos = useMemo(() => gruposDeTrabajo(conc), [conc])
-  const vs = useMemo(() => verificaciones(conc), [conc])
-  const saldo = useMemo(() => calcularSaldos(data, periodo, corte, today, grupos), [data, periodo, corte, today, grupos])
+  const { grupos, vs, saldo, actualDe, filas, verificadas, sumaReal, sumaDif, sumaCalcSnap, ultima, ultimaDelPeriodo, estadoGlobal, estadoDif } =
+    useMemo(() => resumenConciliacion(data, periodo, corte, today), [data, periodo, corte, today])
   const periodos = mesesDisponibles(hoyMes, 12, [...vs.map(v => v.periodo), periodo])
-
-  // Saldo calculado HOY para el corte de cada verificación vigente: si difiere de su foto, la verificación está desactualizada.
-  const actualDe = useMemo(() => {
-    const cache = new Map<string, SaldoCalculado>()
-    return (v: Verificacion): number | null => {
-      const fecha = fechaEnTz(v.corte, tz), k = `${v.periodo}|${fecha}`
-      let s = cache.get(k)
-      if (!s) { s = calcularSaldos(data, v.periodo, fecha, today, grupos); cache.set(k, s) }
-      return s.porGrupo[v.grupoId] ?? null
-    }
-  }, [data, tz, today, grupos])
-
-  const filas = grupos.map(g => {
-    const v = vigentePorGrupo(vs, periodo, g.id)
-    const calc = saldo.porGrupo[g.id] ?? null
-    const stale = v ? estaDesactualizada(v, actualDe(v)) : false
-    const dif = v?.diferencia ?? null
-    const estado: EstadoVisual = !saldo.calculable || (calc === null && !v) ? 'insuficiente' : !v ? 'sin_verificar' : stale ? 'desactualizada'
-      : visualDe(dif ?? 0)
-    return { g, v, calc, stale, dif, estado }
-  })
-  const verificadas = filas.filter(f => f.v)
-  const sumaReal = verificadas.reduce((s, f) => s + (f.v!.real ?? 0), 0)
-  const sumaDif = verificadas.reduce((s, f) => s + (f.v!.diferencia ?? 0), 0)
-  const sumaCalcSnap = verificadas.reduce((s, f) => s + (f.v!.calculado ?? 0), 0)
-  const algunaStale = verificadas.some(f => f.stale)
-  const ultima = vs.find(v => !v.corregidaPor)
-  const ultimaDelPeriodo = verificadas.map(f => f.v!).sort((a, b) => b.corte.localeCompare(a.corte))[0]
-  const estadoGlobal: EstadoVisual = !saldo.calculable ? 'insuficiente' : !verificadas.length ? 'sin_verificar' : algunaStale ? 'desactualizada'
-    : verificadas.some(f => signoDe(f.v!.diferencia ?? 0) !== 'cero' && f.v!.estadoEfectivo !== 'cerrada_justificada') ? 'pendiente' : 'conciliado'
-  const estadoDif: EstadoVisual = !verificadas.length ? 'sin_verificar' : algunaStale ? 'desactualizada' : visualDe(sumaDif)
 
   const m = saldo.moneda
   const cambiarPeriodo = (p: string) => { setPeriodo(p); setCorte(p === hoyMes ? today : monthEnd(p)) }
@@ -123,6 +89,7 @@ export function Conciliacion({ store, today, onRevisarGastos, onNuevoGasto, onIr
             <Chip estado={estadoGlobal} testid="conc-estado-general" />
           </div>
         </div>
+        <p className="mt-2 text-[11px] text-muted" data-testid="conc-alcance">Alcance: la conciliación usa su propio período y fecha de corte y compara saldos de fuentes completas; los filtros de ámbito, categoría, subcategoría, medio y tipo de gasto no se aplican aquí.</p>
       </div>
 
       {!saldo.calculable && (
