@@ -28,6 +28,13 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Corrección v1.20.1 — aplicar plantillas con marcas viejas (requiere redesplegar Code.gs)
+
+- **Síntoma:** «No se pudo verificar lo guardado en Google Sheets. “General”: no se encontró la fuente en la hoja».
+- **Causa:** `aplicarPlantillasFin` daba por buena la marca `aplicada` de la plantilla (columna Estados) sin comprobar que la fuente/subcaja y su importe del mes existieran. Con la hoja vaciada (FUENTES, CAJAS, FUENTES_MESES, PRESUPUESTOS) pero las plantillas aún marcadas, devolvía OK sin crear nada y la verificación de v1.20 lo detectaba.
+- **Arreglo (`Code.gs` 1.20.1):** «sin cambios» solo si la entidad existe y su importe real del mes coincide; si no, se recrea y se aplica. Revertir no escribe sobre entidades inexistentes. Una plantilla sana sigue sin escribir nada.
+- **Tests:** 4 nuevos en `backend.test.ts` (3 fallan sin el arreglo).
+
 ## Novedades v1.20.0 — «Prepara tu mes» continuo y estados sincronizados
 
 Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo).**

@@ -1933,3 +1933,50 @@ describe('v1.20: el frontend deduce el mismo ID de entidad que crea el backend (
     })
   }
 })
+
+describe('v1.20.1: aplicar plantillas cuando la hoja quedó con marcas «aplicada» pero sin la fuente/subcaja (caso real)', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const F = 'pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4', S = 'pf-8f6c6f6b-4b44-41d9-9d13-4f44777c212a'
+  const datos = () => b.post('data', { fresh: true }).data
+  const vaciar = () => { for (const n of ['FUENTES', 'CAJAS', 'FUENTES_MESES', 'PRESUPUESTOS']) { const sh = b.ss.getSheetByName(n)!; sh.rows.splice(1, sh.rows.length) } }
+  for (const mes of ['2026-10', '2026-11']) {
+    it(`${mes}: tras borrar FUENTES/CAJAS/importes del mes, volver a aplicar recrea todo y deja lo aplicado verificable`, async () => {
+      b.post('savePlantillaFin', { id: F, tipo: 'fuente', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
+      b.post('savePlantillaFin', { id: S, tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' })
+      const items = [{ id: F, accion: 'aplicar', monto: 3000 }, { id: S, accion: 'aplicar', monto: 700 }]
+      expect(b.post('aplicarPlantillasFin', { mes, items }).ok).toBe(true)
+      expect(datos().fuentes).toHaveLength(1)
+      vaciar()                                                         // las marcas «aplicada» de PLANTILLAS_FINANCIERAS siguen ahí
+      expect(datos().fuentes).toHaveLength(0)
+      expect(datos().cajas).toHaveLength(0)
+      const r = b.post('aplicarPlantillasFin', { mes, items })
+      expect(r.ok, JSON.stringify(r)).toBe(true)
+      const d = datos()
+      expect(d.fuentes).toHaveLength(1); expect(d.cajas).toHaveLength(1)
+      const { createApi } = await import('./lib/api'), { verificarPlantillasAplicadas } = await import('./lib/planificar')
+      const api = createApi(async (a, p) => { const x = b.post(a, p); if (!x.ok) throw new Error(x.error.message); return x.data })
+      const fresco = await api.getData(true), pls = await api.getPlantillas()
+      const problemas = verificarPlantillasAplicadas(fresco, pls.filter(p => p.id === F || p.id === S).map(p => ({ plantilla: p, monto: p.tipo === 'fuente' ? 3000 : 700 })), mes)
+      expect(problemas).toEqual([])
+      // Idempotente: una tercera vez no duplica ni escribe de más.
+      b.post('aplicarPlantillasFin', { mes, items })
+      expect(datos().fuentes).toHaveLength(1); expect(datos().cajas).toHaveLength(1)
+    })
+  }
+  it('si solo falta el importe del mes (FUENTES_MESES/PRESUPUESTOS vacíos) en un mes aislado, también se reescribe', () => {
+    b.post('savePlantillaFin', { id: S, tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' })
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: S, accion: 'aplicar', monto: 650 }] })
+    expect(datos().presupuestos).toHaveLength(1)
+    const sh = b.ss.getSheetByName('PRESUPUESTOS')!; sh.rows.splice(1, sh.rows.length)
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: S, accion: 'aplicar', monto: 650 }] })
+    expect(datos().presupuestos).toEqual([['2026-11', expect.any(String), 650]])
+  })
+  it('una plantilla sana y ya aplicada sigue sin escribir nada (no hay regresión del atajo)', () => {
+    b.post('savePlantillaFin', { id: F, tipo: 'fuente', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: F, accion: 'aplicar', monto: 3000 }] })
+    const w = ['FUENTES', 'FUENTES_MESES', 'PLANTILLAS_FINANCIERAS'].map(n => b.ss.getSheetByName(n)!.writes)
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: F, accion: 'aplicar', monto: 3000 }] })
+    expect(['FUENTES', 'FUENTES_MESES', 'PLANTILLAS_FINANCIERAS'].map(n => b.ss.getSheetByName(n)!.writes)).toEqual(w)
+  })
+})

@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.19.3';
+var APP_VERSION = '1.20.1';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
@@ -1407,6 +1407,8 @@ function aplicarPlantillasFin_(p) {
   var revertir = function (r, est) {
     if (!est || est.e !== 'aplicada' || !est.w) return;
     var origen = str_(r[14]);
+    // Si la entidad ya no existe no hay nada que revertir (y escribir sobre un ID inexistente fallaría).
+    if (str_(r[1]) === 'fuente' ? !fRows.some(function (x) { return str_(x[0]) === origen; }) : !cRows.some(function (x) { return str_(x[0]) === origen; })) return;
     if (str_(r[1]) === 'fuente') {
       if (est.p === null || est.p === undefined) saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', quitar: true });
       else saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: est.p });
@@ -1421,7 +1423,23 @@ function aplicarPlantillasFin_(p) {
   var salida = [];
   plan.forEach(function (it) {
     var r = rows[it.idx], est = pfEstados_(r[15]), act = est[mes];
-    if (it.accion === 'aplicar' && act && act.e === 'aplicada' && num_(act.m) === it.monto) { salida.push(pfOut_(r)); return; } // ya aplicada igual: no hace nada
+    // v1.20.1: la marca "aplicada" de la plantilla NO basta. Solo es "sin cambios" si la fuente/subcaja EXISTE y su importe real del mes
+    // coincide; si la hoja quedó sin la entidad (borrada, restaurada, migrada), se vuelve a crear y a aplicar en vez de dar un falso OK.
+    var sana = function () {
+      var origenS = str_(r[14]) || pfIdSeguro_(it.tipo === 'fuente' ? 'f-' : 'c-', r[0], it.tipo === 'fuente' ? 60 : 40);
+      if (it.tipo === 'fuente') {
+        var fila = fRows.filter(function (x) { return str_(x[0]) === origenS; })[0];
+        if (!fila) return false;
+        var e0 = fuenteMontoMesGs_(fuenteOut_(fila), mes, mesesRows(), aislar);
+        return !!e0.aplicada && Math.round(it.monto * 100) === Math.round(e0.monto * 100);
+      }
+      var caja0 = cRows.filter(function (x) { return str_(x[0]) === origenS; })[0];
+      if (!caja0) return false;
+      var pr = pres(origenS);
+      if (mes >= aislar && pr === null) return false;
+      return Math.round(it.monto * 100) === Math.round((pr === null ? num_(caja0[2]) : pr) * 100);
+    };
+    if (it.accion === 'aplicar' && act && act.e === 'aplicada' && num_(act.m) === it.monto && sana()) { salida.push(pfOut_(r)); return; } // ya aplicada igual y verificada: no hace nada
     if (act && act.e === 'aplicada') { revertir(r, act); act = null; }
     if (it.accion === 'pendiente') delete est[mes];
     else if (it.accion === 'omitir') est[mes] = { e: 'omitida', m: 0 };
