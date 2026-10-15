@@ -58,15 +58,15 @@ for (const tema of ['light', 'dark'] as const) {
       if (offs.size) expect([...offs]).toEqual([off])
     })
 
-    test('botones Nuevo gasto / Nueva fuente / Nueva subcaja idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
+    test('botones Nuevo gasto / Nueva fuente / Nueva caja idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
       const nuevo: Record<string, unknown> = {}, mensual: Record<string, unknown> = {}
       nuevo.gasto = await estilo(page.getByRole('button', { name: 'Nuevo gasto' }).first())
       mensual.gasto = await estilo(page.getByRole('button', { name: 'Gastos mensuales' }).first())
       await go(page, 'Cajas')
       nuevo.fuente = await estilo(page.getByRole('button', { name: 'Nueva fuente' }).first())
       mensual.fuente = await estilo(page.getByRole('button', { name: 'Fuentes mensuales' }).first())
-      nuevo.subcaja = await estilo(page.getByRole('button', { name: 'Nueva subcaja' }).first())
-      mensual.subcaja = await estilo(page.getByRole('button', { name: 'Subcajas mensuales' }).first())
+      nuevo.subcaja = await estilo(page.getByRole('button', { name: 'Nueva caja' }).first())
+      mensual.subcaja = await estilo(page.getByRole('button', { name: 'Cajas mensuales' }).first())
       expect(nuevo.fuente).toEqual(nuevo.gasto); expect(nuevo.subcaja).toEqual(nuevo.gasto)
       expect(mensual.fuente).toEqual(mensual.gasto); expect(mensual.subcaja).toEqual(mensual.gasto)
       expect(nuevo.gasto).not.toEqual(mensual.gasto)
@@ -79,7 +79,7 @@ for (const tema of ['light', 'dark'] as const) {
       }
       await orden('Nuevo gasto', 'Gastos mensuales')
       await go(page, 'Gastos'); await orden('Nuevo gasto', 'Gastos mensuales')
-      await go(page, 'Cajas'); await orden('Nueva fuente', 'Fuentes mensuales'); await orden('Nueva subcaja', 'Subcajas mensuales')
+      await go(page, 'Cajas'); await orden('Nueva fuente', 'Fuentes mensuales'); await orden('Nueva caja', 'Cajas mensuales')
     })
 
     test('menú ⋯: orden canónico, iconos de 16px y Eliminar con el rojo semántico', async ({ page }) => {

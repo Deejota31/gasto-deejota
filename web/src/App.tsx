@@ -2,7 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { configurarExcepciones } from './lib/texto'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
-import { Skeleton } from './components/ui'
+import { Skeleton, ErrorBox } from './components/ui'
+import { Desconectado } from './components/Desconectado'
 import Toaster from './components/Toaster'
 import AppShell from './components/AppShell'
 import { tabDeHash, type TabId } from './lib/navegacion'
@@ -121,6 +122,11 @@ export default function App({ api }: { api?: Api }) {
           {!store.loading && <button className="font-semibold underline" onClick={() => void store.refresh()}>Reintentar</button>}
         </div>
       )}
+      {store.desconectado && (
+        <div className="bg-bg px-4 py-1.5 text-center text-xs text-muted" data-testid="aviso-desconectado">
+          Sin conexión. <button className="font-semibold underline" onClick={() => setConexionAbierta(true)}>Conecta tu Apps Script</button> para ver y usar tu hoja.
+        </div>
+      )}
       {store.isDemo && (
         <div className="bg-morado/10 px-4 py-1.5 text-center text-xs text-morado">
           Modo demostración con datos de ejemplo. <button className="font-semibold underline" onClick={() => setConexionAbierta(true)}>Conecta tu Apps Script</button> para usar tu hoja.
@@ -129,7 +135,13 @@ export default function App({ api }: { api?: Api }) {
     </>
   )
 
-  const contenido = (
+  const sinDatosPorError = !!conn && !!store.error && !store.data
+  const seccionVacia = tab !== 'config' && (store.desconectado || sinDatosPorError)
+  const contenido = seccionVacia ? (
+    store.desconectado
+      ? <Desconectado seccion={tab as 'dashboard' | 'cajas' | 'gastos' | 'salud' | 'catalogo'} onConectar={() => setConexionAbierta(true)} />
+      : <ErrorBox message={`No se pudieron cargar tus datos: ${store.error}`} onRetry={() => void store.refresh()} />
+  ) : (
     <>
         {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard plan={plan} store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
         {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} plan={plan} /></Suspense>}

@@ -37,18 +37,18 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
         ) : <p className="py-2 text-xs text-muted">Aún no tienes fuentes: el presupuesto sale de la caja general.</p>}
         <div className="mt-2 flex justify-end">{link}</div>
       </Acordeon>
-      <Acordeon icon={<Boxes className="size-4" />} color="#6D5DD3" titulo="Subcajas / reservas"
+      <Acordeon icon={<Boxes className="size-4" />} color="#6D5DD3" titulo="Cajas / reservas"
         resumen={`${c.subcajas.length} activa${c.subcajas.length === 1 ? '' : 's'} · ${money(c.reservado)} reservados`}
         open={abierto.subcajas} onToggle={() => setAbierto(x => ({ ...x, subcajas: !x.subcajas }))}>
         {c.subcajas.length ? (
-          <ul className="divide-y divide-line/70" aria-label="Subcajas del período">
+          <ul className="divide-y divide-line/70" aria-label="Cajas del período">
             {c.subcajas.map(s => (
               <Fila key={s.caja.id} look={cajaLook(s.caja, catalogo)} nombre={s.caja.nombre} detalle={`${s.caja.filtroCampo} · ${s.caja.filtroValor}`}
                 cols={[['Reservado', s.asignado ? money(s.asignado) : '—'], ['Gastado', money(s.gastado)],
                   [s.excedido ? 'Exceso' : 'Disponible', s.asignado ? money(Math.abs(s.disponible)) : '—', s.excedido ? ESTADO.alerta : undefined]]} />
             ))}
           </ul>
-        ) : <p className="py-2 text-xs text-muted">No hay subcajas activas.</p>}
+        ) : <p className="py-2 text-xs text-muted">No hay cajas activas.</p>}
         <div className="mt-2 flex justify-end">{link}</div>
       </Acordeon>
     </div>

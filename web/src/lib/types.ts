@@ -92,7 +92,7 @@ export type EstadoPlantillaMes = 'pendiente' | 'aplicada' | 'omitida'
 export interface PlantillaFin {
   id: string; tipo: TipoPlantillaFin; nombre: string; monto: number
   moneda: string; medios: string                                  // solo fuentes ('A|B' o vacío)
-  campo: string; valor: string                                     // solo subcajas (alcance)
+  campo: string; valor: string                                     // solo cajas (alcance)
   descripcion: string; color: string; icono: string
   recurrencia: Recurrencia; activo: boolean; orden: number
   origenId: string; estados: Record<string, { e: 'aplicada' | 'omitida'; m: number }>

@@ -93,8 +93,8 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
     },
     {
       id: 'presupuesto', titulo: 'Mi presupuesto', icon: PiggyBank, tone: presTone,
-      valor: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : 'Sin definir',
-      valorTxt: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : 'Sin definir',
+      valor: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : '—',
+      valorTxt: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : 'No disponible',
       sub: pres.presupuesto ? <>Disponible tras compromisos · <b className="font-semibold" style={{ color: presTone.fg }}>usado {pctTxt(pres.pctUsado)}</b></> : 'Define el presupuesto en Ajustar caja',
       barra: pres.presupuesto ? <Barra partes={[{ v: pres.gastado, color: presTone.fg }, { v: pres.pendiente, color: TONO.atencion.fg, rayado: true }]} total={pres.presupuesto} alto="h-1.5" /> : undefined,
       cta: 'Ver presupuesto',
@@ -780,7 +780,7 @@ function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsoc
         <div id={id} className="space-y-2 px-3 pb-3 pl-7.5 text-xs" data-testid="compromiso-detalle">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             <div><dt className="text-[10px] text-muted">Categoría</dt><dd className="truncate text-ink">{p.ambito} › {p.categoria} › {p.subcategoria}</dd></div>
-            <div><dt className="text-[10px] text-muted">Caja asignada</dt><dd className="truncate text-ink">{caja ?? 'Fuera de subcajas (saldo libre)'}</dd></div>
+            <div><dt className="text-[10px] text-muted">Caja asignada</dt><dd className="truncate text-ink">{caja ?? 'Fuera de cajas (saldo libre)'}</dd></div>
             <div><dt className="text-[10px] text-muted">Medio de pago</dt><dd className="truncate text-ink">{p.medioPago || 'Sin medio predeterminado'}</dd></div>
             <div><dt className="text-[10px] text-muted">Notas</dt><dd className="text-ink">{nota}</dd></div>
           </dl>

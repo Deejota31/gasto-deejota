@@ -20,7 +20,7 @@ export function CajaModal({ store, target, cajas, mes, money, onClose }: {
   const cents = Math.round(n * 100)
   const otrasReservas = cajas.reservado - (esGeneral ? 0 : target.asignado)
   const aviso = !Number.isFinite(n) ? '' : esGeneral
-    ? cents < cajas.reservado ? `Las reservas de subcajas (${money(cajas.reservado)}) superarían este presupuesto.` : ''
+    ? cents < cajas.reservado ? `Las reservas de cajas (${money(cajas.reservado)}) superarían este presupuesto.` : ''
     : otrasReservas + cents > cajas.presupuesto ? `Con este monto las reservas sumarían ${money(otrasReservas + cents)}, más que el presupuesto consolidado (${money(cajas.presupuesto)}).` : ''
 
   // No bloquea: valida, cierra y la escritura sigue en segundo plano con su notificación de resultado.

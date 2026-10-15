@@ -13,7 +13,7 @@ import { Preferencias } from '../components/Preferencias'
 import { ResumenPlan, type PlanificacionApi } from '../components/Planificacion'
 import { RecordatoriosPlan } from '../components/RecordatoriosPlan'
 
-export const APP_VERSION = '1.20.3'
+export const APP_VERSION = '1.21.0'
 
 export default function Configuracion({ store, conn, onConnect, notify, goCatalogo, plan, hoy }: {
   plan: PlanificacionApi; hoy: string; store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
@@ -46,7 +46,8 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
   const saveCfg = (clave: string, valor: string) => store.track(`config:${clave}`,
     { pending: 'Guardando configuración…', ok: 'Configuración guardada correctamente.', error: 'No se pudo guardar la configuración.' },
     () => store.actions.saveConfig(clave, valor))
-  const estado = store.error ? { tone: 'error', text: 'Con errores' } : store.loading ? { tone: 'sync', text: 'Sincronizando…' } : store.data ? { tone: 'ok', text: conn ? 'Conectado' : 'Modo demostración' } : { tone: 'idle', text: 'Sin datos' }
+  const sinConexion = store.desconectado
+  const estado = sinConexion ? { tone: 'idle', text: 'Sin conexión' } : store.error ? { tone: 'error', text: 'Con errores' } : store.loading ? { tone: 'sync', text: 'Sincronizando…' } : store.data ? { tone: 'ok', text: conn ? 'Conectado' : 'Modo demostración' } : { tone: 'idle', text: 'Sin datos' }
 
   return (
     <div className="space-y-4">
@@ -83,32 +84,35 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
           </div>
           {connError && <div className="mt-2"><ErrorBox message={connError} /></div>}
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <Stat icon={<Activity />} label="Estado de Apps Script" value={store.error ? 'Con errores' : store.loading ? 'Sincronizando…' : store.data ? 'Operativo' : 'Sin datos'} tone={store.error ? 'error' : 'ok'} />
+            <Stat icon={<Activity />} label="Estado de Apps Script" value={sinConexion ? 'Sin conexión' : store.error ? 'Con errores' : store.loading ? 'Sincronizando…' : store.data ? 'Operativo' : 'Sin datos'} tone={store.error ? 'error' : 'ok'} />
             <Stat icon={<RefreshCw />} label="Última sincronización" value={store.lastSync ? store.lastSync.toLocaleTimeString('es-PE') : '—'} />
             <Stat icon={<ShieldCheck />} label="Versión backend" value={store.data?.version ?? '—'} />
           </div>
           {store.error && <p className="mt-2 text-xs text-danger">{store.error}</p>}
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><KeyRound className="size-3.5" />
-            {conn ? 'Conectado a tu Apps Script.' : 'Sin conexión: estás viendo datos de demostración en memoria.'} La URL y el token se guardan solo en este navegador.
+            {conn ? 'Conectado a tu Apps Script.' : sinConexion ? 'Sin conexión: conecta tu Apps Script para ver y administrar tus datos.' : 'Modo demostración con datos de ejemplo en memoria.'} La URL y el token se guardan solo en este navegador.
           </p>
         </Card>
 
         {/* B. Preferencias: tres grupos lógicos en una cuadrícula adaptable */}
         <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />}>
-          <Preferencias cfg={cfg} saveCfg={saveCfg} setError={setError} />
+          {sinConexion ? <RequiereConexion /> : <Preferencias cfg={cfg} saveCfg={saveCfg} setError={setError} />}
         </Card>
 
         {/* C. Planificación mensual y recordatorios (v1.19) */}
         <Card title="Planificación mensual y recordatorios" icon={<CalendarCheck2 className="size-4 text-navy" />}>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-            <ResumenPlan store={store} hoy={hoy} compacto onPreparar={() => plan.abrir()} />
-            <RecordatoriosPlan cfg={cfg} saveCfg={saveCfg} hoy={hoy} />
-          </div>
+          {sinConexion ? <RequiereConexion /> : (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+              <ResumenPlan store={store} hoy={hoy} compacto onPreparar={() => plan.abrir()} />
+              <RecordatoriosPlan cfg={cfg} saveCfg={saveCfg} hoy={hoy} />
+            </div>
+          )}
         </Card>
 
         {/* D. Administración de datos */}
         {/* E. Datos */}
         <Card title="Administración de datos" icon={<FileSpreadsheet className="size-4 text-turquesa" />}>
+          {sinConexion ? <RequiereConexion /> : <>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Action icon={<ShieldCheck />} title="Crear respaldo" desc="Copia completa en tu carpeta Backup" loading={busy === 'backup'}
               onClick={() => run('backup', async () => {
@@ -127,10 +131,13 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
               : <Action icon={<ExternalLink />} title="Abrir hoja" desc="Disponible al conectar" disabled onClick={() => {}} />}
           </div>
           <CarpetaRespaldos store={store} />
+          </>}
         </Card>
 
         {/* G. Herramientas del backend */}
-        <FuncionesBackend store={store} />
+        {sinConexion
+          ? <Card title="Funciones del backend" icon={<Settings className="size-4 text-navy" />}><RequiereConexion /></Card>
+          : <FuncionesBackend store={store} />}
 
         {/* F. Acerca de */}
         <Card title="Acerca de" icon={<Info className="size-4 text-muted" />}>
@@ -144,6 +151,11 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
       </div>
     </div>
   )
+}
+
+/** Sin conexión las funciones que leen o escriben la hoja no se ofrecen como disponibles. */
+function RequiereConexion() {
+  return <p className="rounded-xl bg-bg px-4 py-4 text-sm text-muted" data-testid="requiere-conexion">Conéctate para acceder a estas funciones.</p>
 }
 
 function StatusPill({ tone, text }: { tone: string; text: string }) {

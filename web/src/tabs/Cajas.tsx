@@ -2,7 +2,7 @@ import { formatearDescripcion } from '../lib/texto'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
-  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Plus, Power, Search,
+  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Power, Search,
   Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info, FilePlus2,
 } from 'lucide-react'
 import { aislaDesde, cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
@@ -78,6 +78,7 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
     ...c.inactivas.map(caja => ({ caja, r: null })),
   ]
   const ocultas = c.subcajas.filter(r => !r.aplicada).length
+  const sinCajas = c.subcajas.length === 0 && c.inactivas.length === 0   // no existe ninguna caja (distinto de «ninguna aplicada a este mes»)
   const mesVacio = !!mes && mes >= aislaDesde(data.config) && !c.subcajas.some(r => r.aplicada)
   const term = normName(q)
   const filtrando = !!term || alcance !== 'todos' || estado !== 'todas'
@@ -120,21 +121,21 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
       {mes && <BarraPlan store={store} hoy={today} mes={mes} plan={plan} />}
       <FuentesSeccion plan={plan} plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
 
-      <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
+      <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y cajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-ink">Reservas / subcajas <span className="rounded-full bg-bg px-2 py-0.5 text-xs font-semibold text-muted">{items.length}</span>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-ink">Reservas / cajas <span className="rounded-full bg-bg px-2 py-0.5 text-xs font-semibold text-muted">{items.length}</span>
               <InfoTooltip title="Cómo se reparten los gastos" align="left">
-                <p>Cada gasto cae en una sola subcaja: la de alcance más específico. Prioridad: <b>Subcategoría &gt; Categoría &gt; Ámbito &gt; Medio de pago</b>. A igual nivel, gana la primera en tu orden manual.</p>
-                <p>Ejemplo: con “Familia” (ámbito) y “Bebé” (categoría), un gasto de Bebé va a Bebé. Lo que no cae en ninguna va a “gastado fuera de subcajas”.</p>
+                <p>Cada gasto cae en una sola caja: la de alcance más específico. Prioridad: <b>Subcategoría &gt; Categoría &gt; Ámbito &gt; Medio de pago</b>. A igual nivel, gana la primera en tu orden manual.</p>
+                <p>Ejemplo: con “Familia” (ámbito) y “Bebé” (categoría), un gasto de Bebé va a Bebé. Lo que no cae en ninguna va a “gastado fuera de cajas”.</p>
                 <p>Una caja inactiva no reserva dinero ni toma gastos. Eliminar una caja no borra ningún gasto.</p>
               </InfoTooltip>
             </h2>
             <p className="text-xs text-muted">Apartan parte del presupuesto consolidado por ámbito, categoría, subcategoría o medio de pago. No suman dinero.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <BotonNuevo onClick={() => setForm({ caja: null })}>Nueva subcaja</BotonNuevo>
-            <BotonMensual onClick={() => plantillas.abrir('subcaja')}>Subcajas mensuales</BotonMensual>
+            <BotonNuevo onClick={() => setForm({ caja: null })}>Nueva caja</BotonNuevo>
+            <BotonMensual onClick={() => plantillas.abrir('subcaja')}>Cajas mensuales</BotonMensual>
           </div>
         </div>
 
@@ -163,9 +164,9 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
         </div>
         {!puedeOrdenar && items.length > 1 && <p className="-mt-2 mb-3 text-[11px] text-muted">Para reordenar, usa “Orden manual” y quita la búsqueda y los filtros.</p>}
 
-        {mesVacio && <div className="mb-4"><VacioMes tipo="subcaja" mes={mes!} nOcultas={ocultas} onConfigurar={() => setForm({ caja: null })} onPlantillas={() => plantillas.abrir('subcaja')} onAnterior={() => plan.usarAnterior('subcaja', mes!)} /></div>}
-        {mesVacio && !items.length ? null : !items.length ? (
-          <Vacio icon={Wallet} titulo="Aún no tienes subcajas" accion={<Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Crear mi primera caja</Button>}>
+        {mesVacio && !sinCajas && <div className="mb-4"><VacioMes tipo="subcaja" mes={mes!} nOcultas={ocultas} onConfigurar={() => setForm({ caja: null })} onPlantillas={() => plantillas.abrir('subcaja')} onAnterior={() => plan.usarAnterior('subcaja', mes!)} /></div>}
+        {mesVacio && !sinCajas && !items.length ? null : !items.length ? (
+          <Vacio icon={Wallet} titulo="Aún no tienes cajas registradas. Añade una caja para empezar">
             Aparta dinero de tu presupuesto para Auto, Salud, Streaming o lo que quieras: cada caja junta sola los gastos de su alcance.
           </Vacio>
         ) : !visibles.length ? (
@@ -204,18 +205,18 @@ function Cabecera({ c, money, filters, setFilters, today, n, onAjustar }: {
           <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-warning shadow-sm ring-1 ring-line"><Wallet className="size-6" /></span>
           <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight text-ink">Cajas y presupuestos</h1>
-            <p className="mt-0.5 text-sm text-muted">Tus fuentes de dinero forman el presupuesto consolidado; las subcajas reservan partes de él.</p>
+            <p className="mt-0.5 text-sm text-muted">Tus fuentes de dinero forman el presupuesto consolidado; las cajas reservan partes de él.</p>
           </div>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className="w-full sm:w-72"><PeriodPicker value={filters} today={today} onChange={p => setFilters({ ...filters, ...p })} /></div>
-        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fuente{nf === 1 ? '' : 's'} · {n} subcaja{n === 1 ? '' : 's'}</span>
+        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fuente{nf === 1 ? '' : 's'} · {n} caja{n === 1 ? '' : 's'}</span>
         {onAjustar && <button type="button" onClick={onAjustar} className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-xs font-medium text-ink hover:bg-bg"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="cajas-resumen">
-        <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fuentes' ? money(c.presupuesto) : 'Sin definir'} />
-        <Mini label="Reservado en subcajas" value={money(c.reservado)} tone="#6D5DD3" />
+        <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fuentes' ? money(c.presupuesto) : '—'} />
+        <Mini label="Reservado en cajas" value={money(c.reservado)} tone="#6D5DD3" />
         <Mini label="Libre inicial" value={c.presupuesto ? money(c.libreInicial) : '—'} tone={c.libreInicial < 0 ? TONO.alerta.fg : undefined} />
         <Mini label="Gastado fuera de cajas" value={money(c.gastadoLibre)} tone="#E8664F" />
       </dl>
@@ -519,7 +520,7 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
           <input id="caja-nombre" className={inputCls} maxLength={40} placeholder="Ej. Caja Salud" value={nombre} onChange={e => setNombre(e.target.value)} />
         </Field>
         {!editar && (
-          <Field label="Mes de aplicación" htmlFor="caja-mes" hint="Esta subcaja reserva su monto en el mes elegido; los demás meses se preparan aparte.">
+          <Field label="Mes de aplicación" htmlFor="caja-mes" hint="Esta caja reserva su monto en el mes elegido; los demás meses se preparan aparte.">
             <MonthPicker id="caja-mes" label="Mes de aplicación" value={mesAplic} onChange={setMesAplic} />
           </Field>
         )}
@@ -586,7 +587,7 @@ function BorrarCaja({ store, caja, data, onClose, onDesactivar }: { store: AppSt
             Desactívala: libera su reserva al libre, conserva su configuración y los gastos y podrás eliminarla o reactivarla cuando quieras.
           </p>
         ) : (
-          <p className="text-muted">{cajaActiva(caja) ? 'No coincide con ningún gasto.' : 'Está inactiva: no toma ningún gasto.'} Se eliminará la subcaja{deps.presupuestos ? ` y sus ${deps.presupuestos} ajuste(s) mensual(es)` : ''}; su reserva vuelve al libre de la caja general y ningún gasto se borra.</p>
+          <p className="text-muted">{cajaActiva(caja) ? 'No coincide con ningún gasto.' : 'Está inactiva: no toma ningún gasto.'} Se eliminará la caja{deps.presupuestos ? ` y sus ${deps.presupuestos} ajuste(s) mensual(es)` : ''}; su reserva vuelve al libre de la caja general y ningún gasto se borra.</p>
         )}
       </div>
     </Modal>

@@ -23,10 +23,10 @@ export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: Cajas
     ['Presupuesto consolidado', v(P), undefined, c.origen === 'fuentes' ? 'Suma de lo que aportan las fuentes activas en el período.' : 'Presupuesto de la caja general en el período (suma los meses si abarca varios).'],
     ['Gastado del período', money(c.gastadoPeriodo), '#E8664F', 'Todos los gastos activos del período, cada uno una sola vez. No aplica filtros de ámbito, categoría o medio.'],
     ['Disponible consolidado', v(c.disponible), c.disponible < 0 ? ESTADO.alerta : ESTADO.ok, 'Presupuesto consolidado − gastado del período.'],
-    ['Reservado en subcajas', money(c.reservado), '#6D5DD3', 'Suma de lo asignado a las subcajas activas. No es dinero adicional.'],
+    ['Reservado en cajas', money(c.reservado), '#6D5DD3', 'Suma de lo asignado a las cajas activas. No es dinero adicional.'],
     ['Libre inicial', v(c.libreInicial), c.libreInicial < 0 ? ESTADO.alerta : undefined, 'Presupuesto consolidado − reservado.'],
-    ['Gastado fuera de reservas', money(c.gastadoLibre), '#E8664F', 'Gastos que no caen en ninguna subcaja activa.'],
-    ['Saldo libre actual', v(c.saldoLibre), c.saldoLibre < 0 ? ESTADO.alerta : ESTADO.ok, 'Libre inicial − gastado fuera de reservas − excesos de subcajas.'],
+    ['Gastado fuera de reservas', money(c.gastadoLibre), '#E8664F', 'Gastos que no caen en ninguna caja activa.'],
+    ['Saldo libre actual', v(c.saldoLibre), c.saldoLibre < 0 ? ESTADO.alerta : ESTADO.ok, 'Libre inicial − gastado fuera de reservas − excesos de cajas.'],
     ['Consumido', c.pct === null ? '—' : `${c.pct}%`, tono, 'Gastado del período ÷ presupuesto consolidado.'],
   ]
   return (
@@ -38,7 +38,7 @@ export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: Cajas
             <span className="rounded-full bg-white/15 [&_button]:text-white [&_button:hover]:bg-white/20">
               <InfoTooltip title="Cómo se calcula" align="left">
                 <p>Presupuesto consolidado = suma de lo que aportan las fuentes activas del período (sin fuentes: la caja general).</p>
-                <p>Las subcajas reservan parte de ese dinero: no se suman. Cada gasto cuenta una sola vez y cae como máximo en una subcaja.</p>
+                <p>Las cajas reservan parte de ese dinero: no se suman. Cada gasto cuenta una sola vez y cae como máximo en una caja.</p>
                 <p>Disponible consolidado = presupuesto − gastado. Saldo libre = libre inicial − gastado fuera de reservas − excesos. Siempre se cumple: disponible = saldo libre + reservas sin usar.</p>
               </InfoTooltip>
             </span>
@@ -64,14 +64,14 @@ export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: Cajas
       {P > 0 && (
         <div className="px-4 py-3 sm:px-5">
           <div className="flex h-3 overflow-hidden rounded-full bg-bg" role="img"
-            aria-label={`Gastado fuera de reservas ${money(c.gastadoLibre)}, gastado en subcajas ${money(c.gastadoSubcajas)}, reservas sin usar ${money(c.reservasSinUsar)}`}>
+            aria-label={`Gastado fuera de reservas ${money(c.gastadoLibre)}, gastado en cajas ${money(c.gastadoSubcajas)}, reservas sin usar ${money(c.reservasSinUsar)}`}>
             <span className="bar-grow h-full bg-coral" style={{ width: seg(c.gastadoLibre) }} />
             <span className="bar-grow h-full bg-morado" style={{ width: seg(c.gastadoSubcajas) }} />
             <span className="bar-grow h-full bg-morado/25" style={{ width: seg(c.reservasSinUsar) }} />
           </div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
             <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-coral" /> Gastado fuera <b className="tabular text-ink">{money(c.gastadoLibre)}</b></span>
-            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado" /> En subcajas <b className="tabular text-ink">{money(c.gastadoSubcajas)}</b></span>
+            <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado" /> En cajas <b className="tabular text-ink">{money(c.gastadoSubcajas)}</b></span>
             <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-morado/25" /> Reservas sin usar <b className="tabular text-ink">{money(c.reservasSinUsar)}</b></span>
             <span className="flex items-center gap-1.5"><i className="size-2.5 rounded-full bg-bg ring-1 ring-line" /> Libre</span>
           </div>

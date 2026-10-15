@@ -88,7 +88,8 @@ function demoFuentes(n: number, mes: string): unknown[][] {
   return [...base, ...extra].slice(0, n)
 }
 
-export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0, nFuentes = 0): Transport {
+/** `vacio`: simula una hoja conectada pero sin ningún registro (solo pruebas / ?demo&vacio=1). */
+export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0, nFuentes = 0, vacio = false): Transport {
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
@@ -131,6 +132,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     revisiones: [] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
+  if (vacio) { db.gastos = []; db.catalogo = []; db.medios = []; db.cajas = []; db.fuentes = []; db.plantillas = []; db.vinculos = [] }
   const upsert = (rows: unknown[][], keyLen: number, row: unknown[]) => {
     const key = JSON.stringify(row.slice(0, keyLen)).toLowerCase()
     const i = rows.findIndex(r => JSON.stringify(r.slice(0, keyLen)).toLowerCase() === key)
@@ -325,8 +327,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       if (!nombre) throw fail('VALIDATION', 'Nombre de la plantilla es obligatorio.')
       if (!(Number(p.monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
       const origen = String(p.origenId ?? '')
-      if (tipo === 'subcaja' && (!['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'].includes(String(p.campo)) || !String(p.valor ?? '').trim())) throw fail('VALIDATION', 'Alcance de subcaja inválido.')
-      if (origen && !(tipo === 'fuente' ? db.fuentes : db.cajas).some(r => r[0] === origen)) throw fail('NOT_FOUND', tipo === 'fuente' ? 'La fuente original ya no existe.' : 'La subcaja original ya no existe.')
+      if (tipo === 'subcaja' && (!['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'].includes(String(p.campo)) || !String(p.valor ?? '').trim())) throw fail('VALIDATION', 'Alcance de caja inválido.')
+      if (origen && !(tipo === 'fuente' ? db.fuentes : db.cajas).some(r => r[0] === origen)) throw fail('NOT_FOUND', tipo === 'fuente' ? 'La fuente original ya no existe.' : 'La caja original ya no existe.')
       let maxOrden = 0
       for (const r of db.plantillasFin) {
         maxOrden = Math.max(maxOrden, Number(r[13]))
@@ -369,7 +371,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
         if (accion === 'aplicar' && r[12] === false) throw fail('VALIDATION', `La plantilla “${r[2]}” está desactivada.`)
         if (accion === 'aplicar' && !r[14]) {
           if (r[1] === 'fuente' && db.fuentes.some(f => f[0] !== seguro('f-', r[0]) && normName(String(f[1])) === normName(String(r[2])))) throw fail('VALIDATION', `Ya existe una fuente llamada “${r[2]}”. Enlaza la plantilla a esa fuente (Guardar como plantilla desde ella).`)
-          if (r[1] === 'subcaja' && db.cajas.some(c => c[0] !== seguro('c-', r[0]) && c[7] !== false && c[3] === r[6] && normName(String(c[4])) === normName(String(r[7])))) throw fail('VALIDATION', `Ya existe una subcaja con el alcance de “${r[2]}”. Enlaza la plantilla a esa subcaja.`)
+          if (r[1] === 'subcaja' && db.cajas.some(c => c[0] !== seguro('c-', r[0]) && c[7] !== false && c[3] === r[6] && normName(String(c[4])) === normName(String(r[7])))) throw fail('VALIDATION', `Ya existe una caja con el alcance de “${r[2]}”. Enlaza la plantilla a esa subcaja.`)
         }
         return { r, accion, monto }
       })

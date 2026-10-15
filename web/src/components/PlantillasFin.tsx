@@ -34,7 +34,7 @@ const AMOUNT = /^\d{1,9}([.,]\d{1,2})?$/
 const nuevoId = () => `pf-${crypto.randomUUID()}`
 const TXT = {
   fuente: { titulo: 'Fuentes mensuales', sub: 'Plantillas de tus fuentes habituales', una: 'fuente', Icon: CircleDollarSign, vacio: 'Aún no tienes plantillas de fuentes', ejemplo: 'General, Aporte de Pareja, Sodexo, Ingresos extras…' },
-  subcaja: { titulo: 'Subcajas mensuales', sub: 'Plantillas de tus subcajas habituales', una: 'subcaja', Icon: Boxes, vacio: 'Aún no tienes plantillas de subcajas', ejemplo: 'Servicios del Hogar, Auto, Bebé, Viaje…' },
+  subcaja: { titulo: 'Cajas mensuales', sub: 'Plantillas de tus cajas habituales', una: 'caja', Icon: Boxes, vacio: 'Aún no tienes plantillas de cajas', ejemplo: 'Servicios del Hogar, Auto, Bebé, Viaje…' },
 } as const
 
 /** Estado de una plantilla en un mes: Pendiente (sin decisión), Aplicada o No aplica este mes. */
@@ -89,8 +89,8 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
     return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
   }
   const mon = data.config.moneda || 'PEN'
-  if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la subcaja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)} en ${ml}. Reserva dinero ya existente; no lo crea.` }
-  if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La subcaja ${nombre} ya existe, pero aún no reserva en ${ml}: se creará su aplicación mensual con ${formatMoney(toCents(monto), mon)}.` }
+  if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la caja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)} en ${ml}. Reserva dinero ya existente; no lo crea.` }
+  if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La caja ${nombre} ya existe, pero aún no reserva en ${ml}: se creará su aplicación mensual con ${formatMoney(toCents(monto), mon)}.` }
   if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya reserva ${formatMoney(o.actual ?? 0, mon)} en ${ml}.` }
   return { op: o.op, cambia: true, txt: `Reserva de ${ml}: ${formatMoney(o.actual ?? 0, mon)} → ${formatMoney(toCents(monto), mon)}. Otros meses no cambian.` }
 }
@@ -125,7 +125,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
   if (vista.kind === 'form') {
     return (
       <Modal open onClose={onClose} size="lg" title={vista.plantilla ? 'Editar plantilla' : vista.clonDe ? 'Clonar plantilla' : `Nueva plantilla de ${T.una}`} icon={<T.Icon className="size-5" />}
-        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fuentes, subcajas ni gastos."
+        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fuentes, cajas ni gastos."
         footer={<>
           <Button type="button" variant="outline" onClick={() => setVista({ kind: 'lista' })}><ArrowLeft className="size-4" /> Volver</Button>
           <Button type="submit" form="plantilla-fin-form"><Save className="size-4" /> {vista.plantilla ? 'Guardar cambios' : 'Guardar plantilla'}</Button>
@@ -149,7 +149,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
               if (ok) setBorrar(null)
             }}><Trash2 className="size-4" /> Eliminar</Button>
           </>}>
-          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. {borrar.tipo === 'fuente' ? 'La fuente' : 'La subcaja'} original, los importes ya aplicados en meses y los gastos no cambian.</p>
+          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. {borrar.tipo === 'fuente' ? 'La fuente' : 'La caja'} original, los importes ya aplicados en meses y los gastos no cambian.</p>
         </Modal>
       )}
     </>
@@ -307,7 +307,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
             trigger={<><Plus className="size-4" /> Nueva plantilla <ChevronDown className="size-4" /></>}
             acciones={[
               { key: 'cero', label: 'Crear desde cero', icon: <Plus className="size-4" />, onClick: () => onForm(null) },
-              { key: 'existente', label: `Crear desde ${tipo === 'fuente' ? 'una fuente' : 'una subcaja'} existente`, icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
+              { key: 'existente', label: `Crear desde ${tipo === 'fuente' ? 'una fuente' : 'una caja'} existente`, icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
             ]} />
         </div>
         {items.length > 4 && (
@@ -338,7 +338,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
               const on = sel.includes(p.id)
               const sub = p.tipo === 'fuente'
                 ? `${p.recurrencia === 'unica' ? 'Un solo mes' : 'Mensual'}${mediosDeFuente(p.medios).length ? ` · ${mediosDeFuente(p.medios).join(', ')}` : ''}${p.origenId ? '' : ' · sin fuente aún'}`
-                : `${p.campo}: ${p.valor.replace(' › ', ' › ')}${p.origenId ? '' : ' · sin subcaja aún'}`
+                : `${p.campo}: ${p.valor.replace(' › ', ' › ')}${p.origenId ? '' : ' · sin caja aún'}`
               return (
                 <li key={p.id} {...dnd.item(p.id)} data-testid="pf-fila" data-estado={e} className={`${CLASE_ARRASTRE} border border-transparent ${on ? 'bg-primary-soft/40' : ''} ${p.activo ? '' : 'opacity-70'}`}>
                   <SwipeFila nombre={p.nombre} acciones={accionesFila(p)} activo={movil}>
@@ -383,7 +383,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
         <p className="text-[11px] text-muted">
           {tipo === 'fuente'
             ? 'Cambiar el importe aquí solo afecta al mes elegido: el importe predeterminado de la plantilla (y de la fuente) se conserva para los demás meses. Nunca se crean ingresos ni gastos.'
-            : 'Una subcaja no crea dinero: solo reserva parte del presupuesto existente. Cambiar el importe aquí solo afecta al mes elegido; la plantilla conserva su valor para los demás.'}
+            : 'Una caja no crea dinero: solo reserva parte del presupuesto existente. Cambiar el importe aquí solo afecta al mes elegido; la plantilla conserva su valor para los demás.'}
         </p>
       </div>
 
@@ -478,10 +478,10 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
       {!plantilla && !clonDe && (
         <div className="space-y-2 rounded-xl bg-bg/70 p-3">
           <Segmented label="Origen de la plantilla" value={desdeExistente ? 'existente' : 'cero'} onChange={v => { setDesdeExistente(v === 'existente'); if (v === 'cero') setOrigen('') }}
-            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: `Desde ${tipo === 'fuente' ? 'una fuente' : 'una subcaja'} existente` }]} />
+            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: `Desde ${tipo === 'fuente' ? 'una fuente' : 'una caja'} existente` }]} />
           {desdeExistente && (
-            <Field label={`${tipo === 'fuente' ? 'Fuente' : 'Subcaja'} existente`} htmlFor="pf-origen" error={errors.origen}>
-              <Combobox id="pf-origen" label={`${tipo === 'fuente' ? 'Fuente' : 'Subcaja'} existente`} value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
+            <Field label={`${tipo === 'fuente' ? 'Fuente' : 'Caja'} existente`} htmlFor="pf-origen" error={errors.origen}>
+              <Combobox id="pf-origen" label={`${tipo === 'fuente' ? 'Fuente' : 'Caja'} existente`} value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
             </Field>
           )}
           {yaVinculada && (

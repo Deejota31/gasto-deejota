@@ -32,7 +32,7 @@ test.describe('v1.19 aislamiento por mes', () => {
     await expect(page.getByRole('list', { name: 'Lista de fuentes' })).toBeVisible()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect(page.getByTestId('vacio-mes-fuente')).toContainText('No tienes fuentes configuradas para noviembre')
-    await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes subcajas configuradas para noviembre')
+    await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes cajas configuradas para noviembre')
     await expect(page.getByTestId('n-fuentes')).toHaveText(/\d+/)
     // Dashboard: mensajes guiados, sin porcentajes engañosos.
     await go(page, 'Dashboard')
@@ -40,7 +40,7 @@ test.describe('v1.19 aislamiento por mes', () => {
     await expect(av).toContainText('Todavía no has configurado fuentes de dinero para este mes.')
     await expect(av).toContainText('Todavía no has reservado presupuesto para este mes.')
     await expect(av.getByRole('button', { name: 'Preparar fuentes mensuales' })).toBeVisible()
-    await expect(av.getByRole('button', { name: 'Preparar subcajas mensuales' })).toBeVisible()
+    await expect(av.getByRole('button', { name: 'Preparar cajas mensuales' })).toBeVisible()
     await expect(page.getByText(/NaN|Infinity/)).toHaveCount(0)
     // Diciembre y enero (cambio de año) también empiezan vacíos.
     await go(page, 'Cajas')
@@ -74,7 +74,7 @@ test.describe('v1.19 aislamiento por mes', () => {
   test('nueva subcaja se aplica al mes seleccionado con "Mes de aplicación" visible', async ({ page }) => {
     await abrir(page, OCT)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     await expect(d.getByText('Mes de aplicación')).toBeVisible()
     await expect(d.locator('#caja-mes')).toContainText(/noviembre/i)
@@ -114,9 +114,7 @@ test.describe('v1.19 asistente y campana', () => {
     await expect(page.getByTestId('plan-resumen-final')).toContainText('Omitida')
     await expect(page.getByTestId('plan-resumen-final')).toContainText('Completada')
     await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    // v1.20.3: finalizar guarda en segundo plano y NO cierra ni redirige: el asistente queda en el Resumen como «Finalizada».
-    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')
-    await page.getByTestId('cerrar-plan').click()
+    // v1.21: finalizar cierra el asistente al instante y guarda en segundo plano.
     await expect(page.getByTestId('asistente-plan')).toHaveCount(0)
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
     expect(await fuentesAplicadas(page)).toBeGreaterThan(antesF)             // las fuentes del mes anterior quedaron aplicadas
@@ -208,7 +206,7 @@ test.describe('v1.19 recordatorios en Configuración', () => {
 test.describe('v1.19 descripciones normalizadas', () => {
   test('la descripción de una subcaja se normaliza al salir del campo y al guardar', async ({ page }) => {
     await abrir(page)
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     const desc = d.getByLabel('Descripción (opcional)')
     await desc.fill('GASTOS DE LA CASA para el mes con chatgpt')
@@ -270,7 +268,7 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
 
   test('aplicar una sola plantilla y luego todas: sin error, sin duplicar', async ({ page }) => {
     await abrir(page, OCT, '/?demo=60&fuentes=3#cajas')
-    await page.getByRole('button', { name: 'Subcajas mensuales' }).first().click()
+    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await crearPlantilla(page, 'Mascotas', '300', 0)
     await crearPlantilla(page, 'Viajes', '150', 1)
     await crearPlantilla(page, 'Regalos', '90', 5)
@@ -289,15 +287,15 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
     await dialog(page).getByRole('button', { name: /Seleccionar todas|Quitar selección/ }).first().click()
     await expect(errores(page)).toHaveCount(0)
     await page.keyboard.press('Escape')
-    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Mascotas').first()).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Viajes').first()).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Regalos').first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Mascotas').first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Viajes').first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Regalos').first()).toBeVisible()
     await expect(errores(page)).toHaveCount(0)
   })
 
   test('con el backend caído el error es visible, con Reintentar, y no queda nada aplicado', async ({ page }) => {
     await abrir(page, OCT, '/?demo=60&fuentes=3&falla=1#cajas')
-    await page.getByRole('button', { name: 'Subcajas mensuales' }).first().click()
+    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
     await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
     await dialog(page).locator('#pf-nombre').fill('Mascotas')

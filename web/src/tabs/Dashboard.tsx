@@ -3,6 +3,7 @@ import { useAgregado } from '../lib/useAgregado'
 import {
   Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
   Percent, PieChart as PieIcon, PiggyBank, Shapes, TrendingUp, Trophy, Wallet,
+  Receipt,
 } from 'lucide-react'
 import { aislaDesde, subKey } from '../lib/engine'
 import type { PlanificacionApi } from '../components/Planificacion'
@@ -13,7 +14,7 @@ import type { Caja, Filters } from '../lib/types'
 import { categoriaLook, subcategoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
-import { BotonMensual, BotonNuevo, Card, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
+import { BotonMensual, BotonNuevo, Card, Empty, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
@@ -67,7 +68,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             <ErrorBox tone="warning" message={`${a.excluidosSinTipoCambio} movimiento(s) en otra moneda no se suman porque falta su tipo de cambio en Configuración.`} />
           )}
 
-          {/* v1.19: mes sin fuentes/subcajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
+          {/* v1.19: mes sin fuentes/cajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
           {mes && data && mes >= aislaDesde(data.config) && plan && (() => {
             const sinF = a.cajas.origen === 'fuentes' && !a.cajas.fuentes.lista.some(r => r.aplicada)
             const sinS = a.cajas.subcajas.length > 0 && !a.cajas.subcajas.some(r => r.aplicada)
@@ -75,7 +76,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             return (
               <div className="space-y-2" data-testid="aviso-mes-sin-config">
                 {sinF && <ErrorBox tone="warning" message="Todavía no has configurado fuentes de dinero para este mes." action={{ label: 'Preparar fuentes mensuales', onClick: () => plan.abrir(mes, 'fuentes') }} />}
-                {sinS && <ErrorBox tone="warning" message="Todavía no has reservado presupuesto para este mes." action={{ label: 'Preparar subcajas mensuales', onClick: () => plan.abrir(mes, 'subcajas') }} />}
+                {sinS && <ErrorBox tone="warning" message="Todavía no has reservado presupuesto para este mes." action={{ label: 'Preparar cajas mensuales', onClick: () => plan.abrir(mes, 'subcajas') }} />}
               </div>
             )
           })()}
@@ -88,17 +89,17 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : 'Sin definir'}
+            <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : '—'}
               hint={a.cajas.origen === 'fuentes' ? `${a.cajas.fuentes.activas} fuente${a.cajas.fuentes.activas === 1 ? '' : 's'} · reservado ${money(a.cajas.reservado)}` : a.cajas.presupuesto ? `Reservado ${money(a.cajas.reservado)}` : 'Defínela en Cajas'}
               info={a.cajas.origen === 'fuentes'
-                ? <><p>Presupuesto consolidado de {periodoTxt}: la suma de lo que aportan tus fuentes activas (General, Sodexo, extras…). Si el período abarca varios meses, suma cada mes.</p><p>Las subcajas son reservas dentro de este monto, no dinero adicional.</p></>
-                : <><p>Presupuesto total de la caja general para {periodoTxt}. Si el período abarca varios meses, suma el presupuesto de cada mes.</p><p>Las subcajas (Auto, Bebé, Plan Nube) son reservas dentro de este monto, no dinero adicional.</p></>} />
+                ? <><p>Presupuesto consolidado de {periodoTxt}: la suma de lo que aportan tus fuentes activas (General, Sodexo, extras…). Si el período abarca varios meses, suma cada mes.</p><p>Las cajas son reservas dentro de este monto, no dinero adicional.</p></>
+                : <><p>Presupuesto total de la caja general para {periodoTxt}. Si el período abarca varios meses, suma el presupuesto de cada mes.</p><p>Las cajas (Auto, Bebé, Plan Nube) son reservas dentro de este monto, no dinero adicional.</p></>} />
             <Kpi tone="coral" icon={<TrendingUp />} label="Total gastado" value={money(a.total)}
               hint={a.filtrado ? `De ${money(a.totalPeriodo)} en el período` : `${a.count} movimientos`}
               info={<><p>Suma de los gastos activos del período con todos los filtros aplicados. Los eliminados no cuentan.</p><p>Montos en otra moneda se convierten con el tipo de cambio de Configuración.</p></>} />
             <Kpi tone={a.cajas.disponible < 0 ? 'red' : 'green'} icon={<PiggyBank />} label="Disponible" value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.disponible) : '—'}
               hint={a.cajas.presupuesto ? `Saldo libre ${money(a.cajas.saldoLibre)}` : undefined} tag={a.filtrado ? 'Período completo' : undefined}
-              info={<><p>Disponible = Caja mensual − todo lo gastado en el período (en subcajas y fuera de ellas).</p><p>Saldo libre = lo que queda fuera de las reservas de subcajas. No cambia con los filtros de categoría, ámbito o medio, porque el presupuesto es del período completo.</p></>} />
+              info={<><p>Disponible = Caja mensual − todo lo gastado en el período (en cajas y fuera de ellas).</p><p>Saldo libre = lo que queda fuera de las reservas de cajas. No cambia con los filtros de categoría, ámbito o medio, porque el presupuesto es del período completo.</p></>} />
             <Kpi tone="violet" icon={<Percent />} label="Consumido" value={a.cajas.pct === null ? '—' : `${a.cajas.pct}%`} progress={a.cajas.pct}
               tag={a.filtrado ? 'Período completo' : undefined}
               info={<p>Porcentaje de la caja mensual ya gastado: gasto del período ÷ caja mensual × 100. Pasa de 100% si te excedes.</p>} />
@@ -116,6 +117,9 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           </div>
 
 
+          {data!.gastos.length === 0 ? (
+            <Card><Empty icon={<Receipt className="size-5" />} title="Aún no hay gastos registrados">Cuando registres gastos verás aquí tus gráficos y análisis.</Empty></Card>
+          ) : <>
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>
               <p>Cómo evoluciona tu gasto a lo largo del período. La línea azul es el gasto real acumulado día a día.</p>
@@ -162,6 +166,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               filtros={[...filters.ambitos, ...filters.categorias, ...filters.subcategorias, ...filters.medios, ...filters.tipos]}
               onPickCategoria={c => setFilters({ ...filters, categorias: toggle(filters.categorias, c) })} />
           </Card>
+          </>}
         </>
       )}
 
