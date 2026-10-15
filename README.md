@@ -38,6 +38,11 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 - **Configuración → Planificación mensual y recordatorios:** activar/desactivar, día predeterminado, día y ON/OFF por mes y año (valida días reales, bisiestos incluidos), mismo día a todos, copiar del año anterior, restablecer, próximas fechas. Zona horaria `America/Lima` (fechas como texto, sin conversión UTC).
 - **Descripciones normalizadas** (`normalizarDescripcion`, idéntica en la web y en Apps Script): primera palabra en mayúscula, conectores en minúscula (lista cerrada), el resto con inicial mayúscula; excepciones de marca/frase (ChatGPT, iPhone, YouTube, Netflix, USD, API, *papa a la Huancaina*…) editables en CONFIG `desc_excepciones`. Se aplica al salir del campo y antes de guardar (cajas, plantillas, gastos, clones, lotes y aplicación de plantillas); no reescribe registros históricos y es idempotente.
 
+### Corrección v1.19.1 (plantillas de subcajas)
+
+- **Error "ID de caja supera 40 caracteres"** al aplicar plantillas de subcajas (una o todas): el ID de la subcaja que nace de una plantilla (`c-` + `pf-`+UUID = 41) excedía el límite de 40. Ahora el ID siempre cabe (`c-`+UUID = 38) y es estable: aplicar de nuevo no duplica.
+- **Hojas propias:** las plantillas de fuentes van a **`PLANTILLAS_FUENTES`** y las de subcajas a **`PLANTILLAS_SUBCAJAS`** (como gastos mensuales tiene `PLANTILLAS_MENSUALES`); el estado Aplicada/Omitida por mes queda en la columna *Estados*. Lo que hubiera en `PLANTILLAS_FINANCIERAS` se copia una sola vez; esa hoja no se borra ni se modifica. Para ver los cambios hay que volver a desplegar `Code.gs`.
+
 ### Despliegue de v1.19.0
 
 1. Copia `apps-script/Code.gs` y publica una **nueva versión** de la implementación (la URL no cambia).
@@ -53,7 +58,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 - **Fuentes mensuales y Subcajas mensuales**: plantillas reutilizables (crear desde cero o desde una existente, editar, clonar, eliminar, activar/desactivar, reordenar, selección múltiple). Cada una se aplica a un mes concreto con importe temporal, vista previa y confirmación; estados *Pendiente / Aplicada / No aplica este mes*. Reaplicar no duplica; el importe predeterminado se conserva para los demás meses. Una subcaja solo reserva: nunca crea dinero.
 - **Guardar como plantilla** en el menú ⋯ de cada fuente y subcaja (deduplicado por ID; si ya existe se ofrece verla o editarla).
 - **Móvil compacto**: filas de Fuentes, Subcajas y Gastos mensuales en dos líneas, acciones deslizando (con botón y teclado como alternativa; Eliminar siempre pide confirmación). Menú «Agregar» del Catálogo anclado y dentro de la pantalla; los menús ⋯ ya funcionan dentro de modales.
-- **Persistencia**: una hoja nueva y ligera `PLANTILLAS_FINANCIERAS` (se crea al primer uso, con respaldo único); los meses aplicados reutilizan `FUENTES_MESES` y `PRESUPUESTOS`.
+- **Persistencia**: dos hojas, `PLANTILLAS_FUENTES` y `PLANTILLAS_SUBCAJAS` (desde v1.19; antes una sola `PLANTILLAS_FINANCIERAS`, que se migra sola y queda intacta); los meses aplicados reutilizan `FUENTES_MESES` y `PRESUPUESTOS`.
 - **Despliegue**: volver a desplegar `Code.gs` en Apps Script y publicar en Netlify.
 
 ## Novedades v1.16.0

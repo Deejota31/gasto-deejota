@@ -151,7 +151,11 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     return [...r.slice(0, 15), Object.fromEntries(Object.entries(est).map(([m, v]) => [m, { e: v.e, m: v.m }])), r[16], r[17]]
   }
   const MES = /^\d{4}-(0[1-9]|1[0-2])$/
-  const seguro = (pre: string, id: unknown) => (pre + String(id).replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 60)
+  // Igual que pfIdSeguro_ del backend: cabe en el límite (caja 40, fuente 64); si "pf-"+UUID no cabe con el prefijo, se omite su "pf-".
+  const seguro = (pre: string, id: unknown, max = pre === 'c-' ? 40 : 60) => {
+    const limpio = String(id).replace(/[^A-Za-z0-9_-]/g, ''), s = pre + limpio
+    return s.length <= max ? s : (pre + limpio.replace(/^pf-/, '')).slice(0, max)
+  }
   const eq = (a: number, b: number) => Math.round(a * 100) === Math.round(b * 100)
   const efectivoFuente = (f: unknown[], mes: string) => {
     let solo: unknown[] | undefined, desde: unknown[] | undefined
@@ -269,6 +273,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       return upsert(db.medios, 1, [p.nombre, p.activo !== false, p.icono === undefined ? prev?.[2] ?? '' : p.icono, p.color === undefined ? prev?.[3] ?? '' : p.color])
     },
     saveCaja: p => {
+      if (String(p.id ?? '').length > 40) throw fail('VALIDATION', 'ID de caja supera 40 caracteres.')
       const norm = (v: unknown) => normName(String(v ?? ''))
       if (p.filtroCampo !== 'Todos' && p.activo !== false && db.cajas.some(r => r[0] !== p.id && r[3] === p.filtroCampo && norm(r[4]) === norm(p.filtroValor) && r[7] !== false)) {
         throw fail('VALIDATION', `Otra caja ya usa ${p.filtroCampo} = ${p.filtroValor}. Cambia el alcance o desactívala primero.`)

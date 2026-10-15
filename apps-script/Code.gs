@@ -8,6 +8,8 @@
 var APP_VERSION = '1.19.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
+var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
+  'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en'];
 var SHEETS = {
   GASTOS: ['Fecha', 'Monto', 'Moneda', 'Categoría', 'Subcategoría', 'Descripción', 'Medio de pago',
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
@@ -35,13 +37,13 @@ var SHEETS = {
   // Importes por mes de cada fuente. Modo "solo" = únicamente ese mes; "desde" = ese mes en adelante (hasta otro "desde").
   // Una fila por fuente + mes + modo: volver a guardar actualiza, nunca duplica ni toca otros meses.
   FUENTES_MESES: ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en'],
-  // Plantillas de fuentes y subcajas (v1.17): solo definiciones reutilizables. Estados = JSON por mes (aplicada / omitida).
-  PLANTILLAS_FINANCIERAS: ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
-    'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en']
+  // Plantillas de fuentes y subcajas (v1.17; hojas separadas desde v1.19): solo definiciones reutilizables. Estados = JSON por mes.
+  PLANTILLAS_FUENTES: PF_COLS_,
+  PLANTILLAS_SUBCAJAS: PF_COLS_
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0, PLANTILLAS_FINANCIERAS: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0, PLANTILLAS_FUENTES: 0, PLANTILLAS_SUBCAJAS: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -688,7 +690,7 @@ function getData_(fresh) {
     fuentesMeses: ss.getSheetByName('FUENTES_MESES') ? readRows_(ss, 'FUENTES_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
     }) : [],
-    plantillasFin: ss.getSheetByName('PLANTILLAS_FINANCIERAS') ? readRows_(ss, 'PLANTILLAS_FINANCIERAS').map(pfOut_) : []
+    plantillasFin: pfTodas_().rows.map(pfOut_)
   };
   writeCache_(data, gen);
   data.cache = false;
@@ -1192,7 +1194,7 @@ function savePresupuesto_(p) {
 }
 
 /* ===================== Plantillas de fuentes y de subcajas (v1.17) =====================
- * Una plantilla es SOLO configuración reutilizable (PLANTILLAS_FINANCIERAS, una hoja para ambos tipos). Se distinguen tres cosas:
+ * Una plantilla es SOLO configuración reutilizable (hojas PLANTILLAS_FUENTES y PLANTILLAS_SUBCAJAS). Se distinguen tres cosas:
  *   - la definición de la plantilla (esta hoja),
  *   - la entidad original (FUENTES / CAJAS; se enlaza por "Origen ID"),
  *   - la configuración aplicada a un mes (FUENTES_MESES / PRESUPUESTOS, que ya existían).
@@ -1201,18 +1203,51 @@ function savePresupuesto_(p) {
  */
 var PF_TIPOS = ['fuente', 'subcaja'];
 
-function plantillasFinSheet_() {
-  var ss = openSpreadsheet_(false);
-  if (!ss.getSheetByName('PLANTILLAS_FINANCIERAS')) {
-    var props = PropertiesService.getScriptProperties();
-    if (!props.getProperty('PLANTILLAS_FIN_RESPALDO')) props.setProperty('PLANTILLAS_FIN_RESPALDO', backup_().url); // hoja nueva: respaldo previo
-  }
-  return ensureSheet_(ss, 'PLANTILLAS_FINANCIERAS', SHEETS.PLANTILLAS_FINANCIERAS);
-}
+var PF_HOJA = { fuente: 'PLANTILLAS_FUENTES', subcaja: 'PLANTILLAS_SUBCAJAS' };
 
 function pfRows_(sh) {
   var n = Math.max(lastDataRow_(sh) - 1, 0);
-  return n ? sh.getRange(2, 1, n, SHEETS.PLANTILLAS_FINANCIERAS.length).getValues() : [];
+  return n ? sh.getRange(2, 1, n, PF_COLS_.length).getValues() : [];
+}
+
+// v1.19: antes ambos tipos vivían en PLANTILLAS_FINANCIERAS. Se copian (una sola vez por tipo) a su hoja propia; la anterior
+// no se toca ni se borra, así que no hay pérdida de datos y se puede revisar o eliminar a mano cuando quieras.
+function pfMigrarLegacy_(ss, sh, tipo) {
+  var props = PropertiesService.getScriptProperties(), flag = 'PF_MIGRADO_' + tipo;
+  if (props.getProperty(flag)) return;
+  var old = ss.getSheetByName('PLANTILLAS_FINANCIERAS');
+  if (old && old.getLastRow() > 1) {
+    var vals = old.getRange(2, 1, old.getLastRow() - 1, PF_COLS_.length).getValues();
+    var have = {};
+    pfRows_(sh).forEach(function (r) { have[str_(r[0])] = true; });
+    var mover = vals.filter(function (r) { return str_(r[0]) && str_(r[1]) === tipo && !have[str_(r[0])]; });
+    if (mover.length) appendRows_(sh, mover);
+  }
+  props.setProperty(flag, '1');
+}
+
+function plantillasFinSheet_(tipo) {
+  if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
+  var ss = openSpreadsheet_(false), name = PF_HOJA[tipo];
+  if (!ss.getSheetByName(name) && !ss.getSheetByName('PLANTILLAS_FINANCIERAS')) {
+    var props = PropertiesService.getScriptProperties();
+    if (!props.getProperty('PLANTILLAS_FIN_RESPALDO')) props.setProperty('PLANTILLAS_FIN_RESPALDO', backup_().url); // hoja nueva: respaldo previo
+  }
+  var sh = ensureSheet_(ss, name, PF_COLS_);
+  pfMigrarLegacy_(ss, sh, tipo);
+  return sh;
+}
+
+// Todas las plantillas (fuentes y subcajas) con la hoja y la fila donde viven. No crea hojas que no existen.
+function pfTodas_() {
+  var ss = openSpreadsheet_(false), rows = [], refs = [], legacy = !!ss.getSheetByName('PLANTILLAS_FINANCIERAS');
+  PF_TIPOS.forEach(function (tipo) {
+    var sh = ss.getSheetByName(PF_HOJA[tipo]);
+    if (!sh && !legacy) return;
+    if (!sh || (legacy && !PropertiesService.getScriptProperties().getProperty('PF_MIGRADO_' + tipo))) sh = plantillasFinSheet_(tipo);   // asegura la migración desde la hoja anterior
+    pfRows_(sh).forEach(function (r, j) { if (str_(r[0])) { rows.push(r); refs.push({ sh: sh, fila: j + 2 }); } });
+  });
+  return { rows: rows, refs: refs };
 }
 
 function pfEstados_(raw) {
@@ -1251,7 +1286,9 @@ function savePlantillaFin_(p) {
   }
   var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
   if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
-  var sh = plantillasFinSheet_();
+  var otroTipo = tipo === 'fuente' ? 'subcaja' : 'fuente', otraHoja = ss.getSheetByName(PF_HOJA[otroTipo]);
+  if (otraHoja && findRowByValue_(otraHoja, 1, id)) throw appError_('VALIDATION', 'No se puede cambiar el tipo de una plantilla.');
+  var sh = plantillasFinSheet_(tipo);
   var rows = pfRows_(sh);
   var idx = -1, maxOrden = 0;
   for (var i = 0; i < rows.length; i++) {
@@ -1276,10 +1313,10 @@ function savePlantillaFin_(p) {
 // Elimina solo la definición: no toca la fuente/subcaja original ni lo ya aplicado en meses.
 function deletePlantillaFin_(p) {
   var id = text_(p.id, 'ID de plantilla', 64, true);
-  var sh = plantillasFinSheet_();
-  var row = findRowByValue_(sh, 1, id);
-  if (!row) return { id: id, eliminada: false };
-  sh.deleteRow(row);
+  var todo = pfTodas_(), i = -1;
+  todo.rows.forEach(function (r, k) { if (str_(r[0]) === id) i = k; });
+  if (i < 0) return { id: id, eliminada: false };
+  todo.refs[i].sh.deleteRow(todo.refs[i].fila);
   return { id: id, eliminada: true };
 }
 
@@ -1288,7 +1325,7 @@ function reorderPlantillasFin_(p) {
   if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
   var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
   if (!ids.length || ids.length > 500) throw appError_('VALIDATION', 'Orden de plantillas inválido.');
-  var sh = plantillasFinSheet_();
+  var sh = plantillasFinSheet_(tipo);
   var rows = pfRows_(sh);
   if (!rows.length) return { ok: true };
   var pos = {};
@@ -1333,7 +1370,14 @@ function fuenteMontoMesGs_(f, mes, meses, aislar) {
   return { monto: !f[9] || mes >= f[9] ? f[2] : 0, solo: null, aplicada: true };
 }
 
-function pfIdSeguro_(prefijo, id) { return (prefijo + String(id).replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 60); }
+// ID estable de la fuente/subcaja que nace de una plantilla. Cabe en el límite de cada hoja (caja 40, fuente 64): si el ID de la
+// plantilla ("pf-" + UUID = 39) no cabe con el prefijo, se omite su "pf-". Mismo ID de plantilla => mismo ID siempre.
+function pfIdSeguro_(prefijo, id, max) {
+  var limpio = String(id).replace(/[^A-Za-z0-9_-]/g, '');
+  var s = prefijo + limpio;
+  if (s.length <= max) return s;
+  return (prefijo + limpio.replace(/^pf-/, '')).slice(0, max);
+}
 
 /**
  * Aplica, omite o revierte plantillas en UN mes. Todo o nada en la validación; idempotente (aplicar dos veces el mismo
@@ -1349,8 +1393,7 @@ function aplicarPlantillasFin_(p) {
   var items = Array.isArray(p.items) ? p.items : [];
   if (!items.length || items.length > 60) throw appError_('VALIDATION', 'Selecciona entre 1 y 60 plantillas.');
   var ss = openSpreadsheet_(false);
-  var sh = plantillasFinSheet_();
-  var rows = pfRows_(sh), porId = {};
+  var todo = pfTodas_(), rows = todo.rows, refs = todo.refs, porId = {};
   rows.forEach(function (r, i) { if (str_(r[0])) porId[str_(r[0])] = i; });
   var aislar = aislarDesde_();
   var vistos = {};
@@ -1374,11 +1417,11 @@ function aplicarPlantillasFin_(p) {
     if (it.tipo === 'fuente') {
       if (origen && fRows.some(function (x) { return str_(x[0]) === origen; })) return;
       var nom = norm_(String(r[2]).replace(/^'/, ''));
-      if (fRows.some(function (x) { return norm_(String(x[1]).replace(/^'/, '')) === nom; }) && !fRows.some(function (x) { return str_(x[0]) === pfIdSeguro_('f-', r[0]); }))
+      if (fRows.some(function (x) { return norm_(String(x[1]).replace(/^'/, '')) === nom; }) && !fRows.some(function (x) { return str_(x[0]) === pfIdSeguro_('f-', r[0], 60); }))
         throw appError_('VALIDATION', 'Ya existe una fuente llamada “' + str_(r[2]) + '”. Enlaza la plantilla a esa fuente (Guardar como plantilla desde ella).');
     } else {
       if (origen && cRows.some(function (x) { return str_(x[0]) === origen; })) return;
-      if (cRows.some(function (x) { return str_(x[0]) !== pfIdSeguro_('c-', r[0]) && (str_(x[7]) === '' ? true : bool_(x[7])) && str_(x[3]) === str_(r[6]) && norm_(x[4]) === norm_(r[7]); }))
+      if (cRows.some(function (x) { return str_(x[0]) !== pfIdSeguro_('c-', r[0], 40) && (str_(x[7]) === '' ? true : bool_(x[7])) && str_(x[3]) === str_(r[6]) && norm_(x[4]) === norm_(r[7]); }))
         throw appError_('VALIDATION', 'Ya existe una subcaja con el alcance de “' + str_(r[2]) + '”. Enlaza la plantilla a esa subcaja.');
     }
   });
@@ -1413,7 +1456,7 @@ function aplicarPlantillasFin_(p) {
       var origen = str_(r[14]), w = false, prev = null;
       if (it.tipo === 'fuente') {
         if (!origen || !fRows.some(function (x) { return str_(x[0]) === origen; })) {
-          origen = pfIdSeguro_('f-', r[0]);
+          origen = pfIdSeguro_('f-', r[0], 60);
           fSh = fuentesSheets_().fuentes;
           if (!findRowByValue_(fSh, 1, origen)) saveFuente_({ id: origen, nombre: str_(r[2]).replace(/^'/, ''), monto: num_(r[3]), moneda: str_(r[4]), color: str_(r[9]), icono: autoVacio_(r[10]) || 'auto',
             recurrencia: str_(r[11]) === 'unica' ? 'unica' : 'mensual', mes: mes, activo: true, medioPago: libreVacio_(r[5]), orden: fRows.length + 1 });
@@ -1425,7 +1468,7 @@ function aplicarPlantillasFin_(p) {
         if (Math.round(it.monto * 100) !== Math.round(ef.monto * 100) || !ef.aplicada) { saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: it.monto }); w = true; }
       } else {
         if (!origen || !cRows.some(function (x) { return str_(x[0]) === origen; })) {
-          origen = pfIdSeguro_('c-', r[0]);
+          origen = pfIdSeguro_('c-', r[0], 40);
           cSh = cajasSheet_();
           if (!findRowByValue_(cSh, 1, origen)) saveCaja_({ id: origen, nombre: str_(r[2]).replace(/^'/, ''), presupuesto: num_(r[3]), filtroCampo: str_(r[6]), filtroValor: str_(r[7]),
             color: str_(r[9]), icono: autoVacio_(r[10]) || '', activo: true, descripcion: str_(r[8]), orden: cRows.length + 1 });
@@ -1443,7 +1486,7 @@ function aplicarPlantillasFin_(p) {
     while (meses.length > 36) delete est[meses.shift()];
     r[15] = JSON.stringify(est);
     r[17] = new Date().toISOString();
-    sh.getRange(it.idx + 2, 1, 1, r.length).setValues([r]);
+    refs[it.idx].sh.getRange(refs[it.idx].fila, 1, 1, r.length).setValues([r]);
     salida.push(pfOut_(r));
   });
   return { mes: mes, plantillas: salida };

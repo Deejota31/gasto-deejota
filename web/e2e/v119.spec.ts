@@ -251,3 +251,59 @@ test('tema oscuro: la campana y el panel usan colores de tokens (legibles)', asy
   const bg = await panel.evaluate(e => getComputedStyle(e).backgroundColor)
   expect(bg).not.toBe('rgb(255, 255, 255)')
 })
+
+test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regresión "ID de caja supera 40 caracteres")', () => {
+  async function crearPlantilla(page: Page, nombre: string, monto: string, opcion: number) {
+    const d = dialog(page)
+    await d.getByRole('button', { name: /Nueva plantilla/ }).click()
+    await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
+    await dialog(page).locator('#pf-nombre').fill(nombre)
+    await dialog(page).locator('#pf-monto').fill(monto)
+    await dialog(page).locator('#pf-valor').click()
+    await page.getByRole('listbox').getByRole('option').nth(opcion).click()
+    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
+    await expect(page.getByTestId('pf-fila').filter({ hasText: nombre })).toHaveCount(1)
+  }
+  const errores = (page: Page) => page.getByText(/ID de caja supera|No se pudo confirmar/)
+
+  test('aplicar una sola plantilla y luego todas: sin error, sin duplicar', async ({ page }) => {
+    await abrir(page, OCT, '/?demo=60&fuentes=3#cajas')
+    await page.getByRole('button', { name: 'Subcajas mensuales' }).first().click()
+    await crearPlantilla(page, 'Mascotas', '300', 0)
+    await crearPlantilla(page, 'Viajes', '150', 1)
+    await crearPlantilla(page, 'Regalos', '90', 5)
+    // 1) botón "Aplicar" de una fila
+    await page.getByTestId('pf-fila').filter({ hasText: 'Mascotas' }).getByRole('button', { name: /^Aplicar/ }).first().click()
+    const vp = page.getByTestId('pf-vista-previa')
+    if (await vp.count()) await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
+    await expect(page.getByTestId('pf-fila').filter({ hasText: 'Mascotas' }).getByTestId('pf-estado')).toHaveText('Aplicada')
+    // 2) seleccionar todas y aplicar (las pendientes)
+    await dialog(page).getByRole('button', { name: /Seleccionar todas/ }).click()
+    await dialog(page).getByRole('button', { name: /^Aplicar \d+ a / }).click()
+    await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
+    for (const n of ['Mascotas', 'Viajes', 'Regalos']) await expect(page.getByTestId('pf-fila').filter({ hasText: n }).getByTestId('pf-estado')).toHaveText('Aplicada')
+    await expect(errores(page)).toHaveCount(0)
+    // 3) volver a aplicar todas: idempotente
+    await dialog(page).getByRole('button', { name: /Seleccionar todas|Quitar selección/ }).first().click()
+    await expect(errores(page)).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Mascotas').first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Viajes').first()).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Reservas y subcajas' }).getByText('Regalos').first()).toBeVisible()
+    await expect(errores(page)).toHaveCount(0)
+  })
+
+  test('con el backend caído el error es visible, con Reintentar, y no queda nada aplicado', async ({ page }) => {
+    await abrir(page, OCT, '/?demo=60&fuentes=3&falla=1#cajas')
+    await page.getByRole('button', { name: 'Subcajas mensuales' }).first().click()
+    await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
+    await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
+    await dialog(page).locator('#pf-nombre').fill('Mascotas')
+    await dialog(page).locator('#pf-monto').fill('300')
+    await dialog(page).locator('#pf-valor').click()
+    await page.getByRole('listbox').getByRole('option').nth(0).click()
+    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
+    await expect(page.getByText(/No se pudo/).first()).toBeVisible()          // error visible, no éxito falso
+    await expect(page.getByText('Plantilla Mascotas guardada.')).toHaveCount(0)
+  })
+})
