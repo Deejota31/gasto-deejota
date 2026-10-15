@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -149,6 +149,14 @@ const toFuente = (r: z.infer<typeof fuenteRow>): Fuente => ({
   recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12],
 })
 const toFuenteMes = (r: z.infer<typeof fuenteMesRow>): FuenteMes => ({ fuenteId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
+// [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
+const plantillaFinRow = z.tuple([str, str, str, z.number(), str, str, str, str, str, str, str, str, z.boolean(), z.number(), str, z.record(z.string(), z.object({ e: z.enum(['aplicada', 'omitida']), m: z.number() })), str, str])
+const toPlantillaFin = (r: z.infer<typeof plantillaFinRow>): PlantillaFin => ({
+  id: r[0], tipo: r[1] === 'subcaja' ? 'subcaja' : 'fuente', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], campo: r[6], valor: r[7], descripcion: r[8],
+  color: r[9] || '#1e3a8a', icono: r[10], recurrencia: r[11] === 'unica' ? 'unica' : 'mensual', activo: r[12], orden: r[13], origenId: r[14], estados: r[15], creadoEn: r[16], actualizadoEn: r[17],
+})
+export type PlantillaFinInput = Omit<PlantillaFin, 'creadoEn' | 'actualizadoEn' | 'estados' | 'orden'> & { orden?: number }
+export interface AplicarItem { id: string; accion: 'aplicar' | 'omitir' | 'pendiente'; monto?: number }
 export interface CarpetaRespaldo { id: string; nombre: string; url: string; personalizada: boolean }
 export type FuenteInput = Omit<Fuente, 'creadoEn' | 'actualizadoEn'>
 
@@ -166,6 +174,7 @@ const dataSchema = z.object({
   revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
   fuentes: z.array(fuenteRow).optional(),
   fuentesMeses: z.array(fuenteMesRow).optional(),
+  plantillasFin: z.array(plantillaFinRow).optional(),
 })
 
 const ESTADOS_REVISION: readonly string[] = ['legitimo', 'pendiente', 'duplicado']
@@ -236,6 +245,7 @@ export function createApi(t: Transport) {
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
           fuentes: (d.fuentes ?? []).map(toFuente),
           fuentesMeses: (d.fuentesMeses ?? []).map(toFuenteMes),
+          plantillasFin: (d.plantillasFin ?? []).map(toPlantillaFin),
         }
       }).finally(() => { inflight = null })
       return inflight
@@ -289,6 +299,16 @@ export function createApi(t: Transport) {
     /** Importe de una fuente para un mes (o desde un mes). quitar = vuelve al importe habitual. */
     async saveFuenteMes(m: FuenteMes, quitar = false): Promise<void> {
       await t('saveFuenteMes', { ...m, ...(quitar ? { quitar: true } : {}) })
+    },
+    /** Plantillas de fuentes/subcajas: definiciones reutilizables (upsert por ID; no crea dinero ni entidades). */
+    async savePlantillaFin(p: PlantillaFinInput): Promise<PlantillaFin> {
+      return toPlantillaFin(parse(plantillaFinRow, await t('savePlantillaFin', p)))
+    },
+    async deletePlantillaFin(id: string): Promise<void> { await t('deletePlantillaFin', { id }) },
+    async reorderPlantillasFin(tipo: TipoPlantillaFin, ids: string[]): Promise<void> { await t('reorderPlantillasFin', { tipo, ids }) },
+    /** Aplica, omite o devuelve a Pendiente plantillas en UN mes (todo o nada; idempotente). */
+    async aplicarPlantillasFin(mes: string, items: AplicarItem[]): Promise<PlantillaFin[]> {
+      return parse(z.object({ plantillas: z.array(plantillaFinRow) }), await t('aplicarPlantillasFin', { mes, items })).plantillas.map(toPlantillaFin)
     },
     async deleteFuente(id: string): Promise<void> {
       await t('deleteFuente', { id })

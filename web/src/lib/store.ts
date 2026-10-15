@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createApi, httpTransport, type Api, type Connection, type FuenteInput, type GastoInput, type PlantillaInput } from './api'
+import { createApi, httpTransport, type Api, type Connection, type AplicarItem, type FuenteInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
-import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
+import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
@@ -248,6 +248,33 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async savePresupuesto(p: Presupuesto) {
       const s = await api.savePresupuesto(p)
       patch(d => ({ ...d, presupuestos: [...d.presupuestos.filter(x => !(x.periodo === s.periodo && x.cajaId === s.cajaId)), s] }))
+    },
+    /** Plantillas de fuentes/subcajas. Solo guardan configuración: no crean fuentes, subcajas, dinero ni gastos. */
+    async savePlantillaFin(p: PlantillaFinInput) {
+      const s = await api.savePlantillaFin(p)
+      patch(d => { const xs = d.plantillasFin ?? []; return { ...d, plantillasFin: xs.some(x => x.id === s.id) ? xs.map(x => x.id === s.id ? s : x) : [...xs, s] } })
+      return s
+    },
+    async deletePlantillaFin(id: string) {
+      await api.deletePlantillaFin(id)
+      patch(d => ({ ...d, plantillasFin: (d.plantillasFin ?? []).filter(x => x.id !== id) }))
+    },
+    /** Orden de las plantillas: se ve al instante; si falla, vuelve al anterior (una sola solicitud por arrastre). */
+    async reorderPlantillasFin(tipo: TipoPlantillaFin, ids: string[]) {
+      let previo: PlantillaFin[] = []
+      const aplicar = (d: AppData) => ({ ...d, plantillasFin: (d.plantillasFin ?? []).map(x => x.tipo === tipo ? { ...x, orden: ids.indexOf(x.id) >= 0 ? ids.indexOf(x.id) + 1 : ids.length + 1 } : x) })
+      setData(d => { previo = d?.plantillasFin ?? []; return d && aplicar(d) })
+      try { await api.reorderPlantillasFin(tipo, ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, plantillasFin: previo }); throw e }
+    },
+    /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fuentes, cajas, importes del mes). */
+    async aplicarPlantillasFin(mes: string, items: AplicarItem[]) {
+      const pl = await api.aplicarPlantillasFin(mes, items)
+      const raw = await api.getData(true)
+      patch(d => ({
+        ...d, plantillasFin: (d.plantillasFin ?? []).map(x => pl.find(y => y.id === x.id) ?? x).concat(pl.filter(y => !(d.plantillasFin ?? []).some(x => x.id === y.id))),
+        fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos,
+      }))
+      return pl
     },
     /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
     async saveFuente(f: FuenteInput) {

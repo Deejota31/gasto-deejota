@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
-  Copy, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, X,
+  Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, X,
 } from 'lucide-react'
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel, todayIn } from '../lib/dates'
@@ -10,12 +10,14 @@ import { fuenteLook, medioLook } from '../lib/visual'
 import type { AppStore } from '../lib/store'
 import type { AppData, Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { dependenciasFuente } from '../lib/dependencias'
-import { MenuAcciones } from './MenuAcciones'
+import { MenuAcciones, type AccionMenu } from './MenuAcciones'
 import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 import { Combobox } from './Combobox'
 import { MonthPicker } from './DatePicker'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
 import { guardarPref, leerPref } from '../lib/prefs'
+import { SwipeFila, useEsMovil } from './swipe'
+import type { usePlantillasFin } from './PlantillasFin'
 import { mediosDeFuente, unirMedios } from '../lib/fuenteMedios'
 
 const NINGUNO = '__ninguno__'
@@ -35,8 +37,8 @@ const recurrenciaTxt = (f: Fuente) => f.recurrencia === 'unica' ? `Solo ${f.mes 
 
 export const FUENTE_GENERAL_ID = 'fuente-general'
 
-export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
-  store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
+export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantillas }: {
+  plantillas: ReturnType<typeof usePlantillasFin>; store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
 }) {
   const data = store.data!
   const fuentes = c.fuentes.lista
@@ -108,7 +110,10 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
             ? `${c.fuentes.activas} activa${c.fuentes.activas === 1 ? '' : 's'} · aportan ${money(c.fuentes.total)} en ${periodo}`
             : 'Aún no tienes fuentes: el presupuesto sale de la caja general.'}</p>
         </div>
-        <Button onClick={() => abrir(null)}><Plus className="size-4" /> Nueva fuente</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => plantillas.abrir('fuente')}><CalendarDays className="size-4" /> Fuentes mensuales</Button>
+          <Button onClick={() => abrir(null)}><Plus className="size-4" /> Nueva fuente</Button>
+        </div>
       </div>
 
       {c.origen === 'caja-general' && (
@@ -156,7 +161,13 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         const porId = new Map(mostradas.map(r => [r.fuente.id, r]))
         const ordenadas = (puedeArrastrar ? dnd.orden : mostradas.map(r => r.fuente.id)).map(id => porId.get(id)).filter((r): r is FuenteResumen => !!r)
         const acc = (r: FuenteResumen) => <AccionesFuente f={r.fuente} puedeOrdenar={!filtrando} first={ids[0] === r.fuente.id} last={ids.at(-1) === r.fuente.id}
-          onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} />
+          onEdit={() => abrir(r.fuente)} onUp={() => mover(r.fuente.id, -1)} onDown={() => mover(r.fuente.id, 1)} onClone={() => clonar(r.fuente)} onDelete={() => setBorrar(r)} onPlantilla={() => plantillas.guardarComoPlantilla('fuente', r.fuente.id)} />
+        const swipe = (r: FuenteResumen): AccionMenu[] => [
+          { key: 'edit', label: 'Editar', icon: <Pencil className="size-4" />, onClick: () => abrir(r.fuente) },
+          { key: 'clone', label: 'Clonar', icon: <Copy className="size-4" />, onClick: () => clonar(r.fuente) },
+          { key: 'tpl', label: 'Plantilla', icon: <FilePlus2 className="size-4" />, onClick: () => plantillas.guardarComoPlantilla('fuente', r.fuente.id) },
+          { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-4" />, onClick: () => setBorrar(r), danger: true },
+        ]
         const asa = (r: FuenteResumen) => <AsaOrden {...dnd.asa(r.fuente.id)} habilitado={puedeArrastrar} motivo={motivoNoArrastrar} />
         return vista === 'grid' ? (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Lista de fuentes">
@@ -166,7 +177,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes }: {
         ) : (
           <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de fuentes">
             {ordenadas.map(r => <FilaFuente key={r.fuente.id} r={r} todas={todas} money={money} busy={store.pending.has(`fuente:${r.fuente.id}`)} onToggle={() => alternar(r)}
-              dnd={dnd.item(r.fuente.id)} asa={asa(r)} acciones={acc(r)} />)}
+              dnd={dnd.item(r.fuente.id)} asa={asa(r)} acciones={acc(r)} swipe={swipe(r)} />)}
           </ul>
         )
       })()}
@@ -275,27 +286,33 @@ function TarjetaFuente({ r, todas, money, mes, busy, onToggle, acciones, dnd, as
   )
 }
 
-function FilaFuente({ r, todas, money, busy, onToggle, acciones, dnd, asa }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode; dnd: DndItem; asa: ReactNode }) {
+function FilaFuente({ r, todas, money, busy, onToggle, acciones, swipe, dnd, asa }: { r: FuenteResumen; todas: Fuente[]; money: (n: number) => string; busy: boolean; onToggle: () => void; acciones: ReactNode; swipe: AccionMenu[]; dnd: DndItem; asa: ReactNode }) {
   const f = r.fuente
   const { Icon, color } = fuenteLook(f, todas)
+  const movil = useEsMovil()
   return (
-    <li {...dnd} data-testid="fuente" className={`${CLASE_ARRASTRE} grid grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-transparent px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${f.activo ? '' : 'opacity-70'}`}>
-      {asa}
-      <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold" data-testid="fuente-nombre">{f.nombre}{busy && <span className="ml-2 text-[10px] font-normal text-muted">Guardando…</span>}</p>
-        <p className="truncate text-[11px] text-muted">{recurrenciaTxt(f)}</p>
-      </div>
-      <div className="order-last col-span-4 sm:order-none sm:col-span-1"><Badges r={r} /></div>
-      <span className="tabular hidden text-right text-sm font-bold sm:block" data-testid="fuente-aporte">{money(r.asignado)}</span>
-      <Toggle on={f.activo} onChange={onToggle} label={`${f.activo ? 'Desactivar' : 'Activar'} ${f.nombre}`} disabled={busy} />
-      {acciones}
+    <li {...dnd} data-testid="fuente" className={`${CLASE_ARRASTRE} border border-transparent transition hover:bg-bg/60`}>
+      <SwipeFila nombre={f.nombre} acciones={swipe} activo={movil} testId="fuente-fila">
+        {/* Móvil: línea 1 = asa, icono, nombre, ON/OFF; línea 2 = recurrencia, estado/medio y monto. Escritorio: una fila. */}
+        <div className="grid grid-cols-[2rem_2.25rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 px-2.5 py-2 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_auto_auto_auto] sm:gap-x-3 sm:px-3 sm:py-2.5">
+          {asa}
+          <span className="grid size-9 place-items-center rounded-xl sm:size-10" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold" data-testid="fuente-nombre">{f.nombre}{busy && <span className="ml-2 text-[10px] font-normal text-muted">Guardando…</span>}</p>
+            <p className="truncate text-[11px] text-muted">{recurrenciaTxt(f)}</p>
+          </div>
+          <div className="col-start-3 col-end-4 row-start-2 min-w-0 sm:col-start-4 sm:col-end-5 sm:row-start-1"><Badges r={r} /></div>
+          <span className="tabular col-start-4 row-start-2 text-right text-sm font-bold sm:col-start-5 sm:row-start-1" data-testid="fuente-aporte">{money(r.asignado)}</span>
+          <div className="col-start-4 row-start-1 sm:col-start-6"><Toggle on={f.activo} onChange={onToggle} label={`${f.activo ? 'Desactivar' : 'Activar'} ${f.nombre}`} disabled={busy} /></div>
+          {!movil && acciones}
+        </div>
+      </SwipeFila>
     </li>
   )
 }
 
-function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete }: {
-  f: Fuente; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void
+function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete, onPlantilla }: {
+  f: Fuente; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void; onPlantilla: () => void
 }) {
   return (
     <div className="relative flex shrink-0 items-center gap-1">
@@ -304,6 +321,7 @@ function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown, on
         { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },
         { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },
         { key: 'clone', label: 'Clonar', icon: <Copy className="size-3.5" />, onClick: onClone },
+        { key: 'tpl', label: 'Guardar como plantilla', icon: <FilePlus2 className="size-3.5" />, onClick: onPlantilla },
         { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-3.5" />, onClick: onDelete, danger: true },
       ]} />
     </div>

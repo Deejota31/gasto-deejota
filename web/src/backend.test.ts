@@ -149,7 +149,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -1487,5 +1487,139 @@ describe('backend Apps Script', () => {
       expect(d.medios.find((m: unknown[]) => m[0] === 'Plin')[1]).toBe(false)
       expect(d.gastos[0][6]).toBe('Plin')
     })
+  })
+})
+
+describe('plantillas de fuentes y de subcajas (v1.17)', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const fuente = (o: Record<string, unknown> = {}) => b.post('saveFuente', { id: 'f-general', nombre: 'General', monto: 3500, moneda: 'PEN', color: '#1E3A8A', orden: 1, recurrencia: 'mensual', mes: '', ...o })
+  const caja = (o: Record<string, unknown> = {}) => b.post('saveCaja', { id: 'c-hogar', nombre: 'Servicios del Hogar', presupuesto: 400, filtroCampo: 'Categoría', filtroValor: 'Servicios', color: '#64748b', orden: 2, ...o })
+  const plF = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: 'pf-1', tipo: 'fuente', nombre: 'Aporte de Pareja', monto: 1000, moneda: 'PEN', medios: '', recurrencia: 'mensual', ...o })
+  const plS = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: 'ps-1', tipo: 'subcaja', nombre: 'Servicios del Hogar', monto: 400, campo: 'Categoría', valor: 'Servicios', ...o })
+  const datos = () => b.post('data', { fresh: true }).data
+  const snapshot = () => { const d = datos(); return JSON.stringify({ f: d.fuentes, fm: d.fuentesMeses, c: d.cajas, p: d.presupuestos, g: d.gastos }) }
+
+  it('A: una plantilla desde una fuente existente crea la definición vinculada, no otra fuente', () => {
+    fuente()
+    const antes = snapshot()
+    const r = plF({ id: 'pf-g', nombre: 'General (plantilla)', monto: 3500, origenId: 'f-general' })
+    expect(r.ok).toBe(true)
+    expect(r.data[14]).toBe('f-general')
+    expect(snapshot()).toBe(antes)                                    // I: presupuesto, fuentes, cajas y gastos idénticos
+    expect(datos().plantillasFin).toHaveLength(1)
+  })
+
+  it('no duplica la plantilla de un mismo registro ni por nombre', () => {
+    fuente()
+    plF({ id: 'pf-g', nombre: 'General (plantilla)', origenId: 'f-general' })
+    const dup = plF({ id: 'pf-otra', nombre: 'Otro nombre', origenId: 'f-general' })
+    expect(dup.ok).toBe(false)
+    expect(dup.error.code).toBe('DUPLICATE')
+    expect(plF({ id: 'pf-n', nombre: 'general (PLANTILLA)' }).ok).toBe(false)
+    expect(plF({ id: 'pf-x', origenId: 'no-existe' }).ok).toBe(false)
+    expect(datos().plantillasFin).toHaveLength(1)
+  })
+
+  it('B: una plantilla desde una subcaja no cambia el importe reservado', () => {
+    caja()
+    const antes = snapshot()
+    expect(plS({ origenId: 'c-hogar' }).ok).toBe(true)
+    expect(snapshot()).toBe(antes)
+  })
+
+  it('C: aplicar 450 en noviembre solo modifica noviembre y es idempotente (D)', () => {
+    caja()
+    plS({ origenId: 'c-hogar' })
+    const r1 = b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    expect(r1.ok).toBe(true)
+    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
+    expect(datos().cajas.find((c: unknown[]) => c[0] === 'c-hogar')[2]).toBe(400)   // el habitual no cambia
+    const w = b.ss.getSheetByName('PRESUPUESTOS')!.writes, nCajas = datos().cajas.length
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    expect(b.ss.getSheetByName('PRESUPUESTOS')!.writes).toBe(w)           // la repetición no escribe
+    expect(datos().presupuestos).toHaveLength(1)
+    expect(datos().cajas).toHaveLength(nCajas)                              // no se duplicó la subcaja
+    const est = datos().plantillasFin[0][15]
+    expect(est['2026-11']).toEqual({ e: 'aplicada', m: 450 })
+  })
+
+  it('aplicar con el mismo importe habitual no escribe PRESUPUESTOS; cambiar el importe actualiza sin duplicar', () => {
+    caja(); plS({ origenId: 'c-hogar' })
+    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 400 }] })
+    expect(datos().presupuestos).toEqual([])
+    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 500 }] })
+    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 520 }] })
+    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 520]])
+  })
+
+  it('volver a Pendiente restaura lo que había antes; omitir no escribe presupuestos', () => {
+    caja(); plS({ origenId: 'c-hogar' })
+    b.post('savePresupuesto', { periodo: '2026-11', cajaId: 'c-hogar', monto: 380 })      // ajuste manual previo
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'pendiente' }] })
+    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 380]])
+    expect(datos().plantillasFin[0][15]['2026-11']).toBeUndefined()
+    b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-1', accion: 'omitir' }] })
+    expect(datos().plantillasFin[0][15]['2026-10'].e).toBe('omitida')
+    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 380]])
+  })
+
+  it('plantilla de fuente sin fuente enlazada: la crea una sola vez con ID estable y solo ajusta ese mes', () => {
+    fuente()
+    plF({ monto: 1000 })
+    const total = () => datos().fuentes.length
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-1', accion: 'aplicar', monto: 1200 }] })
+    expect(total()).toBe(2)
+    const f = datos().fuentes.find((x: unknown[]) => x[1] === 'Aporte de Pareja')
+    expect(f[0]).toBe('f-pf-1'); expect(f[2]).toBe(1000); expect(f[9]).toBe('2026-11')
+    expect(datos().fuentesMeses).toEqual([['f-pf-1', '2026-11', 1200, 'solo']])
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-1', accion: 'aplicar', monto: 1200 }] })
+    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'pf-1', accion: 'aplicar', monto: 1000 }] })
+    expect(total()).toBe(2)
+    expect(datos().fuentesMeses).toEqual([['f-pf-1', '2026-11', 1200, 'solo']])        // diciembre usa el habitual, sin fila nueva
+    expect(datos().plantillasFin.find((p: unknown[]) => p[0] === 'pf-1')[14]).toBe('f-pf-1')
+  })
+
+  it('lote todo o nada: una plantilla inválida o inactiva no aplica ninguna', () => {
+    caja(); plS({ origenId: 'c-hogar' }); fuente(); plF({ origenId: 'f-general', nombre: 'General plantilla', monto: 3500 })
+    b.post('savePlantillaFin', { id: 'ps-1', tipo: 'subcaja', nombre: 'Servicios del Hogar', monto: 400, campo: 'Categoría', valor: 'Servicios', activo: false, origenId: 'c-hogar' })
+    const antes = snapshot()
+    const r = b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-1', accion: 'aplicar', monto: 3600 }, { id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    expect(r.ok).toBe(false)
+    expect(snapshot()).toBe(antes)
+    expect(b.post('aplicarPlantillasFin', { mes: '2026-13', items: [{ id: 'pf-1' }] }).ok).toBe(false)
+  })
+
+  it('E: clonar crea una definición nueva sin vínculo, sin fuente, sin gastos ni dinero', () => {
+    caja(); plS({ origenId: 'c-hogar' })
+    const antes = snapshot()
+    expect(plS({ id: 'ps-copia', nombre: 'Servicios del Hogar (Copia)', origenId: '' }).ok).toBe(true)
+    const pls = datos().plantillasFin
+    expect(pls).toHaveLength(2)
+    expect(pls.find((p: unknown[]) => p[0] === 'ps-copia')[14]).toBe('')
+    expect(snapshot()).toBe(antes)
+  })
+
+  it('G: un reintento con el mismo ID no duplica la plantilla; H: el orden persiste sin tocar datos', () => {
+    plF(); plF(); expect(datos().plantillasFin).toHaveLength(1)
+    plF({ id: 'pf-2', nombre: 'Sodexo' }); plF({ id: 'pf-3', nombre: 'Extra' })
+    const antes = snapshot()
+    expect(b.post('reorderPlantillasFin', { tipo: 'fuente', ids: ['pf-3', 'pf-1', 'pf-2'] }).ok).toBe(true)
+    const orden = datos().plantillasFin.sort((a: unknown[], c: unknown[]) => (a[13] as number) - (c[13] as number)).map((p: unknown[]) => p[0])
+    expect(orden).toEqual(['pf-3', 'pf-1', 'pf-2'])
+    expect(snapshot()).toBe(antes)
+  })
+
+  it('eliminar una plantilla solo borra la definición (no la fuente ni lo aplicado)', () => {
+    caja(); plS({ origenId: 'c-hogar' })
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
+    expect(b.post('deletePlantillaFin', { id: 'ps-1' }).data.eliminada).toBe(true)
+    expect(b.post('deletePlantillaFin', { id: 'ps-1' }).data.eliminada).toBe(false)     // idempotente
+    expect(datos().plantillasFin).toHaveLength(0)
+    expect(datos().cajas.some((c: unknown[]) => c[0] === 'c-hogar')).toBe(true)
+    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
   })
 })

@@ -83,6 +83,22 @@ export interface Fuente {
 /** Importe de una fuente para un mes: "solo" = únicamente ese mes; "desde" = ese mes en adelante. */
 export interface FuenteMes { fuenteId: string; mes: string; monto: number; modo: 'solo' | 'desde' }
 
+/**
+ * Plantilla de fuente o de subcaja (v1.17): solo configuración reutilizable. Crearla, editarla o clonarla no crea dinero,
+ * fuentes, subcajas ni gastos. `origenId` enlaza con la fuente/subcaja original; `estados` dice qué pasó cada mes.
+ */
+export type TipoPlantillaFin = 'fuente' | 'subcaja'
+export type EstadoPlantillaMes = 'pendiente' | 'aplicada' | 'omitida'
+export interface PlantillaFin {
+  id: string; tipo: TipoPlantillaFin; nombre: string; monto: number
+  moneda: string; medios: string                                  // solo fuentes ('A|B' o vacío)
+  campo: string; valor: string                                     // solo subcajas (alcance)
+  descripcion: string; color: string; icono: string
+  recurrencia: Recurrencia; activo: boolean; orden: number
+  origenId: string; estados: Record<string, { e: 'aplicada' | 'omitida'; m: number }>
+  creadoEn: string; actualizadoEn: string
+}
+
 export interface AppData {
   gastos: Gasto[]
   catalogo: CatalogoItem[]
@@ -92,6 +108,7 @@ export interface AppData {
   /** Sin fuentes (instalaciones anteriores) el presupuesto sigue saliendo de la caja general. */
   fuentes?: Fuente[]
   fuentesMeses?: FuenteMes[]
+  plantillasFin?: PlantillaFin[]
   config: Record<string, string>
   /** Orden personalizado de la tabla de Gastos: [id, orden]. Se guarda aparte para no recalcular el dashboard. */
   ordenGastos?: [string, number][]

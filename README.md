@@ -28,6 +28,14 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.17.0
+
+- **Fuentes mensuales y Subcajas mensuales**: plantillas reutilizables (crear desde cero o desde una existente, editar, clonar, eliminar, activar/desactivar, reordenar, selección múltiple). Cada una se aplica a un mes concreto con importe temporal, vista previa y confirmación; estados *Pendiente / Aplicada / No aplica este mes*. Reaplicar no duplica; el importe predeterminado se conserva para los demás meses. Una subcaja solo reserva: nunca crea dinero.
+- **Guardar como plantilla** en el menú ⋯ de cada fuente y subcaja (deduplicado por ID; si ya existe se ofrece verla o editarla).
+- **Móvil compacto**: filas de Fuentes, Subcajas y Gastos mensuales en dos líneas, acciones deslizando (con botón y teclado como alternativa; Eliminar siempre pide confirmación). Menú «Agregar» del Catálogo anclado y dentro de la pantalla; los menús ⋯ ya funcionan dentro de modales.
+- **Persistencia**: una hoja nueva y ligera `PLANTILLAS_FINANCIERAS` (se crea al primer uso, con respaldo único); los meses aplicados reutilizan `FUENTES_MESES` y `PRESUPUESTOS`.
+- **Despliegue**: volver a desplegar `Code.gs` en Apps Script y publicar en Netlify.
+
 ## Novedades v1.16.0
 
 **Despliegue:** hay que volver a desplegar `Code.gs` en Apps Script (nueva acción `setEstadoLote`, zona horaria leída de `CONFIG`, comparación de token en tiempo constante) y publicar la web (Netlify). No cambia el esquema de la hoja.

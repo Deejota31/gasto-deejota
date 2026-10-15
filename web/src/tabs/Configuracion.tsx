@@ -11,7 +11,7 @@ import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { Preferencias } from '../components/Preferencias'
 
-export const APP_VERSION = '1.16.0'
+export const APP_VERSION = '1.17.0'
 
 export default function Configuracion({ store, conn, onConnect, notify, goCatalogo }: {
   store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
