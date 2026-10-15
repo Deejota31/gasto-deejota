@@ -28,6 +28,18 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.20.0 — «Prepara tu mes» continuo y estados sincronizados
+
+Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo).**
+
+- **Causa raíz**: el asistente se cerraba al abrir Fuentes/Subcajas/Gastos mensuales y, al volver, solo se marcaba una casilla local; el estado de cada etapa no salía de lo guardado, y «Se creará» se calculaba con la plantilla en vez de con la aplicación real del mes.
+- **Flujo continuo**: el asistente queda montado (oculto) mientras el módulo hijo está abierto y reaparece al aplicar, con la etapa en «Completada» y el botón «Continuar con …». Solo los accesos nacidos del plan vuelven al asistente; abrir un módulo desde Cajas se cierra normalmente.
+- **Estados**: Pendiente / En progreso / Completada / Omitida / Error (texto + color + icono). Se guardan **por mes** en CONFIG (`plan_est_AAAA-MM`, sin hojas nuevas) y solo pasan a Completada tras la confirmación del backend **y** la relectura de Sheets (`verificarPlantillasAplicadas`).
+- **Aplicada vs. Se creará**: el estado de cada plantilla sale de la aplicación real del mes (FUENTES_MESES / PRESUPUESTOS); la vista previa muestra la operación: *Crear aplicación mensual*, *Actualizar aplicación existente*, *Sin cambios*, *Omitir*. Los meses anteriores al corte conservan su comportamiento histórico y no se reescriben.
+- **Modales estables**: confirmación sobre el módulo con estado de carga, error con «Reintentar», y Escape/X/clic fuera bloqueados mientras se guarda.
+- **Resumen real**: conteos y totales leídos de los datos, indicadores y accesos «Revisar …»; «Finalizar» solo guarda el estado (no vuelve a crear nada) y lo omitido no se muestra como ejecutado.
+- Pruebas: `e2e/v120.spec.ts`, `src/lib/planificar.test.ts` y el test de paridad de IDs frontend↔backend en `backend.test.ts`.
+
 ## Novedades v1.19.2 / v1.19.0
 
 - **Aislamiento por mes:** desde **noviembre de 2026** (CONFIG `aislamiento_desde`, `9999-12` lo apaga) cada mes tiene sus propias fuentes y subcajas *aplicadas*: nada se arrastra solo. Una fuente cuenta en un mes solo si tiene su fila `solo` en `FUENTES_MESES` (o es de un único mes); una subcaja, solo si tiene su fila en `PRESUPUESTOS`. Los meses anteriores conservan exactamente su comportamiento histórico (no se inventa historial ni hay migración). Editar noviembre no cambia octubre ni diciembre.

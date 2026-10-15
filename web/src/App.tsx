@@ -19,6 +19,7 @@ import type { Filters } from './lib/types'
 import Gastos from './tabs/Gastos'
 import Catalogo from './tabs/Categorias'
 import { usePlanificacion } from './components/Planificacion'
+import type { ContextoPlan } from './lib/planificar'
 import { usePlantillasFin } from './components/PlantillasFin'
 import Configuracion, { APP_VERSION } from './tabs/Configuracion'
 
@@ -38,12 +39,12 @@ export default function App({ api }: { api?: Api }) {
   // "Revisar movimiento" desde Salud financiera: abre Gastos con ese movimiento resaltado y su formulario, y permite volver.
   const [foco, setFoco] = useState<{ id: string; desde: TabId } | null>(null)
   const irATab = useCallback((t: TabId) => { setTab(t); if (t !== 'gastos') setFoco(null) }, [])
-  const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number }>(false)
+  const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number; ctx?: ContextoPlan }>(false)
   const tz = store.data?.config.zona_horaria || 'America/Lima'
   const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
   // Planificación mensual (v1.19): campana, asistente y resumen globales. Las plantillas se abren desde el asistente.
   const plantillasApp = usePlantillasFin(store, today.slice(0, 7))
-  const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: () => setPlantillasOpen({ key: Date.now() }), onPlantillas: t => plantillasApp.abrir(t), onConfigurar: () => irATab('config') })
+  const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: ctx => setPlantillasOpen({ key: Date.now(), ctx }), onPlantillas: (t, ctx) => plantillasApp.abrir(t, { modo: 'lista' }, ctx), onConfigurar: () => irATab('config') })
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
   const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
 
@@ -151,8 +152,10 @@ export default function App({ api }: { api?: Api }) {
 
       {modal && <GastoModal key={modal.key} store={store} mode={modal.mode} gasto={modal.gasto} draft={modal.draft} preset={modal.preset} onClose={() => setModal(null)} onSubmit={submitGasto} />}
       {/* "Usar" cierra las plantillas y abre el mismo formulario de Nuevo gasto con los datos precargados. */}
-      {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} onClose={() => setPlantillasOpen(false)}
-        onUse={p => { setPlantillasOpen(false); openGasto('create', null, undefined, p) }}
+      {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} ctx={plantillasOpen.ctx}
+        onClose={() => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onCerrar() }}
+        onRegistrado={r => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onAplicado(r) }}
+        onUse={p => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onCerrar(); openGasto('create', null, undefined, p) }}
         onReopen={draft => { setModal(null); setPlantillasOpen({ draft, key: Date.now() }) }} />}
       {plan.nodo}
       {plantillasApp.nodo}

@@ -1901,3 +1901,35 @@ describe('plantillas de fuentes y subcajas: hojas propias e IDs reales (v1.19)',
     expect(plF({ nombre: 'aporte de pareja' }).ok).toBe(false)             // nombre repetido sigue prohibido
   })
 })
+
+describe('v1.20: el frontend deduce el mismo ID de entidad que crea el backend (idEntidadPlantilla ↔ pfIdSeguro_)', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const ids = ['pf-4e870b82-7519-44dc-b406-8bad102c664e', 'pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', 'ps-1', 'pf-' + 'x'.repeat(58), 'pf-ok_con-guion']
+  for (const tipo of ['fuente', 'subcaja'] as const) {
+    it(`${tipo}: crea la entidad con el ID que predice el frontend, y las plantillas aplicadas figuran «aplicadas» sin recalcular`, async () => {
+      const { idEntidadPlantilla, estadoRealPlantilla, operacionPlantilla } = await import('./lib/planificar')
+      ids.forEach((id, i) => {
+        const r = b.post('savePlantillaFin', tipo === 'fuente'
+          ? { id, tipo, nombre: `Fuente ${i}`, monto: 100 + i, moneda: 'PEN', medios: '', recurrencia: 'mensual' }
+          : { id, tipo, nombre: `Subcaja ${i}`, monto: 100 + i, campo: 'Categoría', valor: `Valor ${i}` })
+        expect(r.ok, JSON.stringify(r)).toBe(true)
+      })
+      expect(b.post('aplicarPlantillasFin', { mes: '2026-11', items: ids.map((id, i) => ({ id, accion: 'aplicar', monto: 100 + i })) }).ok).toBe(true)
+      const fresco = b.post('data', { fresh: true }).data
+      const entidades: string[] = (tipo === 'fuente' ? fresco.fuentes : fresco.cajas).map((x: unknown[]) => String(x[0]))
+      ids.forEach(id => expect(entidades, id).toContain(idEntidadPlantilla({ id, tipo })))
+      // Y con la lectura real (ya parseada por el frontend) el estado y la operación salen coherentes.
+      const api = createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw new Error(x.error.message); return x.data })
+      const parsed = await api.getData(true)
+      const pls = parsed.plantillasFin ?? []
+      expect(pls).toHaveLength(ids.length)
+      for (const p of pls) {
+        expect(estadoRealPlantilla(p, '2026-11', parsed)).toBe('aplicada')
+        expect(operacionPlantilla(p, '2026-11', p.monto, parsed).op).toBe('sin_cambios')
+        expect(operacionPlantilla(p, '2026-11', p.monto + 1, parsed).op).toBe('actualizar')
+        expect(estadoRealPlantilla(p, '2026-12', parsed)).toBe('pendiente')
+      }
+    })
+  }
+})

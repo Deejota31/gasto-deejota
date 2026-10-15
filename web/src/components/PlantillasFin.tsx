@@ -10,7 +10,8 @@ import {
 import type { AppStore } from '../lib/store'
 import type { PlantillaFinInput } from '../lib/api'
 import type { AppData, Caja, PlantillaFin, TipoPlantillaFin } from '../lib/types'
-import { aislaDesde, budgetCents, fuenteMontoMes } from '../lib/engine'
+import { entidadDePlantilla, estadoRealPlantilla, operacionPlantilla, ETIQUETA_OPERACION, verificarPlantillasAplicadas, type ContextoPlan, type OperacionPlantilla } from '../lib/planificar'
+import { nombreMes } from '../lib/plan'
 import { formatMoney, toCents } from '../lib/money'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
@@ -44,16 +45,19 @@ export const estadoEnMes = (p: PlantillaFin, mes: string): 'pendiente' | 'aplica
  * Si ya hay una plantilla vinculada a ese registro no se crea otra: se avisa y se ofrece verla o editarla.
  */
 export function usePlantillasFin(store: AppStore, hoyMes: string) {
-  const [ui, setUi] = useState<{ tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; key: number } | null>(null)
+  const [ui, setUi] = useState<{ tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; key: number; ctx?: ContextoPlan } | null>(null)
   const [yaExiste, setYaExiste] = useState<PlantillaFin | null>(null)
-  const abrir = (tipo: TipoPlantillaFin, inicio: InicioPlantillasFin = { modo: 'lista' }) => setUi({ tipo, inicio, key: Date.now() })
+  /** `ctx` = se abrió desde «Prepara tu mes»: al terminar (o cerrar) se avisa al asistente para que recupere su contexto. */
+  const abrir = (tipo: TipoPlantillaFin, inicio: InicioPlantillasFin = { modo: 'lista' }, ctx?: ContextoPlan) => setUi({ tipo, inicio, key: Date.now(), ctx })
   const guardarComoPlantilla = (tipo: TipoPlantillaFin, origenId: string) => {
     const ex = (store.data?.plantillasFin ?? []).find(p => p.tipo === tipo && p.origenId === origenId)
     if (ex) setYaExiste(ex); else abrir(tipo, { modo: 'nueva', origenId })
   }
   const nodo = (
     <>
-      {ui && <PlantillasFinModal key={ui.key} store={store} tipo={ui.tipo} inicio={ui.inicio} hoyMes={hoyMes} onClose={() => setUi(null)} />}
+      {ui && <PlantillasFinModal key={ui.key} store={store} tipo={ui.tipo} inicio={ui.inicio} hoyMes={ui.ctx?.mes ?? hoyMes} ctx={ui.ctx}
+        onClose={() => { const c = ui.ctx; setUi(null); c?.onCerrar() }}
+        onAplicado={r => { const c = ui.ctx; setUi(null); c?.onAplicado(r) }} />}
       {yaExiste && (
         <Modal open onClose={() => setYaExiste(null)} size="sm" title="Ya existe una plantilla" icon={<Info className="size-5" />}
           footer={<>
@@ -71,36 +75,39 @@ export function usePlantillasFin(store: AppStore, hoyMes: string) {
 
 /* ----------------------------- Efecto de aplicar (vista previa) ----------------------------- */
 
-function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { txt: string; cambia: boolean } {
+function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { txt: string; cambia: boolean; op: OperacionPlantilla } {
   const ml = monthLabel(mes, true)
+  const o = operacionPlantilla(p, mes, monto, data)
+  const ent = entidadDePlantilla(p, data)
+  const nombre = ent?.nombre ?? p.nombre
   if (p.tipo === 'fuente') {
-    const f = (data.fuentes ?? []).find(x => x.id === p.origenId)
     const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
-    if (!f) return { txt: `Se creará la fuente “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))}. No se duplica si ya existe.`, cambia: true }
-    const ef = fuenteMontoMes(f, mes, data.fuentesMeses ?? [], aislaDesde(data.config)).monto
-    return toCents(ef) === toCents(monto) ? { txt: `Sin cambios: ${f.nombre} ya aporta ${m(toCents(ef))} en ${ml}.`, cambia: false }
-      : { txt: `Ajuste solo de ${ml}: ${m(toCents(ef))} → ${m(toCents(monto))}. Otros meses no cambian.`, cambia: true }
+    if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la fuente “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
+    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La fuente ${nombre} ya existe, pero aún no está aplicada a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
+    if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya aporta ${m(o.actual ?? 0)} en ${ml}.` }
+    return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
   }
-  const c = data.cajas.find(x => x.id === p.origenId)
   const mon = data.config.moneda || 'PEN'
-  if (!c) return { txt: `Se creará la subcaja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)}. Reserva dinero ya existente; no lo crea.`, cambia: true }
-  const ef = budgetCents(c, mes, data.presupuestos, aislaDesde(data.config))
-  return ef === toCents(monto) ? { txt: `Sin cambios: ${c.nombre} ya reserva ${formatMoney(ef, mon)} en ${ml}.`, cambia: false }
-    : { txt: `Reserva de ${ml}: ${formatMoney(ef, mon)} → ${formatMoney(toCents(monto), mon)}. Otros meses no cambian.`, cambia: true }
+  if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la subcaja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)} en ${ml}. Reserva dinero ya existente; no lo crea.` }
+  if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La subcaja ${nombre} ya existe, pero aún no reserva en ${ml}: se creará su aplicación mensual con ${formatMoney(toCents(monto), mon)}.` }
+  if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya reserva ${formatMoney(o.actual ?? 0, mon)} en ${ml}.` }
+  return { op: o.op, cambia: true, txt: `Reserva de ${ml}: ${formatMoney(o.actual ?? 0, mon)} → ${formatMoney(toCents(monto), mon)}. Otros meses no cambian.` }
 }
 
 const BADGE = {
   pendiente: { txt: 'Pendiente', fg: 'var(--warning)', bg: 'var(--warning-soft)' },
   aplicada: { txt: 'Aplicada', fg: 'var(--success)', bg: 'var(--success-soft)' },
   omitida: { txt: 'No aplica este mes', fg: '#64748B', bg: 'var(--bg)' },
+  historica: { txt: 'Config. histórica', fg: 'var(--navy)', bg: 'var(--primary-soft)' },
 } as const
 
 /* ----------------------------------- Modal principal ----------------------------------- */
 
 type Vista = { kind: 'lista' } | { kind: 'form'; plantilla: PlantillaFin | null; origenId?: string; existente?: boolean; clonDe?: PlantillaFin }
 
-export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose }: {
+export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, onAplicado }: {
   store: AppStore; tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; hoyMes: string; onClose: () => void
+  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void
 }) {
   const data = store.data
   const T = TXT[tipo]
@@ -129,7 +136,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose }: {
   }
   return (
     <>
-      <ListaPlantillas store={store} tipo={tipo} items={todas} hoyMes={hoyMes} onClose={onClose}
+      <ListaPlantillas store={store} tipo={tipo} items={todas} hoyMes={hoyMes} onClose={onClose} ctx={ctx} onAplicado={onAplicado}
         onForm={(plantilla, extra) => setVista({ kind: 'form', plantilla, ...extra })} onBorrar={setBorrar} />
       {borrar && (
         <Modal open onClose={() => setBorrar(null)} size="sm" title="Eliminar plantilla" icon={<Trash2 className="size-5" />}
@@ -150,8 +157,9 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose }: {
 
 /* ------------------------------------- Lista ------------------------------------- */
 
-function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar }: {
+function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado, onForm, onBorrar }: {
   store: AppStore; tipo: TipoPlantillaFin; items: PlantillaFin[]; hoyMes: string; onClose: () => void
+  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void
   onForm: (p: PlantillaFin | null, extra?: { origenId?: string; existente?: boolean; clonDe?: PlantillaFin }) => void; onBorrar: (p: PlantillaFin) => void
 }) {
   const data = store.data!
@@ -164,6 +172,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
   const [detalle, setDetalle] = useState(false)
   const [confirmar, setConfirmar] = useState(false)
   const [errores, setErrores] = useState<Record<string, string>>({})
+  const [errorAplicar, setErrorAplicar] = useState<string | null>(null)
   const monedaPrincipal = data.config.moneda || 'PEN'
   const term = normName(q)
   const visibles = items.filter(p => !term || normName(`${p.nombre} ${p.medios} ${p.valor}`).includes(term))
@@ -175,7 +184,12 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
   const porId = new Map(visibles.map(p => [p.id, p]))
   const filas = (puedeOrdenar ? dnd.orden : visibles.map(p => p.id)).map(id => porId.get(id)).filter((p): p is PlantillaFin => !!p)
 
-  const montoDe = (p: PlantillaFin) => valores[p.id] ?? String(p.estados[mes]?.e === 'aplicada' ? p.estados[mes].m : p.monto)
+  const montoDe = (p: PlantillaFin) => {
+    if (valores[p.id] !== undefined) return valores[p.id]
+    const real = estadoRealPlantilla(p, mes, data)
+    if (real === 'aplicada' || real === 'historica') { const o = operacionPlantilla(p, mes, p.monto, data); if (o.actual !== null) return String(o.actual / 100) }
+    return String(p.estados[mes]?.e === 'aplicada' ? p.estados[mes].m : p.monto)
+  }
   const valido = (p: PlantillaFin) => AMOUNT.test(montoDe(p).trim()) && Number(montoDe(p).replace(',', '.')) >= 0
   const numero = (p: PlantillaFin) => Number(montoDe(p).replace(',', '.'))
   const moneda = (p: PlantillaFin) => (p.tipo === 'fuente' ? p.moneda || 'PEN' : monedaPrincipal)
@@ -184,22 +198,32 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
   for (const p of elegidas) if (valido(p)) totales.set(moneda(p), (totales.get(moneda(p)) ?? 0) + toCents(numero(p)))
   const mesLabel = monthLabel(mes, true)
 
-  const aplicar = (ps: PlantillaFin[], accion: 'aplicar' | 'omitir' | 'pendiente' = 'aplicar') => {
+  type CbAplicar = (ok: boolean, error?: string) => void
+  const aplicar = (ps: PlantillaFin[], accion: 'aplicar' | 'omitir' | 'pendiente' = 'aplicar', cb?: CbAplicar) => {
     if (accion === 'aplicar') {
       const malas = ps.filter(p => !valido(p))
       if (malas.length) { setErrores(Object.fromEntries(malas.map(p => [p.id, 'Monto inválido']))); return false }
     }
-    setErrores({})
+    setErrores({}); setErrorAplicar(null)
     const n = ps.length
     const verbo = accion === 'aplicar' ? 'aplicada' : accion === 'omitir' ? 'marcada como “No aplica este mes”' : 'devuelta a Pendiente'
+    const pedidas = ps.map(p => ({ plantilla: p, monto: numero(p) }))
     return store.track(`pf:aplicar:${tipo}:${mes}:${accion}:${ps.map(p => p.id).join(',')}`,
       { pending: accion === 'aplicar' ? `Aplicando ${n} plantilla${n === 1 ? '' : 's'} a ${mesLabel}…` : 'Guardando…', ok: `${n} plantilla${n === 1 ? '' : 's'} ${verbo}${n === 1 ? '' : 's'} en ${mesLabel}.`.replace('ass ', 'as '), error: 'No se pudo confirmar la operación. Puedes reintentar sin riesgo de duplicar nada.' },
       async () => {
-        await store.actions.aplicarPlantillasFin(mes, ps.map(p => ({ id: p.id, accion, ...(accion === 'aplicar' ? { monto: numero(p) } : {}) })))
+        const r = await store.actions.aplicarPlantillasFin(mes, ps.map(p => ({ id: p.id, accion, ...(accion === 'aplicar' ? { monto: numero(p) } : {}) })))
+        if (accion === 'aplicar') {
+          // Verificación contra la relectura de Sheets: no se da por aplicado lo que no quedó guardado.
+          const problemas = verificarPlantillasAplicadas({ ...data, ...r.datos }, pedidas.map(x => ({ plantilla: r.plantillas.find(y => y.id === x.plantilla.id) ?? x.plantilla, monto: x.monto })), mes)
+          if (problemas.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${problemas.join(' ')}`)
+        }
         setValores(v => { const x = { ...v }; ps.forEach(p => delete x[p.id]); return x })
         if (accion === 'aplicar') setSel(s => s.filter(id => !ps.some(p => p.id === id)))
-      })
+      }, { onDone: (ok, error) => { if (!ok) setErrorAplicar(error ?? 'No se pudo confirmar la operación.'); cb?.(ok, error) } })
   }
+  const aplicarFila = (ps: PlantillaFin[]) => aplicar(ps, 'aplicar', ok => { if (ok && ctx && ctx.mes === mes) onAplicado?.({ mes, n: ps.length }) })
+  // Mientras se guarda no se cierra el módulo (Escape, X o clic fuera): evita perder el resultado de un guardado crítico.
+  const cerrar = () => { if (!enviando) onClose() }
 
   const alternarActiva = (p: PlantillaFin) => store.track(`pf:${p.id}`, { pending: 'Guardando…', ok: `${p.nombre} ${p.activo ? 'desactivada' : 'activada'}.`, error: 'No se pudo cambiar el estado.' },
     () => store.actions.savePlantillaFin({ ...p, medios: p.medios, activo: !p.activo }))
@@ -210,9 +234,9 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
     { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-4" />, onClick: () => onBorrar(p), danger: true },
   ]
   const accionesEstado = (p: PlantillaFin): AccionMenu[] => {
-    const e = estadoEnMes(p, mes)
+    const e = estadoRealPlantilla(p, mes, data)
     return [
-      { key: 'apply', label: e === 'aplicada' ? 'Actualizar importe' : 'Aplicar', icon: <Check className="size-3.5" />, onClick: () => aplicar([p]), disabled: !p.activo },
+      { key: 'apply', label: e === 'aplicada' ? 'Actualizar importe' : 'Aplicar', icon: <Check className="size-3.5" />, onClick: () => aplicarFila([p]), disabled: !p.activo },
       { key: 'omit', label: 'No aplica este mes', icon: <Ban className="size-3.5" />, onClick: () => aplicar([p], 'omitir'), disabled: e === 'omitida' },
       { key: 'pend', label: 'Volver a Pendiente', icon: <RotateCcw className="size-3.5" />, onClick: () => aplicar([p], 'pendiente'), disabled: e === 'pendiente' },
       { key: 'toggle', label: p.activo ? 'Desactivar plantilla' : 'Activar plantilla', icon: <Power className="size-3.5" />, onClick: () => alternarActiva(p) },
@@ -226,9 +250,9 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
 
   const Resumen = (
     <ol className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-line bg-card p-2 text-xs" aria-label="Detalle de lo que se aplicará">
-      {previa.map(({ p, monto, txt }) => (
-        <li key={p.id} className="space-y-0.5 border-b border-line/60 pb-1 last:border-0 last:pb-0">
-          <p className="flex justify-between gap-3"><span className="truncate font-medium">{p.nombre}</span><span className="tabular shrink-0 font-semibold">{formatMoney(toCents(monto), moneda(p))}</span></p>
+      {previa.map(({ p, monto, txt, op }) => (
+        <li key={p.id} className="space-y-0.5 border-b border-line/60 pb-1 last:border-0 last:pb-0" data-operacion={op}>
+          <p className="flex justify-between gap-3"><span className="truncate font-medium">{p.nombre} <span className="ml-1 rounded-full bg-bg px-1.5 py-0.5 text-[10px] font-semibold text-muted" data-testid="pf-operacion">{ETIQUETA_OPERACION[op]}</span></span><span className="tabular shrink-0 font-semibold">{formatMoney(toCents(monto), moneda(p))}</span></p>
           <p className="text-muted">{txt}</p>
         </li>
       ))}
@@ -236,7 +260,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
   )
 
   return (
-    <Modal open onClose={onClose} size="xl" title={T.titulo} subtitle={`${T.sub}. Aplica cada una al mes que elijas.`} icon={<T.Icon className="size-5" />}
+    <Modal open onClose={cerrar} bloqueado={enviando} size="xl" title={T.titulo} subtitle={ctx ? `${T.sub}. Aplicando a ${nombreMes(mes)} desde «Prepara tu mes».` : `${T.sub}. Aplica cada una al mes que elijas.`} icon={<T.Icon className="size-5" />}
       footer={
         <div className="w-full space-y-2" data-testid="pf-footer">
           {detalle && n > 0 && Resumen}
@@ -258,9 +282,13 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
       }>
       <div className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
-          <Field label="Mes a aplicar" htmlFor="pf-mes">
-            <div className="w-48"><MonthPicker id="pf-mes" value={mes} onChange={v => { setMes(v); setValores({}); setErrores({}) }} today={`${hoyMes}-01`} label="Mes a aplicar" /></div>
-          </Field>
+          {ctx ? (
+            <p className="rounded-xl bg-primary-soft px-3 py-2 text-xs font-semibold text-navy" data-testid="pf-mes-plan">Mes de la planificación: {nombreMes(ctx.mes)}</p>
+          ) : (
+            <Field label="Mes a aplicar" htmlFor="pf-mes">
+              <div className="w-48"><MonthPicker id="pf-mes" value={mes} onChange={v => { setMes(v); setValores({}); setErrores({}) }} today={`${hoyMes}-01`} label="Mes a aplicar" /></div>
+            </Field>
+          )}
           <MenuAcciones label="Nueva plantilla" ancho={270}
             triggerClass={claseBoton('primary')}
             trigger={<><Plus className="size-4" /> Nueva plantilla <ChevronDown className="size-4" /></>}
@@ -278,7 +306,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <ListChecks className="size-4 text-muted" />
           <button type="button" className="rounded-lg px-2 py-1 font-medium text-navy hover:bg-primary-soft" onClick={() => setSel(s => todasSel ? s.filter(id => !filas.some(p => p.id === id)) : [...new Set([...s, ...filas.filter(p => p.activo).map(p => p.id)])])}>{todasSel ? 'Quitar selección' : `Seleccionar ${term ? 'visibles' : 'todas'} (${filas.filter(p => p.activo).length})`}</button>
-          <button type="button" className="rounded-lg px-2 py-1 font-medium text-navy hover:bg-primary-soft" onClick={() => setSel(items.filter(p => p.activo && estadoEnMes(p, mes) === 'pendiente').map(p => p.id))}>Solo pendientes</button>
+          <button type="button" className="rounded-lg px-2 py-1 font-medium text-navy hover:bg-primary-soft" onClick={() => setSel(items.filter(p => p.activo && estadoRealPlantilla(p, mes, data) === 'pendiente').map(p => p.id))}>Solo pendientes</button>
           <span className="ml-auto text-[11px] text-muted">{puedeOrdenar ? 'Arrastra ⠿ para ordenar.' : term ? 'Quita la búsqueda para reordenar.' : ''}</span>
         </div>
         <AvisoOrden texto={dnd.aviso} />
@@ -291,7 +319,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
           <ul aria-label={`Plantillas de ${T.una}s`} className="divide-y divide-line/70 overflow-hidden rounded-xl border border-line" data-testid="pf-lista">
             {filas.map(p => {
               const look = p.tipo === 'fuente' ? fuenteLook({ nombre: p.nombre, medioPago: p.medios, icono: p.icono, color: p.color }) : cajaLook({ filtroCampo: p.campo as Caja['filtroCampo'], filtroValor: p.valor, color: p.color, icono: p.icono }, data.catalogo)
-              const e = estadoEnMes(p, mes)
+              const e = estadoRealPlantilla(p, mes, data)
               const b = BADGE[e]
               const busy = store.pending.has(`pf:${p.id}`)
               const on = sel.includes(p.id)
@@ -313,7 +341,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
                       </div>
                       <div className="col-start-4 row-start-1 md:col-start-6">
                         <Button variant={e === 'aplicada' ? 'outline' : 'primary'} className="h-10 px-3 text-sm md:h-8 md:px-2.5 md:text-xs" disabled={!p.activo || busy || (e === 'aplicada' && valores[p.id] === undefined)}
-                          aria-label={`${e === 'aplicada' ? 'Actualizar' : 'Aplicar'} ${p.nombre} a ${mesLabel}`} onClick={() => aplicar([p])}>
+                          aria-label={`${e === 'aplicada' ? 'Actualizar' : 'Aplicar'} ${p.nombre} a ${mesLabel}`} onClick={() => aplicarFila([p])}>
                           {e === 'aplicada' ? (valores[p.id] === undefined ? <><Check className="size-4" /> Lista</> : 'Actualizar') : 'Aplicar'}
                         </Button>
                       </div>
@@ -347,14 +375,23 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
       </div>
 
       {confirmar && (
-        <Modal open onClose={() => setConfirmar(false)} size="md" title={`Aplicar a ${mesLabel}`} icon={<CalendarDays className="size-5" />}
+        <Modal open onClose={() => { if (!enviando) { setConfirmar(false); setErrorAplicar(null) } }} bloqueado={enviando} size="md" title={`Aplicar a ${mesLabel}`} icon={<CalendarDays className="size-5" />}
           footer={<>
-            <Button variant="outline" onClick={() => setConfirmar(false)}>Cancelar</Button>
-            <Button disabled={enviando} onClick={() => { if (aplicar(elegidas)) setConfirmar(false) }}>{enviando ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Confirmar y aplicar</Button>
+            <Button variant="outline" disabled={enviando} onClick={() => { setConfirmar(false); setErrorAplicar(null) }}>Cancelar</Button>
+            <Button disabled={enviando} onClick={() => {
+              const hechas = elegidas.length
+              // El diálogo se queda abierto con estado de carga hasta que el backend confirme; si falla, muestra el error y deja reintentar.
+              aplicar(elegidas, 'aplicar', ok => {
+                if (!ok) return
+                setConfirmar(false)
+                if (ctx && ctx.mes === mes) onAplicado?.({ mes, n: hechas })
+              })
+            }}>{enviando ? <Loader2 className="size-4 animate-spin" /> : errorAplicar ? <RotateCcw className="size-4" /> : <Check className="size-4" />} {enviando ? 'Guardando…' : errorAplicar ? 'Reintentar' : 'Confirmar y aplicar'}</Button>
           </>}>
           <div className="space-y-2" data-testid="pf-vista-previa">
             <p className="text-sm">Vista previa de lo que se escribirá. Solo cambia <b>{mesLabel}</b>; volver a aplicar no duplica nada.</p>
             {Resumen}
+            {errorAplicar && <p className="rounded-xl px-3 py-2 text-xs font-medium" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }} role="alert" data-testid="pf-error-aplicar">{errorAplicar}</p>}
           </div>
         </Modal>
       )}

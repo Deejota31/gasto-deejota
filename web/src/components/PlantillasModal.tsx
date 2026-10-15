@@ -20,6 +20,8 @@ import { showToast } from '../lib/toast'
 import { ClasificacionPicker, clasificacionVigente, ConfirmarDescripcion, useDescripcionSub, type Clasif } from './Clasificacion'
 import { Combobox, type Opcion } from './Combobox'
 import type { GastoPreset } from './GastoModal'
+import type { ContextoPlan } from '../lib/planificar'
+import { nombreMes } from '../lib/plan'
 import { type AccionMenu } from './MenuAcciones'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
 import { SwipeFila, useEsMovil } from './swipe'
@@ -41,8 +43,10 @@ const opcionesMedio = (medios: string[], actual: string, vacio?: string): Opcion
 ]
 const montoTxt = (n: number | null) => (n === null ? '' : n.toFixed(2))
 
-export default function PlantillasModal({ store, onClose, onUse, draft, onReopen }: {
+export default function PlantillasModal({ store, onClose, onUse, draft, onReopen, ctx, onRegistrado }: {
   store: AppStore; onClose: () => void; onUse: (p: GastoPreset) => void
+  /** Abierto desde «Prepara tu mes»: al confirmarse el registro en Sheets se avisa al asistente (onRegistrado). */
+  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void
   /** Reabrir tras un error al guardar una plantilla: vuelve al formulario con lo que habías escrito. */
   draft?: PlantillaDraft; onReopen: (d: PlantillaDraft) => void
 }) {
@@ -91,13 +95,14 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
       </Modal>
     )
   }
-  return <Lista store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} />
+  return <Lista store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} ctx={ctx} onRegistrado={onRegistrado} />
 }
 
 /* ============================== Lista + lote ============================== */
 
-function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
+function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRegistrado }: {
   store: AppStore; items: Plantilla[]; loaded: boolean; error: string | null; onClose: () => void; onUse: (p: GastoPreset) => void; setView: (v: View) => void
+  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void
 }) {
   const { lote, setLote } = store
   const cfg = store.data?.config ?? {}
@@ -192,6 +197,10 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
         error: 'No se pudo confirmar el registro de los gastos. Puedes reintentar sin riesgo de duplicarlos.' },
       async () => {
         const r = await store.registrarLote(loteId, gastos)
+        // Confirmación del backend: cada gasto pedido debe volver guardado. Si falta alguno no se da por registrado.
+        const guardados = new Set(r.gastos.map(g => g.id))
+        const faltan = gastos.filter(g => !guardados.has(g.id)).length
+        if (faltan) throw new Error(`Google Sheets no confirmó ${faltan} de ${gastos.length} gasto${gastos.length === 1 ? '' : 's'}.`)
         if (r.yaExistian > 0) showToast('info', `${r.yaExistian} de ${r.solicitados} ya estaban registrados de un intento anterior: no se duplicaron ni se modificaron.`)
         // Confirmado: se limpia solo lo registrado. Las plantillas y sus valores predeterminados no cambian.
         setLote(l => {
@@ -199,7 +208,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
           usadas.forEach(id => { delete valores[id]; delete ids[id] })
           return { ...l, seleccion: l.seleccion.filter(id => !usadas.includes(id)), valores, gastoIds: ids, loteId: store.nuevoLote().loteId }
         })
-      })
+      }, { onDone: ok => { if (ok && ctx) onRegistrado?.({ mes: ctx.mes, n }) } })
   }
 
   const n = elegidas.length
@@ -209,7 +218,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
   const filas = (puedeOrdenar ? dnd.orden : visibles.map(p => p.id)).map(id => porId.get(id)).filter((p): p is Plantilla => !!p)
 
   return (
-    <Modal open onClose={onClose} size="xl" title="Gastos mensuales" subtitle="Prepara y registra tus gastos frecuentes" icon={<CalendarDays className="size-5" />}
+    <Modal open onClose={() => { if (!enviando) onClose() }} bloqueado={enviando} size="xl" title="Gastos mensuales" subtitle={ctx ? `Registra tus gastos frecuentes de ${nombreMes(ctx.mes)} desde «Prepara tu mes»` : 'Prepara y registra tus gastos frecuentes'} icon={<CalendarDays className="size-5" />}
       footer={
         <div className="w-full space-y-2">
           {detalle && n > 0 && (

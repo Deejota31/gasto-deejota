@@ -225,8 +225,10 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
   )
 }
 
-export function Modal({ open, onClose, title, subtitle, icon, children, footer, size = 'md' }: {
+export function Modal({ open, onClose, title, subtitle, icon, children, footer, size = 'md', bloqueado }: {
   open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl'
+  /** Guardado crítico en curso: Escape y el botón Cerrar no cierran el diálogo (evita perder el resultado). */
+  bloqueado?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useModalLayer(open)
@@ -238,7 +240,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
   }, [open])
   const w = { sm: 'w-[min(26rem,calc(100vw-1.5rem))]', md: 'w-[min(36rem,calc(100vw-1.5rem))]', lg: 'w-[min(44rem,calc(100vw-1.5rem))]', xl: 'w-[min(64rem,calc(100vw-1.5rem))]' }[size]
   return (
-    <dialog ref={ref} onClose={onClose} className={`m-auto max-h-[calc(100dvh-2rem)] ${w} overflow-hidden rounded-2xl border border-line bg-card p-0 text-ink shadow-2xl`}>
+    <dialog ref={ref} onClose={onClose} onCancel={e => { if (bloqueado) e.preventDefault() }} className={`m-auto max-h-[calc(100dvh-2rem)] ${w} overflow-hidden rounded-2xl border border-line bg-card p-0 text-ink shadow-2xl`}>
       {open && (
         <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
           <div className="flex items-start gap-3 border-b border-line px-5 py-4">
@@ -247,7 +249,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
               <h2 className="text-base font-semibold">{title}</h2>
               {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
             </div>
-            <IconButton label="Cerrar" onClick={onClose}><X className="size-4" /></IconButton>
+            <IconButton label="Cerrar" onClick={bloqueado ? () => undefined : onClose}><X className="size-4" /></IconButton>
           </div>
           {/* Al abrirse el teclado del teléfono, el campo enfocado se mantiene visible dentro del área desplazable. */}
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5"

@@ -201,7 +201,8 @@ test.describe('v1.17: Fuentes mensuales', () => {
     await expect(page.getByTestId('pf-estado').first()).toHaveText('No aplica este mes')
     await page.getByTestId('pf-estado').first().click()
     await page.getByRole('menuitem', { name: 'Volver a Pendiente' }).click()
-    await expect(page.getByTestId('pf-estado').first()).toHaveText('Pendiente')
+    // v1.20: en un mes anterior al corte la fuente ya creada rige por su configuración histórica (no se muestra como «Pendiente»).
+    await expect(page.getByTestId('pf-estado').first()).toHaveText('Config. histórica')
   })
 
   test('clonar, reordenar con Subir/Bajar vía swipe/menú y eliminar solo la plantilla', async ({ page }) => {
@@ -250,7 +251,7 @@ test.describe('v1.17: Subcajas mensuales', () => {
     await expect(dialog(page).locator('#pf-nombre')).not.toHaveValue('')
     await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
     await expect(page.getByTestId('pf-fila')).toHaveCount(1)
-    await expect(page.getByTestId('pf-estado').first()).toHaveText('Pendiente')
+    await expect(page.getByTestId('pf-estado').first()).toHaveText('Config. histórica')   // v1.20: la subcaja ya existe y rige en meses previos al corte
   })
 
   test('Guardar como plantilla desde una subcaja y aviso si ya existe', async ({ page }) => {
