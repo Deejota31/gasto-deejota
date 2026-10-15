@@ -8,7 +8,13 @@ import type { AppData, Caja, Fuente, PlantillaFin } from './types'
 export type TipoEntidad = 'fuente' | 'subcaja'
 
 /** Origen de una operación lanzada desde «Prepara tu mes»: el módulo hijo avisa al asistente cuando el backend confirmó, o cuando se cerró sin aplicar. */
-export interface ContextoPlan { mes: string; onAplicado: (r: { mes: string; n: number }) => void; onCerrar: () => void }
+export interface ContextoPlan {
+  mes: string; onAplicado: (r: { mes: string; n: number }) => void; onCerrar: () => void
+  /** El módulo hijo lanzó el guardado en segundo plano y se cierra: el asistente recupera el control y muestra la etapa «En progreso». */
+  onIniciado?: () => void
+  /** El guardado en segundo plano falló (nada quedó aplicado): el asistente muestra la etapa en Error con «Reintentar». */
+  onFallo?: (mensaje: string) => void
+}
 export interface Candidato {
   id: string; nombre: string; moneda: string
   /** ¿Ya está aplicada al mes? (no se puede "desaplicar" desde aquí ni se sobrescribe sin que el usuario edite el monto) */

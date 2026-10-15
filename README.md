@@ -28,6 +28,16 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.20.2 — aplicar en segundo plano desde «Prepara tu mes»
+
+Solo frontend (Code.gs sigue en 1.20.1).
+
+- Al confirmar «Aplicar» (fila o varias) en Fuentes/Subcajas mensuales, el módulo y su confirmación **se cierran al instante** y el asistente sigue visible: la etapa muestra «En progreso» con un aviso de guardado en segundo plano, y pasa sola a «Completada» cuando Sheets confirma y la relectura lo verifica.
+- Mientras guarda se puede seguir con las demás etapas (omitir, ir a Gastos, ver el Resumen); «Finalizar» y reabrir ese mismo módulo quedan bloqueados hasta que termine.
+- Si falla, no queda nada aplicado: la etapa pasa a «Error» con «Reintentar» (reabre el módulo).
+- Fuera del asistente (desde Cajas) el módulo también guarda en segundo plano con toast de progreso. «Gastos mensuales» conserva su confirmación con carga porque su reintento usa un lote idempotente.
+- Demo: `?falla=aplicar` hace fallar solo las acciones «aplicar…».
+
 ## Corrección v1.20.1 — aplicar plantillas con marcas viejas (requiere redesplegar Code.gs)
 
 - **Síntoma:** «No se pudo verificar lo guardado en Google Sheets. “General”: no se encontró la fuente en la hoja».

@@ -57,9 +57,11 @@ export function buildApi(conn: Connection | null): Api {
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
   const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fuentes')) || 0, 25))
-  const falla = q.get('falla') === '1' || q.get('falla') === 'timeout'
+  // ?falla=aplicar: solo fallan las acciones «aplicar…» (permite crear plantillas y probar el error del guardado en segundo plano).
+  const falla = q.get('falla') === '1' || q.get('falla') === 'timeout' || q.get('falla') === 'aplicar'
+  const soloAplicar = q.get('falla') === 'aplicar'
   const codigo = q.get('falla') === 'timeout' ? { code: 'TIMEOUT', msg: 'Apps Script tardó demasiado en responder.' } : { code: 'NETWORK', msg: 'No se pudo conectar con Google Sheets.' }
-  return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' ? demo(action, payload)
+  return createApi(falla ? (action, payload) => (action === 'data' || action === 'plantillas' || (soloAplicar && !action.startsWith('aplicar')) ? demo(action, payload)
     : (() => {
       const w = globalThis as unknown as { __gdDemoCalls?: Record<string, number> } // también cuenta los intentos fallidos
       w.__gdDemoCalls = { ...w.__gdDemoCalls, [action]: (w.__gdDemoCalls?.[action] ?? 0) + 1 }
