@@ -150,7 +150,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'PLANTILLAS_MENSUALES', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FUENTES', 'PLANTILLAS_MENSUALES', 'PLANTILLAS_SUBCAJAS', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -1669,7 +1669,7 @@ describe('normalización de descripciones en el backend (v1.19)', () => {
     expect(b.ss.getSheetByName('CAJAS')!.rows.at(-1)![8]).toBe('Médico, Farmacia y Exámenes')
     const pf = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'subcaja', nombre: 'Auto', monto: 250, campo: 'Categoría', valor: 'Auto', descripcion: 'MANTENIMIENTO DEL AUTO' })
     expect(pf.ok).toBe(true)
-    expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows.at(-1)![8]).toBe('Mantenimiento del Auto')
+    expect(b.ss.getSheetByName('PLANTILLAS_SUBCAJAS')!.rows.at(-1)![8]).toBe('Mantenimiento del Auto')
   })
 
   it('las excepciones configuradas en CONFIG aplican en el backend y no reescriben registros antiguos', () => {
@@ -1774,5 +1774,102 @@ describe('planificación mensual y recordatorios en CONFIG (v1.19)', () => {
     const antes = JSON.stringify(['FUENTES', 'FUENTES_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))
     b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'd|000|' })
     expect(JSON.stringify(['FUENTES', 'FUENTES_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))).toBe(antes)
+  })
+})
+
+describe('plantillas de fuentes y subcajas: hojas propias e IDs reales (v1.19)', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const uuid = () => `pf-${crypto.randomUUID()}`                       // el ID que genera la web: 39 caracteres
+  const plF = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: uuid(), tipo: 'fuente', nombre: 'Aporte de Pareja', monto: 1000, moneda: 'PEN', medios: '', recurrencia: 'mensual', ...o })
+  const plS = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: uuid(), tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas', ...o })
+  const datos = () => b.post('data', { fresh: true }).data
+  const filas = (hoja: string) => (b.ss.getSheetByName(hoja)?.rows ?? []).slice(1)
+
+  it('REGRESIÓN: aplicar una subcaja con ID de plantilla "pf-"+UUID ya no falla por "ID de caja supera 40 caracteres"', () => {
+    const id = plS().data[0]
+    expect(id.length).toBe(39)
+    const r = b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id, accion: 'aplicar', monto: 750 }] })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    const caja = datos().cajas.find((c: unknown[]) => c[1] === 'Mascotas')
+    expect(caja[0].length).toBeLessThanOrEqual(40)
+    expect(datos().presupuestos).toContainEqual(['2026-10', caja[0], 750])
+  })
+
+  it('aplicar TODAS (2 subcajas + 3 fuentes en un solo pedido) funciona, es idempotente y no duplica nada', () => {
+    const s = [plS(), plS({ nombre: 'Viajes', monto: 250, valor: 'Viajes' })].map(x => x.data[0])
+    const f = ['A', 'B', 'C'].map(n => plF({ nombre: `Fuente ${n}`, monto: 100 }).data[0])
+    const items = [...s, ...f].map(id => ({ id, accion: 'aplicar', monto: undefined }))
+    const r1 = b.post('aplicarPlantillasFin', { mes: '2026-10', items })
+    expect(r1.ok, JSON.stringify(r1)).toBe(true)
+    const antes = JSON.stringify([datos().cajas, datos().fuentes, datos().presupuestos, datos().fuentesMeses])
+    const r2 = b.post('aplicarPlantillasFin', { mes: '2026-10', items })
+    expect(r2.ok).toBe(true)
+    expect(JSON.stringify([datos().cajas, datos().fuentes, datos().presupuestos, datos().fuentesMeses])).toBe(antes)
+    expect(datos().cajas.filter((c: unknown[]) => ['Mascotas', 'Viajes'].includes(c[1] as string))).toHaveLength(2)
+    expect(datos().fuentes).toHaveLength(3)
+    expect(new Set(datos().cajas.map((c: unknown[]) => c[0])).size).toBe(datos().cajas.length)
+  })
+
+  it('aplicar a noviembre (aislado) y a otro mes no se cruzan, también con IDs largos', () => {
+    const id = plS().data[0]
+    expect(b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id, accion: 'aplicar', monto: 800 }] }).ok).toBe(true)
+    expect(b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id, accion: 'aplicar', monto: 900 }] }).ok).toBe(true)
+    const cid = datos().cajas.find((c: unknown[]) => c[1] === 'Mascotas')[0]
+    expect(datos().presupuestos.filter((p: unknown[]) => p[1] === cid).sort()).toEqual([['2026-11', cid, 800], ['2026-12', cid, 900]])
+  })
+
+  it('cada tipo se guarda en su propia hoja: PLANTILLAS_FUENTES y PLANTILLAS_SUBCAJAS', () => {
+    const f = plF().data[0], s = plS().data[0]
+    expect(filas('PLANTILLAS_FUENTES').map(r => r[0])).toEqual([f])
+    expect(filas('PLANTILLAS_SUBCAJAS').map(r => r[0])).toEqual([s])
+    expect(b.ss.getSheetByName('PLANTILLAS_FUENTES')!.rows[0]).toContain('Tipo')
+    expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')).toBeNull()      // ya no se crea la hoja única
+    expect(datos().plantillasFin.map((p: unknown[]) => p[0]).sort()).toEqual([f, s].sort())
+  })
+
+  it('el estado aplicada/omitida queda en la hoja correcta y sobrevive a una nueva lectura', () => {
+    const s = plS().data[0], f = plF().data[0]
+    b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: s, accion: 'aplicar', monto: 700 }, { id: f, accion: 'omitir' }] })
+    expect(JSON.parse(String(filas('PLANTILLAS_SUBCAJAS')[0][15]))['2026-10'].e).toBe('aplicada')
+    expect(JSON.parse(String(filas('PLANTILLAS_FUENTES')[0][15]))['2026-10'].e).toBe('omitida')
+    const d = datos().plantillasFin
+    expect(d.find((p: unknown[]) => p[0] === s)[15]['2026-10'].e).toBe('aplicada')
+  })
+
+  it('eliminar y reordenar funcionan sobre la hoja de cada tipo; el ID no puede cambiar de tipo', () => {
+    const f1 = plF().data[0], f2 = plF({ nombre: 'Sodexo' }).data[0], s = plS().data[0]
+    expect(b.post('reorderPlantillasFin', { tipo: 'fuente', ids: [f2, f1] }).ok).toBe(true)
+    expect(filas('PLANTILLAS_FUENTES').find(r => r[0] === f2)![13]).toBe(1)
+    expect(b.post('deletePlantillaFin', { id: s }).data.eliminada).toBe(true)
+    expect(filas('PLANTILLAS_SUBCAJAS')).toHaveLength(0)
+    expect(filas('PLANTILLAS_FUENTES')).toHaveLength(2)
+    expect(b.post('savePlantillaFin', { id: f1, tipo: 'subcaja', nombre: 'X', monto: 1, campo: 'Categoría', valor: 'Y' }).ok).toBe(false)
+  })
+
+  it('MIGRACIÓN: las plantillas de la hoja anterior PLANTILLAS_FINANCIERAS pasan una sola vez a las hojas nuevas, sin tocar la anterior', () => {
+    const cols = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia', 'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en']
+    const old = b.ss.insertSheet('PLANTILLAS_FINANCIERAS')
+    const fila = (id: string, tipo: string, nombre: string) => [id, tipo, nombre, 500, 'PEN', 'Libre', tipo === 'subcaja' ? 'Categoría' : '', tipo === 'subcaja' ? nombre : '', '', '#1e3a8a', 'auto', 'mensual', true, 1, '', '{}', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z']
+    old.rows = [cols, fila('pf-old-1', 'fuente', 'Aporte viejo'), fila('ps-old-1', 'subcaja', 'Jardín')]
+    b.props.delete('PF_MIGRADO_fuente'); b.props.delete('PF_MIGRADO_subcaja')
+    b.ss.getSheetByName('PLANTILLAS_FUENTES')!.rows = [b.ss.getSheetByName('PLANTILLAS_FUENTES')!.rows[0]]
+    const d = datos().plantillasFin
+    expect(d.map((p: unknown[]) => p[0]).sort()).toEqual(['pf-old-1', 'ps-old-1'])
+    expect(filas('PLANTILLAS_FUENTES').map(r => r[0])).toEqual(['pf-old-1'])
+    expect(filas('PLANTILLAS_SUBCAJAS').map(r => r[0])).toEqual(['ps-old-1'])
+    datos(); datos()                                                         // no se vuelve a copiar
+    expect(filas('PLANTILLAS_FUENTES')).toHaveLength(1)
+    expect(old.rows).toHaveLength(3)                                         // la hoja anterior queda intacta
+    // y lo migrado se puede aplicar
+    expect(b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-old-1', accion: 'aplicar', monto: 500 }] }).ok).toBe(true)
+  })
+
+  it('una plantilla nueva tras migrar no pisa ni duplica las migradas', () => {
+    const f = plF().data[0]
+    expect(plF({ id: f, monto: 1200 }).ok).toBe(true)                      // mismo ID: actualiza
+    expect(filas('PLANTILLAS_FUENTES')).toHaveLength(1)
+    expect(Number(filas('PLANTILLAS_FUENTES')[0][3])).toBe(1200)
+    expect(plF({ nombre: 'aporte de pareja' }).ok).toBe(false)             // nombre repetido sigue prohibido
   })
 })
