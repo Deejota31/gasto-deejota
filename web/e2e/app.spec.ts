@@ -596,7 +596,11 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
     await expect(page.getByLabel('Nuevo medio de pago')).toHaveCount(0)
     await go(page, 'Catálogo')
     await expect(page.getByRole('button', { name: 'Nuevo medio de pago', exact: true })).toHaveCount(0)   // sin botón duplicado debajo de las tarjetas
-    await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Agregar', exact: true })).toBeEnabled()
+    await expect(async () => {
+      if (!(await page.getByRole('menuitem', { name: 'Nuevo medio de pago' }).isVisible())) await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+      await expect(page.getByRole('menuitem', { name: 'Nuevo medio de pago' })).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 10000 })
     await page.getByRole('menuitem', { name: 'Nuevo medio de pago' }).click()
     await dialog(page).getByLabel('Nombre del medio de pago').fill('Tarjeta')
     await dialog(page).getByRole('button', { name: 'Crear medio de pago' }).click()

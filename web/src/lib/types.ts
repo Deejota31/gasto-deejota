@@ -29,6 +29,28 @@ export interface Gasto {
 
 /** Decisión sobre una alerta de calidad. `firma` resume los datos revisados: si cambian, la alerta vuelve. */
 export type EstadoRevision = 'legitimo' | 'pendiente' | 'duplicado'
+/**
+ * Conciliación de saldos (v1.22). Hoja de solo agregar: una fila es un hecho que no se edita.
+ * tipo 'verificacion' = saldo real comprobado vs saldo presupuestario (foto) en una fecha de corte; 'seguimiento' = estado/causa
+ * de una verificación; 'grupo' = definición de un grupo de fondos (conjunto de fuentes). Nada de esto es una transacción.
+ */
+export type TipoConc = 'verificacion' | 'seguimiento' | 'grupo'
+export type EstadoConc = 'pendiente' | 'en_revision' | 'conciliada' | 'cerrada_justificada'
+export type CausaConc = 'gasto_pendiente' | 'ingreso_pendiente' | 'saldo_anterior' | 'comision' | 'reembolso' | 'no_identificada' | 'otro'
+export interface ConcFila {
+  id: string; tipo: TipoConc; conciliacionId: string; periodo: string
+  /** Instante de la verificación (ISO UTC). */
+  corte: string
+  grupoId: string; grupo: string; moneda: string
+  calculado: number | null; real: number | null; diferencia: number | null
+  /** verificacion/seguimiento: EstadoConc · grupo: 'activo' | 'archivado' */
+  estado: string
+  causa: string; observacion: string; reemplazaA: string
+  /** verificacion: huella de los datos al verificar · grupo: IDs de fuentes separados por coma. */
+  referencia: string
+  creadoEn: string
+}
+
 export interface Revision { id: string; tipo: 'duplicado'; ids: string[]; estado: EstadoRevision; firma: string; creadoEn: string; actualizadoEn: string }
 
 /** Plantilla de gasto frecuente: configuración reutilizable. No es un movimiento ni suma en nada. */
@@ -115,6 +137,8 @@ export interface AppData {
   /** Vínculo gasto → plantilla (qué movimiento pagó qué compromiso): [gastoId, plantillaId]. */
   vinculos?: [string, string][]
   revisiones?: Revision[]
+  /** Conciliación de saldos: historial inmutable (verificaciones, seguimientos y grupos). */
+  conciliaciones?: ConcFila[]
   sheetUrl: string
   version: string
 }

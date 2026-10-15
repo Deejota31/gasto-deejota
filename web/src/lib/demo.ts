@@ -130,6 +130,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     vinculos: [['d0000000-0000-4000-8000-900000000001', 'pl-00000000-0000-4000-8000-000000000001', ''],
       ['d0000000-0000-4000-8000-900000000002', 'pl-00000000-0000-4000-8000-000000000003', '']] as unknown[][],
     revisiones: [] as unknown[][],
+    conciliaciones: [] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
   if (vacio) { db.gastos = []; db.catalogo = []; db.medios = []; db.cajas = []; db.fuentes = []; db.plantillas = []; db.vinculos = [] }
@@ -552,6 +553,54 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       if (prev) { prev[3] = p.estado; prev[4] = p.firma; prev[6] = now; return [...prev] }
       const row = [p.id, 'duplicado', ids, p.estado, p.firma, now, now]
       db.revisiones.push(row)
+      return [...row]
+    },
+    // Conciliación de saldos (v1.22): réplica del backend. Solo agrega filas a su propia hoja; nunca toca gastos, fuentes ni cajas.
+    saveConciliacion: p => {
+      const prev = db.conciliaciones.find(r => r[0] === p.id); if (prev) return [...prev]
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.periodo))) throw fail('VALIDATION', 'Período inválido.')
+      const corte = new Date(String(p.corte)); if (isNaN(corte.getTime())) throw fail('VALIDATION', 'Fecha de corte inválida.')
+      if (corte.getTime() > Date.now() + 864e5) throw fail('VALIDATION', 'La fecha de corte no puede estar en el futuro.')
+      const calc = Number(p.calculado), real = Number(p.real)
+      if (!Number.isFinite(calc) || !Number.isFinite(real) || real < 0) throw fail('VALIDATION', 'Saldo real inválido.')
+      if (!String(p.grupo ?? '').trim()) throw fail('VALIDATION', 'Grupo es obligatorio.')
+      const reemplaza = String(p.reemplazaA ?? '')
+      if (reemplaza) {
+        if (!db.conciliaciones.some(r => r[0] === reemplaza && r[1] === 'verificacion')) throw fail('NOT_FOUND', 'La verificación que se corrige ya no existe.')
+        if (db.conciliaciones.some(r => r[1] === 'verificacion' && r[14] === reemplaza)) throw fail('VALIDATION', 'Esa verificación ya fue corregida.')
+      }
+      const diff = Math.round((real - calc) * 100) / 100
+      const row = [p.id, 'verificacion', p.id, p.periodo, corte.toISOString(), p.grupoId, p.grupo, p.moneda, Math.round(calc * 100) / 100, Math.round(real * 100) / 100, diff,
+        diff === 0 ? 'conciliada' : 'pendiente', '', String(p.observacion ?? ''), reemplaza, String(p.referencia ?? ''), new Date().toISOString()]
+      db.conciliaciones.push(row)
+      return [...row]
+    },
+    saveSeguimientoConciliacion: p => {
+      const prev = db.conciliaciones.find(r => r[0] === p.id); if (prev) return [...prev]
+      if (!['pendiente', 'en_revision', 'cerrada_justificada'].includes(String(p.estado))) throw fail('VALIDATION', 'Estado de seguimiento inválido.')
+      const v = db.conciliaciones.find(r => r[0] === p.conciliacionId && r[1] === 'verificacion')
+      if (!v) throw fail('NOT_FOUND', 'La verificación ya no existe.')
+      if (v[10] === 0) throw fail('VALIDATION', 'Esa verificación no tiene diferencia que seguir.')
+      if (p.estado === 'cerrada_justificada' && (!p.causa || !String(p.observacion ?? '').trim())) throw fail('VALIDATION', 'Para cerrar con diferencia justificada indica la causa y una explicación.')
+      const row = [p.id, 'seguimiento', p.conciliacionId, v[3], v[4], v[5], v[6], v[7], null, null, null, p.estado, String(p.causa ?? ''), String(p.observacion ?? ''), '', '', new Date().toISOString()]
+      db.conciliaciones.push(row)
+      return [...row]
+    },
+    saveGrupoConciliacion: p => {
+      const prev = db.conciliaciones.find(r => r[0] === p.id); if (prev) return [...prev]
+      const nombre = String(p.nombre ?? '').trim(); if (!nombre) throw fail('VALIDATION', 'Nombre del grupo es obligatorio.')
+      const fuentes = [...new Set((p.fuenteIds as string[] | undefined) ?? [])]
+      if (p.activo !== false) {
+        const vigentes = new Map<string, unknown[]>(); for (const r of db.conciliaciones) if (r[1] === 'grupo') vigentes.set(String(r[5]), r)
+        for (const [gid, g] of vigentes) {
+          if (gid === p.grupoId || g[11] !== 'activo') continue
+          if (String(g[6]).toLowerCase() === nombre.toLowerCase()) throw fail('VALIDATION', `Ya existe un grupo llamado "${g[6]}".`)
+          const otras = String(g[15]).split(',').filter(Boolean)
+          if (fuentes.some(f => otras.includes(f))) throw fail('VALIDATION', `Una fuente ya pertenece al grupo "${g[6]}": no se puede contar dos veces.`)
+        }
+      }
+      const row = [p.id, 'grupo', '', '', '', p.grupoId, nombre, '', null, null, null, p.activo === false ? 'archivado' : 'activo', '', '', '', fuentes.join(','), new Date().toISOString()]
+      db.conciliaciones.push(row)
       return [...row]
     },
     reorderGastos: p => {

@@ -6,14 +6,17 @@ import type { Filters, Gasto } from '../lib/types'
 import SaludFinanciera from '../components/SaludFinanciera'
 import { FilterBar } from '../components/shared'
 import { Empty, ErrorBox, InfoTooltip, Skeleton } from '../components/ui'
+import { Conciliacion } from '../components/conciliacion/Conciliacion'
 
 /**
  * Pestaña Salud financiera. Usa los mismos datos en memoria y el mismo filtro global que Dashboard y Gastos
  * (no hay estados duplicados ni lecturas nuevas). Sus cálculos solo corren mientras esta pestaña está abierta.
  */
-export default function Salud({ store, filters, setFilters, today, onRevisarGasto, onGastosMensuales }: {
+export default function Salud({ store, filters, setFilters, today, onRevisarGasto, onGastosMensuales, onConcRevisarGastos, onConcNuevoGasto, onConcIrFuentes }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
+  /** Conciliación de saldos: abren Gastos / Nuevo gasto / Fuentes con el período y corte de la conciliación. */
+  onConcRevisarGastos: (desde: string, hasta: string) => void; onConcNuevoGasto: (fecha: string) => void; onConcIrFuentes: () => void
 }) {
   const data = store.data
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
@@ -50,6 +53,9 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
           </div>
         )}
       </div>
+      {data && (data.gastos.length > 0 || (data.fuentes?.length ?? 0) > 0 || (data.conciliaciones?.length ?? 0) > 0) && (
+        <Conciliacion store={store} today={today} onRevisarGastos={onConcRevisarGastos} onNuevoGasto={onConcNuevoGasto} onIrFuentes={onConcIrFuentes} />
+      )}
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={gastos} />
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
       {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 ? (

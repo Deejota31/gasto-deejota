@@ -108,7 +108,7 @@ function load() {
     LockService: { getScriptLock: () => ({ tryLock: () => lockFree, releaseLock: () => {} }) },
     Utilities: {
       getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}`,
-      formatDate: (d: Date) => d.toISOString().slice(0, 10),
+      formatDate: (d: Date, _tz?: string, fmt?: string) => d.toISOString().slice(0, fmt === 'yyyy-MM' ? 7 : 10),
       DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
       computeDigest: (alg: string, s: string) => [...createHash(alg).update(s, 'utf8').digest()].map(b => (b > 127 ? b - 256 : b)),
     },
@@ -150,7 +150,7 @@ describe('backend Apps Script', () => {
   beforeEach(() => { b = load(); b.g.setup() })
 
   it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONCILIACIONES', 'CONFIG', 'FUENTES', 'FUENTES_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'VINCULOS_PLANTILLAS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -1978,5 +1978,137 @@ describe('v1.20.1: aplicar plantillas cuando la hoja quedó con marcas «aplicad
     const w = ['FUENTES', 'FUENTES_MESES', 'PLANTILLAS_FINANCIERAS'].map(n => b.ss.getSheetByName(n)!.writes)
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: F, accion: 'aplicar', monto: 3000 }] })
     expect(['FUENTES', 'FUENTES_MESES', 'PLANTILLAS_FINANCIERAS'].map(n => b.ss.getSheetByName(n)!.writes)).toEqual(w)
+  })
+})
+
+describe('v1.22 conciliación de saldos (backend)', () => {
+  let b: ReturnType<typeof load>
+  const hoyIso = () => new Date().toISOString()
+  const mesActual = () => hoyIso().slice(0, 7)
+  const id = (n: number) => `conc-00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  const ver = (n: number, over: Record<string, unknown> = {}) => ({
+    id: id(n), periodo: mesActual(), corte: hoyIso(), grupoId: 'gf-00000001', grupo: 'Dinero general', moneda: 'PEN', calculado: 437.5, real: 467.38,
+    observacion: 'Saldo confirmado después de revisar mis cuentas', referencia: '2|100|538000', ...over,
+  })
+  const snapshot = () => JSON.stringify(['GASTOS', 'FUENTES', 'FUENTES_MESES', 'CAJAS', 'PRESUPUESTOS', 'VINCULOS_PLANTILLAS', 'PLANTILLAS_FINANCIERAS', 'CONFIG', 'CATALOGO']
+    .map(n => b.ss.getSheetByName(n)?.rows))
+  beforeEach(() => { b = load(); b.g.setup() })
+
+  it('guarda una verificación, calcula la diferencia en el servidor y la devuelve al recargar (persistencia real)', () => {
+    const r = b.post('saveConciliacion', ver(1))
+    expect(r.ok).toBe(true)
+    expect(r.data.slice(0, 2)).toEqual([id(1), 'verificacion'])
+    expect(r.data[8]).toBe(437.5); expect(r.data[9]).toBe(467.38); expect(r.data[10]).toBe(29.88); expect(r.data[11]).toBe('pendiente')
+    const d = b.post('data', { fresh: true }).data
+    expect(d.conciliaciones).toHaveLength(1)
+    expect(d.conciliaciones[0][10]).toBe(29.88)
+    // diferencia cero → conciliada
+    expect(b.post('saveConciliacion', ver(2, { real: 437.5 })).data[11]).toBe('conciliada')
+  })
+
+  it('guardar NO toca fuentes, gastos, cajas, presupuestos, compromisos ni configuración', () => {
+    b.post('saveGasto', gasto({ fecha: `${mesActual()}-01` }))
+    const antes = snapshot()
+    expect(b.post('saveConciliacion', ver(1)).ok).toBe(true)
+    expect(b.post('saveConciliacion', ver(2, { grupoId: 'gf-00000002', grupo: 'Sodexo', calculado: 45.51, real: 48.43 })).ok).toBe(true)
+    expect(b.post('saveSeguimientoConciliacion', { id: id(3), conciliacionId: id(1), estado: 'en_revision', causa: '', observacion: '' }).ok).toBe(true)
+    expect(b.post('saveGrupoConciliacion', { id: id(4), grupoId: 'gf-00000001', nombre: 'Dinero general', fuenteIds: ['fuente-general'], activo: true }).ok).toBe(true)
+    expect(snapshot()).toBe(antes)
+    expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(2)
+  })
+
+  it('es idempotente por ID: doble clic o reintento no duplican filas', () => {
+    b.post('saveConciliacion', ver(1)); b.post('saveConciliacion', ver(1)); b.post('saveConciliacion', ver(1))
+    expect(b.post('data', {}).data.conciliaciones).toHaveLength(1)
+    expect(b.ss.getSheetByName('CONCILIACIONES')!.rows.slice(1).filter(r => r[0])).toHaveLength(1)
+  })
+
+  it('historial de solo agregar: una nueva verificación no sobrescribe la anterior; una corrección la conserva', () => {
+    b.post('saveConciliacion', ver(1))
+    b.post('saveConciliacion', ver(2, { real: 470 }))
+    const corr = b.post('saveConciliacion', ver(3, { real: 468, reemplazaA: id(1) }))
+    expect(corr.ok).toBe(true)
+    const filas = b.post('data', { fresh: true }).data.conciliaciones
+    expect(filas.map((f: unknown[]) => f[0])).toEqual([id(1), id(2), id(3)])
+    expect(filas[0][9]).toBe(467.38)                       // la original sigue intacta
+    expect(b.post('saveConciliacion', ver(4, { reemplazaA: id(1) })).error.code).toBe('VALIDATION')      // ya fue corregida
+    expect(b.post('saveConciliacion', ver(5, { reemplazaA: id(99) })).error.code).toBe('NOT_FOUND')
+    expect(b.post('saveConciliacion', ver(6, { reemplazaA: id(2), grupoId: 'gf-00000002' })).error.code).toBe('VALIDATION')   // otro grupo
+  })
+
+  it('valida los datos: fechas, períodos, importes, grupo y moneda', () => {
+    const bad = (over: Record<string, unknown>) => b.post('saveConciliacion', ver(7, over)).error?.code
+    expect(bad({ id: 'x' })).toBe('VALIDATION')
+    expect(bad({ periodo: '2026-13' })).toBe('VALIDATION')
+    expect(bad({ corte: 'no es fecha' })).toBe('VALIDATION')
+    expect(bad({ corte: new Date(Date.now() + 5 * 864e5).toISOString() })).toBe('VALIDATION')   // futuro
+    expect(bad({ periodo: '2020-01' })).toBe('VALIDATION')                                       // el corte no pertenece al período
+    expect(bad({ real: -1 })).toBe('VALIDATION')
+    expect(bad({ real: '' })).toBe('VALIDATION')
+    expect(bad({ real: 'abc' })).toBe('VALIDATION')
+    expect(bad({ calculado: null })).toBe('VALIDATION')
+    expect(bad({ grupoId: 'cualquiera' })).toBe('VALIDATION')
+    expect(bad({ grupo: '' })).toBe('VALIDATION')
+    expect(bad({ moneda: 'soles' })).toBe('VALIDATION')
+    expect(bad({ observacion: 'x'.repeat(501) })).toBe('VALIDATION')
+    expect(b.post('data', {}).data.conciliaciones).toHaveLength(0)
+    expect(b.post('saveConciliacion', ver(8, { real: '467,38', grupoId: 'total' })).data[9]).toBe(467.38)   // coma decimal
+  })
+
+  it('seguimiento: en revisión / cerrar justificada (exige causa y explicación); no aplica a diferencia cero', () => {
+    b.post('saveConciliacion', ver(1)); b.post('saveConciliacion', ver(2, { real: 437.5 }))
+    const seg = (n: number, over: Record<string, unknown>) => b.post('saveSeguimientoConciliacion', { id: id(n), conciliacionId: id(1), estado: 'en_revision', causa: '', observacion: '', ...over })
+    expect(seg(10, {}).data[11]).toBe('en_revision')
+    expect(seg(11, { estado: 'cerrada_justificada' }).error.code).toBe('VALIDATION')
+    expect(seg(11, { estado: 'cerrada_justificada', causa: 'comision' }).error.code).toBe('VALIDATION')
+    expect(seg(11, { estado: 'cerrada_justificada', causa: 'inventada', observacion: 'x' }).error.code).toBe('VALIDATION')
+    expect(seg(11, { estado: 'cerrada_justificada', causa: 'comision', observacion: 'Comisión del banco' }).ok).toBe(true)
+    expect(seg(12, { estado: 'conciliada' }).error.code).toBe('VALIDATION')     // "conciliada" solo sale de una verificación con diferencia cero
+    expect(b.post('saveSeguimientoConciliacion', { id: id(13), conciliacionId: id(2), estado: 'en_revision' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveSeguimientoConciliacion', { id: id(14), conciliacionId: id(50), estado: 'en_revision' }).error.code).toBe('NOT_FOUND')
+    // la verificación original no cambió
+    expect(b.post('data', {}).data.conciliaciones[0].slice(8, 12)).toEqual([437.5, 467.38, 29.88, 'pendiente'])
+  })
+
+  it('grupos: sin nombres repetidos ni fuentes en dos grupos activos; archivar conserva el historial', () => {
+    const grp = (n: number, gid: string, nombre: string, fuenteIds: string[], activo = true) => b.post('saveGrupoConciliacion', { id: id(n), grupoId: gid, nombre, fuenteIds, activo })
+    expect(grp(1, 'gf-00000001', 'Dinero general', ['fuente-general', 'extra']).ok).toBe(true)
+    expect(grp(2, 'gf-00000002', 'Sodexo', ['sodexo']).ok).toBe(true)
+    expect(grp(3, 'gf-00000003', 'dinero  general', ['otra']).error.code).toBe('VALIDATION')           // nombre repetido
+    expect(grp(4, 'gf-00000003', 'Otro', ['sodexo']).error.code).toBe('VALIDATION')                     // fuente ya en otro grupo
+    expect(grp(5, 'gf-00000001', 'Dinero general', ['fuente-general', 'extra', 'tesis']).ok).toBe(true) // editar el propio grupo
+    expect(grp(6, 'gf-00000002', 'Sodexo', ['sodexo'], false).ok).toBe(true)                            // archivar
+    expect(grp(7, 'gf-00000003', 'Otro', ['sodexo']).ok).toBe(true)                                     // la fuente quedó libre
+    expect(grp(8, 'gf-00000009', 'x', ['no valida!']).error.code).toBe('VALIDATION')
+    expect(grp(9, 'total', 'x', []).error.code).toBe('VALIDATION')
+    expect(b.post('data', {}).data.conciliaciones.filter((f: unknown[]) => f[1] === 'grupo')).toHaveLength(5)   // nada se borra
+  })
+
+  it('el período y la fecha de corte se guardan como texto (Sheets no los convierte en fechas) y se leen igual aunque vengan como Date', () => {
+    b.post('saveConciliacion', ver(1))
+    const fila = b.ss.getSheetByName('CONCILIACIONES')!.rows[1]
+    expect(typeof fila[3]).toBe('string'); expect(typeof fila[4]).toBe('string')
+    fila[4] = new Date(String(fila[4]))
+    expect(b.post('data', { fresh: true }).data.conciliaciones[0][4]).toBe(new Date(fila[4] as Date).toISOString())
+  })
+
+  it('una hoja CONCILIACIONES ausente (backend anterior o sin usar) no rompe la lectura de datos', () => {
+    b.ss.sheets.delete('CONCILIACIONES')
+    const d = b.post('data', { fresh: true })
+    expect(d.ok).toBe(true)
+    expect(d.data.conciliaciones).toEqual([])
+  })
+
+  it('no requiere ni crea más de una hoja técnica', () => {
+    b.post('saveConciliacion', ver(1)); b.post('saveGrupoConciliacion', { id: id(2), grupoId: 'gf-00000001', nombre: 'G', fuenteIds: [], activo: true })
+    expect([...b.ss.sheets.keys()].filter(n => /CONCIL/.test(n))).toEqual(['CONCILIACIONES'])
+  })
+
+  it('rechaza peticiones sin token y con escritura bloqueada (hoja ocupada)', () => {
+    expect(b.post('saveConciliacion', ver(1), 'token-malo').error.code).toBe('UNAUTHORIZED')
+    b.setLock(false)
+    expect(b.post('saveConciliacion', ver(1)).error.code).toBe('BUSY')
+    b.setLock(true)
+    expect(b.post('data', { fresh: true }).data.conciliaciones).toHaveLength(0)
   })
 })
