@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fuente, type FuenteMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
+import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type ConcFila, type EstadoRevision, type Fuente, type FuenteMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -160,6 +160,15 @@ export interface AplicarItem { id: string; accion: 'aplicar' | 'omitir' | 'pendi
 export interface CarpetaRespaldo { id: string; nombre: string; url: string; personalizada: boolean }
 export type FuenteInput = Omit<Fuente, 'creadoEn' | 'actualizadoEn'>
 
+const concRow = z.tuple([str, str, str, str, str, str, str, str, z.number().nullable(), z.number().nullable(), z.number().nullable(), str, str, str, str, str, str])
+const toConc = ([id, tipo, conciliacionId, periodo, corte, grupoId, grupo, moneda, calculado, real, diferencia, estado, causa, observacion, reemplazaA, referencia, creadoEn]: z.infer<typeof concRow>): ConcFila => ({
+  id, tipo: tipo === 'seguimiento' || tipo === 'grupo' ? tipo : 'verificacion', conciliacionId, periodo, corte, grupoId, grupo, moneda,
+  calculado, real, diferencia, estado, causa, observacion, reemplazaA, referencia, creadoEn,
+})
+export interface ConcVerificacionInput { id: string; periodo: string; corte: string; grupoId: string; grupo: string; moneda: string; calculado: number; real: number; observacion: string; referencia: string; reemplazaA?: string }
+export interface ConcSeguimientoInput { id: string; conciliacionId: string; estado: 'pendiente' | 'en_revision' | 'cerrada_justificada'; causa: string; observacion: string }
+export interface ConcGrupoInput { id: string; grupoId: string; nombre: string; fuenteIds: string[]; activo: boolean }
+
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
@@ -172,6 +181,7 @@ const dataSchema = z.object({
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
   vinculos: z.array(z.tuple([str, str])).optional(),
   revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
+  conciliaciones: z.array(concRow).optional(),
   fuentes: z.array(fuenteRow).optional(),
   fuentesMeses: z.array(fuenteMesRow).optional(),
   plantillasFin: z.array(plantillaFinRow).optional(),
@@ -243,6 +253,7 @@ export function createApi(t: Transport) {
           ordenGastos: d.ordenGastos ?? [],
           vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
+          conciliaciones: (d.conciliaciones ?? []).map(toConc),
           fuentes: (d.fuentes ?? []).map(toFuente),
           fuentesMeses: (d.fuentesMeses ?? []).map(toFuenteMes),
           plantillasFin: (d.plantillasFin ?? []).map(toPlantillaFin),
@@ -359,6 +370,10 @@ export function createApi(t: Transport) {
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>): Promise<Revision> {
       return toRevision(parse(revisionRow, await t('saveRevision', { ...r, tipo: 'duplicado' })))
     },
+    /** Conciliación de saldos: SOLO escribe la hoja CONCILIACIONES (nunca fuentes, gastos, cajas ni presupuestos). */
+    async saveConciliacion(i: ConcVerificacionInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveConciliacion', i))) },
+    async saveSeguimientoConciliacion(i: ConcSeguimientoInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveSeguimientoConciliacion', i))) },
+    async saveGrupoConciliacion(i: ConcGrupoInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveGrupoConciliacion', i))) },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })
     },

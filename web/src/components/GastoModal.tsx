@@ -33,7 +33,9 @@ type Form = GastoDraft
 /** Datos precargados desde una plantilla de "Gastos mensuales" (solo clasificación y descripción). */
 export type GastoPreset = Clasif & { descripcion: string; monto?: number | null; moneda?: string; medioPago?: string; tipoGasto?: TipoGasto; esRecurrente?: boolean
   /** Plantilla de origen: el gasto queda vinculado como pago de ese compromiso. */
-  plantillaId?: string; plantillaNombre?: string }
+  plantillaId?: string; plantillaNombre?: string
+  /** Fecha precargada AAAA-MM-DD (p. ej. la fecha de corte de una conciliación). */
+  fecha?: string }
 
 function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft, preset?: GastoPreset): Form {
   if (draft) return draft // reabrir tras un error: se conservan los datos que ingresaste
@@ -47,7 +49,7 @@ function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: Gast
   }
   return {
     id: crypto.randomUUID(), // generado al abrir: si la red falla y se reintenta, el backend no duplica
-    fecha: todayIn(cfg.zona_horaria || 'America/Lima'), montoText: preset?.monto ? String(preset.monto) : '', moneda: preset?.moneda || cfg.moneda || 'PEN',
+    fecha: preset?.fecha ?? todayIn(cfg.zona_horaria || 'America/Lima'), montoText: preset?.monto ? String(preset.monto) : '', moneda: preset?.moneda || cfg.moneda || 'PEN',
     ambito: preset?.ambito ?? 'Personal', categoria: preset?.categoria ?? '', subcategoria: preset?.subcategoria ?? '', descripcion: preset?.descripcion ?? '',
     medioPago: preset?.medioPago ?? '', tipoGasto: preset?.tipoGasto ?? 'Variable', esRecurrente: preset?.esRecurrente ?? false, comprobanteUrl: '',
     ...(preset?.plantillaId ? { plantillaId: preset.plantillaId } : {}),

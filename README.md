@@ -28,6 +28,29 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.22.0 — Salud financiera → Conciliación de saldos
+
+Compara **lo que Deejota calcula que deberías tener** con **lo que realmente tienes** y te ayuda a investigar la diferencia. **Nunca crea ingresos, gastos ni ajustes** para cuadrar saldos.
+
+**Tres conceptos distintos**
+- *Disponible presupuestario* = lo que dice el motor existente (`aggregate`): fuentes efectivas del mes − gastos activos hasta la fecha de corte (anulados fuera, conversión de moneda, ajustes mensuales y atribución por fuente ya vigentes). No se reimplementó ninguna regla. Las cajas son reservas: se muestran aparte («Reservado en cajas» y «Libre no reservado») y no se descuentan dos veces.
+- *Saldo real verificado* = lo escribes tú, con fecha y hora (America/Lima por defecto). Nunca se deduce de fuentes ni gastos.
+- *Diferencia* = real − calculado, con signo y porcentaje (solo si el calculado no es ~0). Positiva y negativa son hipótesis a investigar, no diagnósticos; los colores no tratan lo positivo como «bueno».
+
+**Grupos de fondos** (botón «Grupos de fondos»): un grupo es un conjunto de **fuentes** (p. ej. «Dinero general» = General + Aporte Pareja + Tésis, y «Sodexo»). El calculado de un grupo es la suma del disponible que el motor ya atribuye a cada una de sus fuentes (atribución por medio de pago, verificable). Una fuente solo puede estar en un grupo activo y no se repiten nombres. Sin grupos se concilia el total. **Yape y Plin no son cuentas** y no tienen saldo propio: no existe hoy una relación explícita cuenta ↔ medio de pago, así que no se inventa. Si algún gasto no pertenece a ningún grupo (fuente inactiva o sin fuente) se muestra «Sin atribuir».
+
+**Hoja CONCILIACIONES** (una sola, de solo agregar, creada al primer guardado o con `setup`/«Reparar hojas»): `ID, Tipo, Conciliación ID, Período, Fecha de corte, Grupo ID, Grupo, Moneda, Saldo presupuestario, Saldo real, Diferencia, Estado, Causa, Observación, Reemplaza a, Referencia, Creado en`. Tres tipos de fila: `verificacion` (foto del calculado y el real), `seguimiento` (en revisión / cerrada con diferencia justificada / reabierta, con causa y explicación) y `grupo`. Nada se edita ni se borra: una nueva verificación añade una fila; corregir una mal ingresada añade otra que «reemplaza a» la anterior (que se conserva marcada como corregida). IDs únicos e idempotentes (doble clic o reintento no duplican). Guardar solo escribe esta hoja.
+
+**Estados**: Pendiente (diferencia sin explicar) · En revisión · Conciliada (diferencia cero) · Cerrada con diferencia justificada (no se presenta como cero) · Desactualizada. «Desactualizada» se detecta comparando la foto guardada con el cálculo de hoy para el mismo período, corte y grupo: si registras un gasto olvidado fechado antes del corte, o cambian fuentes/ajustes, la verificación se marca así y puedes «Verificar de nuevo»; la verificación original **no se modifica** y los estados históricos no cambian solos.
+
+**Investigar una diferencia** («Revisar diferencia»): revisar gastos (abre Gastos con el período y el corte), registrar gasto olvidado (Nuevo gasto con la fecha de corte), registrar ingreso omitido (ve a Cajas → Fuentes; nunca se crea una fuente para cuadrar), corregir un movimiento (en Gastos) y documentar la causa. Documentar no es una transacción.
+
+**Fecha de corte**: el calculado incluye los movimientos **fechados** hasta el día de corte (corte diario); la hora se guarda con el saldo real. No se simula precisión horaria que los datos no permiten. El refresco automático nunca escribe ni sobrescribe un saldo verificado; mostrar la pantalla no genera escrituras.
+
+**Backend**: nuevas acciones `saveConciliacion`, `saveSeguimientoConciliacion` y `saveGrupoConciliacion` en `Code.gs` **1.22.0** → debes **volver a desplegar el script** (misma URL). Con un backend anterior la lectura sigue funcionando y guardar muestra «Acción no válida».
+
+**Limitaciones conocidas**: solo moneda base (los gastos en otra moneda se convierten con el tipo de cambio de Configuración; el saldo real se ingresa en la moneda base); el vínculo entre un gasto nuevo y la conciliación que lo originó no se persiste (se detecta por «Desactualizada»); la persistencia y la sincronización entre dispositivos están probadas contra una simulación en memoria de Google Sheets (vitest) y la interfaz en modo demostración (Playwright), no contra tu hoja real.
+
 ## Novedades v1.21.0 — sin conexión ≠ sin datos, «Caja» y «Finalizar» en segundo plano
 
 - **Sin conexión** (sin Apps Script conectado y sin `?demo`): ninguna pestaña muestra datos de ejemplo. Dashboard, Cajas, Gastos, Salud y Catálogo muestran un estado vacío con «Conectar mi hoja»; Configuración conserva la conexión y muestra «Conéctate para acceder a estas funciones» en Preferencias, Planificación mensual, Administración de datos y Funciones del backend. La app ya no hace ninguna lectura sin conexión. El modo demostración solo existe con `?demo=…`.

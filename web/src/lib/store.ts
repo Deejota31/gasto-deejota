@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createApi, httpTransport, type Api, type Connection, type AplicarItem, type FuenteInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
+import type { ConcGrupoInput, ConcSeguimientoInput, ConcVerificacionInput } from './api'
 import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
@@ -338,6 +339,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       await api.vincularGasto(gastoId, plantillaId)
       patch(d => ({ ...d, vinculos: upsertVinculos(d.vinculos, [[gastoId, plantillaId]]) }))
     },
+    /** Conciliación de saldos: solo agrega filas a CONCILIACIONES. Nunca modifica fuentes, gastos, cajas ni presupuestos. */
+    async saveConciliacion(i: ConcVerificacionInput) { const f = await api.saveConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
+    async saveSeguimientoConciliacion(i: ConcSeguimientoInput) { const f = await api.saveSeguimientoConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
+    async saveGrupoConciliacion(i: ConcGrupoInput) { const f = await api.saveGrupoConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
     /** Decisión sobre una coincidencia (legítima, pendiente o duplicado confirmado). Nunca modifica movimientos. */
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>) {
       const saved = await api.saveRevision(r)

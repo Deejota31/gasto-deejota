@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.20.1';
+var APP_VERSION = '1.22.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
@@ -40,11 +40,18 @@ var SHEETS = {
   // TODAS las plantillas en una sola hoja (v1.19.2). Tipo = fuente | subcaja | gasto (gasto mensual). Solo definiciones
   // reutilizables, nunca movimientos. Estados = JSON por mes (fuente/subcaja). Datos = JSON propio de cada tipo
   // (en 'gasto': ámbito, categoría, subcategoría, tipo de gasto, compromiso, recurrente).
-  PLANTILLAS_FINANCIERAS: PF_COLS_
+  PLANTILLAS_FINANCIERAS: PF_COLS_,
+  // Conciliación de saldos (v1.22): una sola hoja de SOLO AGREGAR. Cada fila es un hecho que nunca se edita ni se borra:
+  //  Tipo 'verificacion' = saldo real comprobado vs saldo presupuestario calculado en esa fecha de corte (el calculado es
+  //    una foto: no cambia aunque después cambien los gastos); 'seguimiento' = cambio de estado / causa de una verificación
+  //    (gana el más reciente); 'grupo' = definición de un grupo de fondos (conjunto de fuentes; gana la más reciente).
+  //  Guardar aquí NUNCA toca fuentes, gastos, cajas, presupuestos ni compromisos.
+  CONCILIACIONES: ['ID', 'Tipo', 'Conciliación ID', 'Período', 'Fecha de corte', 'Grupo ID', 'Grupo', 'Moneda', 'Saldo presupuestario',
+    'Saldo real', 'Diferencia', 'Estado', 'Causa', 'Observación', 'Reemplaza a', 'Referencia', 'Creado en']
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_FINANCIERAS: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_FINANCIERAS: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0, CONCILIACIONES: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -689,7 +696,8 @@ function getData_(fresh) {
     fuentesMeses: ss.getSheetByName('FUENTES_MESES') ? readRows_(ss, 'FUENTES_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
     }) : [],
-    plantillasFin: pfTodas_().rows.map(pfOut_)
+    plantillasFin: pfTodas_().rows.map(pfOut_),
+    conciliaciones: ss.getSheetByName('CONCILIACIONES') ? concLeer_(ss) : []
   };
   writeCache_(data, gen);
   data.cache = false;
@@ -820,6 +828,9 @@ var ACTIONS = {
   reorderGastos: reorderGastos_,
   vincularGasto: vincularGasto_,
   saveRevision: saveRevision_,
+  saveConciliacion: saveConciliacion_,
+  saveSeguimientoConciliacion: saveSeguimientoConciliacion_,
+  saveGrupoConciliacion: saveGrupoConciliacion_,
   saveFuente: saveFuente_,
   saveFuenteMes: saveFuenteMes_,
   reorderFuentes: reorderFuentes_,
@@ -2669,6 +2680,140 @@ function saveRevision_(p) {
   var row = [nuevoId, tipo, idsTxt, estado, firma, now, now];
   appendRows_(sh, [row]);
   return row;
+}
+
+/* ===================== Conciliación de saldos (v1.22) ===================== */
+
+var CONC_SEGUIMIENTO_ESTADOS_ = ['pendiente', 'en_revision', 'cerrada_justificada'];
+var CONC_CAUSAS_ = ['gasto_pendiente', 'ingreso_pendiente', 'saldo_anterior', 'comision', 'reembolso', 'no_identificada', 'otro'];
+
+function concHoja_(ss) {
+  var sh = ensureSheet_(ss, 'CONCILIACIONES', SHEETS.CONCILIACIONES);
+  if (sh.getLastRow() < 2) {
+    // Hoja sin registros (recién creada por setup o por el primer guardado): Período, fecha de corte y creado-en son TEXTO,
+    // así Sheets no los convierte en fechas. Con registros ya no se vuelve a tocar el formato.
+    sh.getRange('D:E').setNumberFormat('@');
+    sh.getRange('Q:Q').setNumberFormat('@');
+  }
+  return sh;
+}
+
+function concFecha_(v) { return v instanceof Date ? v.toISOString() : str_(v).replace(/^'/, ''); }
+
+function concLeer_(ss) {
+  var tz = tz_();
+  return readRows_(ss, 'CONCILIACIONES').map(function (r) {
+    return [str_(r[0]), str_(r[1]), str_(r[2]), periodo_(r[3], tz), concFecha_(r[4]), str_(r[5]), str_(r[6]), str_(r[7]),
+      r[8] === '' ? null : num_(r[8]), r[9] === '' ? null : num_(r[9]), r[10] === '' ? null : num_(r[10]),
+      str_(r[11]), str_(r[12]), str_(r[13]), str_(r[14]), str_(r[15]), concFecha_(r[16])];
+  });
+}
+
+function dinero2_(v, label, noNegativo) {
+  var n = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v);
+  if (v === '' || v === null || v === undefined || !isFinite(n) || Math.abs(n) > 1e9 || (noNegativo && n < 0)) throw appError_('VALIDATION', label + ' inválido.');
+  return Math.round(n * 100) / 100;
+}
+
+function concIdFila_(v) {
+  var id = str_(v);
+  if (!/^conc-[0-9a-f-]{36}$/.test(id)) throw appError_('VALIDATION', 'ID de conciliación inválido.');
+  return id;
+}
+
+// Guarda una verificación NUEVA (nunca sobrescribe). Idempotente por ID (doble clic / reintento no duplica).
+// La diferencia y el estado inicial se calculan aquí; el saldo calculado es la foto que manda la web en ese momento.
+function saveConciliacion_(p) {
+  var id = concIdFila_(p.id);
+  var periodo = str_(p.periodo);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo)) throw appError_('VALIDATION', 'Período inválido.');
+  var corteD = new Date(str_(p.corte));
+  if (isNaN(corteD.getTime())) throw appError_('VALIDATION', 'Fecha de corte inválida.');
+  if (corteD.getTime() > Date.now() + 24 * 3600 * 1000) throw appError_('VALIDATION', 'La fecha de corte no puede estar en el futuro.');
+  if (Utilities.formatDate(corteD, tz_(), 'yyyy-MM') !== periodo) throw appError_('VALIDATION', 'La fecha de corte debe pertenecer al período elegido.');
+  var grupoId = str_(p.grupoId);
+  if (!/^(total|gf-[0-9a-f-]{8,40})$/.test(grupoId)) throw appError_('VALIDATION', 'Grupo de fondos inválido.');
+  var grupo = text_(p.grupo, 'Grupo', 60, true);
+  var moneda = str_(p.moneda).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(moneda)) throw appError_('VALIDATION', 'Moneda inválida.');
+  var calculado = dinero2_(p.calculado, 'Saldo presupuestario', false);
+  var real = dinero2_(p.real, 'Saldo real', true);
+  var obs = text_(p.observacion, 'Observación', 500, false);
+  var ref = text_(p.referencia, 'Referencia', 200, false);
+  var reemplaza = str_(p.reemplazaA);
+  var ss = openSpreadsheet_(false);
+  var sh = concHoja_(ss);
+  var rows = concLeer_(ss);
+  for (var i = 0; i < rows.length; i++) if (rows[i][0] === id) return rows[i];   // ya guardada: no duplicar
+  if (reemplaza) {
+    var viejo = null;
+    rows.forEach(function (r) { if (r[0] === reemplaza && r[1] === 'verificacion') viejo = r; });
+    if (!viejo) throw appError_('NOT_FOUND', 'La verificación que se corrige ya no existe.');
+    if (viejo[5] !== grupoId || viejo[3] !== periodo) throw appError_('VALIDATION', 'Una corrección debe ser del mismo grupo y período.');
+    rows.forEach(function (r) { if (r[1] === 'verificacion' && r[14] === reemplaza) throw appError_('VALIDATION', 'Esa verificación ya fue corregida.'); });
+  }
+  var diff = Math.round((real - calculado) * 100) / 100;
+  var now = new Date().toISOString();
+  var row = [id, 'verificacion', id, periodo, corteD.toISOString(), grupoId, grupo, moneda, calculado, real, diff,
+    diff === 0 ? 'conciliada' : 'pendiente', '', obs, reemplaza, ref, now];
+  appendRows_(sh, [row]);
+  return row;
+}
+
+// Cambia el seguimiento de una diferencia (en revisión / cerrada con diferencia justificada / reabrir). No es una transacción.
+function saveSeguimientoConciliacion_(p) {
+  var id = concIdFila_(p.id);
+  var objetivo = concIdFila_(p.conciliacionId);
+  var estado = str_(p.estado);
+  if (CONC_SEGUIMIENTO_ESTADOS_.indexOf(estado) < 0) throw appError_('VALIDATION', 'Estado de seguimiento inválido.');
+  var causa = str_(p.causa);
+  if (causa && CONC_CAUSAS_.indexOf(causa) < 0) throw appError_('VALIDATION', 'Causa inválida.');
+  var obs = text_(p.observacion, 'Observación', 500, false);
+  if (estado === 'cerrada_justificada' && (!causa || !obs)) throw appError_('VALIDATION', 'Para cerrar con diferencia justificada indica la causa y una explicación.');
+  var ss = openSpreadsheet_(false);
+  var sh = concHoja_(ss);
+  var rows = concLeer_(ss);
+  for (var i = 0; i < rows.length; i++) if (rows[i][0] === id) return rows[i];
+  var v = null;
+  rows.forEach(function (r) { if (r[0] === objetivo && r[1] === 'verificacion') v = r; });
+  if (!v) throw appError_('NOT_FOUND', 'La verificación ya no existe.');
+  if (v[10] === 0) throw appError_('VALIDATION', 'Esa verificación no tiene diferencia que seguir.');
+  rows.forEach(function (r) { if (r[1] === 'verificacion' && r[14] === objetivo) throw appError_('VALIDATION', 'Esa verificación fue reemplazada por una más reciente.'); });
+  var row = [id, 'seguimiento', objetivo, v[3], v[4], v[5], v[6], v[7], null, null, null, estado, causa, obs, '', '', new Date().toISOString()];
+  appendRows_(sh, [row.map(function (x) { return x === null ? '' : x; })]);
+  return row;
+}
+
+// Define o actualiza un grupo de fondos (conjunto de fuentes). Nunca toca FUENTES. Una fuente solo puede estar en un grupo
+// activo: así ningún dinero se suma dos veces.
+function saveGrupoConciliacion_(p) {
+  var id = concIdFila_(p.id);
+  var grupoId = str_(p.grupoId);
+  if (!/^gf-[0-9a-f-]{8,40}$/.test(grupoId)) throw appError_('VALIDATION', 'ID de grupo inválido.');
+  var nombre = text_(p.nombre, 'Nombre del grupo', 40, true);
+  var fuentes = Array.isArray(p.fuenteIds) ? p.fuenteIds.map(str_) : [];
+  if (fuentes.length > 30 || fuentes.some(function (x) { return !/^[A-Za-z0-9_-]{1,64}$/.test(x); })) throw appError_('VALIDATION', 'Fuentes del grupo inválidas.');
+  var vistos = {};
+  fuentes = fuentes.filter(function (x) { if (vistos[x]) return false; vistos[x] = true; return true; });
+  var activo = p.activo !== false;
+  var ss = openSpreadsheet_(false);
+  var sh = concHoja_(ss);
+  var rows = concLeer_(ss);
+  for (var i = 0; i < rows.length; i++) if (rows[i][0] === id) return rows[i];
+  var vigentes = {};
+  rows.forEach(function (r) { if (r[1] === 'grupo') vigentes[r[5]] = r; });
+  if (activo) {
+    Object.keys(vigentes).forEach(function (gid) {
+      var g = vigentes[gid];
+      if (gid === grupoId || g[11] !== 'activo') return;
+      if (norm_(g[6]) === norm_(nombre)) throw appError_('VALIDATION', 'Ya existe un grupo llamado "' + g[6] + '".');
+      var otras = g[15] ? g[15].split(',') : [];
+      fuentes.forEach(function (f) { if (otras.indexOf(f) >= 0) throw appError_('VALIDATION', 'Una fuente ya pertenece al grupo "' + g[6] + '": no se puede contar dos veces.'); });
+    });
+  }
+  var row = [id, 'grupo', '', '', '', grupoId, nombre, '', '', '', '', activo ? 'activo' : 'archivado', '', '', '', fuentes.join(','), new Date().toISOString()];
+  appendRows_(sh, [row]);
+  return concLeer_(ss).filter(function (r) { return r[0] === id; })[0];
 }
 
 /* ===================== Orden personalizado de la tabla de Gastos ===================== */
