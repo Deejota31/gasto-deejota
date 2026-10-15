@@ -5,7 +5,7 @@
 // Una plantilla no es un movimiento: no suma en KPIs, cajas ni gráficos.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, GripVertical, ListChecks,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, ListChecks,
   Loader2, MoreHorizontal, Pencil, Plus, Repeat, Save, Search, Send, Trash2, Zap,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
@@ -20,6 +20,9 @@ import { showToast } from '../lib/toast'
 import { ClasificacionPicker, clasificacionVigente, ConfirmarDescripcion, useDescripcionSub, type Clasif } from './Clasificacion'
 import { Combobox, type Opcion } from './Combobox'
 import type { GastoPreset } from './GastoModal'
+import { type AccionMenu } from './MenuAcciones'
+import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
+import { SwipeFila, useEsMovil } from './swipe'
 import { Button, Checkbox, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, Skeleton, Switch, useDismiss } from './ui'
 
 export interface PlantillaDraft extends Clasif {
@@ -106,7 +109,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
   const [ambito, setAmbito] = useState('')
   const [detalle, setDetalle] = useState(false)
   const [errores, setErrores] = useState<Record<string, string>>({})
-  const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null)
+  const movil = useEsMovil()
   const loteKey = `lote:${lote.loteId}`
   const enviando = store.pending.has(loteKey)
 
@@ -201,6 +204,9 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
 
   const n = elegidas.length
   const puedeOrdenar = !filtrando && items.length > 1
+  const dnd = useReorden({ ids: items.map(p => p.id), habilitado: puedeOrdenar, nombre: id => items.find(p => p.id === id)?.descripcion ?? 'Plantilla', onCommit: ids => store.plantillaActions.reorder(ids) })
+  const porId = new Map(visibles.map(p => [p.id, p]))
+  const filas = (puedeOrdenar ? dnd.orden : visibles.map(p => p.id)).map(id => porId.get(id)).filter((p): p is Plantilla => !!p)
 
   return (
     <Modal open onClose={onClose} size="xl" title="Gastos mensuales" subtitle="Prepara y registra tus gastos frecuentes" icon={<CalendarDays className="size-5" />}
@@ -274,8 +280,9 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
               <div className="hidden grid-cols-[1.5rem_1.5rem_minmax(0,1fr)_8.5rem_5rem_8.5rem_7rem] items-center gap-2 border-b border-line bg-bg/60 px-2 py-1.5 text-[10px] font-semibold tracking-wide text-muted uppercase md:grid">
                 <span /><span /><span>Plantilla</span><span>Monto</span><span>Moneda</span><span>Pago</span><span className="text-right">Acciones</span>
               </div>
+              <AvisoOrden texto={dnd.aviso} />
               <ul aria-label="Plantillas" className="divide-y divide-line/70">
-                {visibles.map(p => {
+                {filas.map(p => {
                   const f = fila(p)
                   const l = categoriaLook(p.categoria, catalogo, p.ambito)
                   const on = sel.has(p.id)
@@ -283,56 +290,51 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                   const busy = store.pending.has(`plantilla:${p.id}`)
                   const editado = !!lote.valores[p.id]
                   const idx = items.indexOf(p)
+                  const swipe: AccionMenu[] = [
+                    { key: 'edit', label: 'Editar', icon: <Pencil className="size-4" />, onClick: () => setView({ kind: 'form', plantilla: p }) },
+                    { key: 'clone', label: 'Clonar', icon: <Copy className="size-4" />, onClick: () => setView({ kind: 'form', plantilla: null, cloneOf: p }) },
+                    { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-4" />, onClick: () => setView({ kind: 'delete', plantilla: p }), danger: true },
+                  ]
                   return (
-                    <li key={p.id} data-id={p.id}
-                      draggable={puedeOrdenar && drag?.from === p.id}
-                      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p.id) }}
-                      onDragOver={e => { if (drag) { e.preventDefault(); if (drag.over !== p.id) setDrag({ ...drag, over: p.id }) } }}
-                      onDrop={e => { e.preventDefault(); if (drag && drag.from !== p.id) mover(drag.from, p.id); setDrag(null) }}
-                      onDragEnd={() => setDrag(null)}
-                      className={`grid grid-cols-[1.5rem_1.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-2 px-2 py-2.5 md:gap-y-1.5 md:py-2 transition md:grid-cols-[1.5rem_1.5rem_minmax(0,1fr)_8.5rem_5rem_8.5rem_7rem] ${on ? 'bg-primary-soft/50' : 'hover:bg-bg/60'} ${drag?.over === p.id && drag.from !== p.id ? 'shadow-[inset_0_2px_0_var(--color-navy)]' : ''} ${drag?.from === p.id ? 'opacity-50' : ''}`}>
-                      <button type="button" aria-label={`Arrastrar ${p.descripcion}`} disabled={!puedeOrdenar} title={puedeOrdenar ? 'Arrastra para cambiar el orden' : 'Quita la búsqueda y el filtro para reordenar'}
-                        onPointerDown={() => puedeOrdenar && setDrag({ from: p.id, over: null })} onPointerUp={() => setDrag(d => (d && !d.over ? null : d))}
-                        className="grid h-7 cursor-grab place-items-center rounded text-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-30">
-                        <GripVertical className="size-4" />
-                      </button>
-                      <Checkbox label={`Seleccionar ${p.descripcion}`} checked={on} onChange={() => toggle(p.id)} disabled={!!rev && !on} color={l.color} />
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: `${l.color}1F`, color: l.color }}><l.Icon className="size-3.5" /></span>
-                        <div className="min-w-0">
-                          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold"><span className="truncate">{p.descripcion}</span>
-                            {p.esCompromiso && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#E7F7F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#0F7A5F] dark:bg-[#0F7A5F]/25 dark:text-[#6EE7C5]" title="Cuenta en Compromisos mensuales"><Repeat className="size-2.5" /> Compromiso</span>}</p>
-                          <p className="truncate text-[11px] text-muted">{p.ambito} · {p.categoria}{p.subcategoria !== p.descripcion ? ` · ${p.subcategoria}` : ''}</p>
-                          {rev && <p className="flex items-center gap-1 text-[11px] font-medium text-[#92400E]"><AlertTriangle className="size-3" /> Requiere revisión: {rev}</p>}
-                          {errores[p.id] && <p className="text-[11px] font-medium text-[#D2463C]" role="alert">{errores[p.id]}</p>}
+                    <li key={p.id} data-id={p.id} {...dnd.item(p.id)} className={`${CLASE_ARRASTRE} border border-transparent transition ${on ? 'bg-primary-soft/50' : 'hover:bg-bg/60'} ${busy ? 'opacity-60' : ''}`}>
+                      <SwipeFila nombre={p.descripcion} acciones={swipe} activo={movil} testId="plantilla-fila">
+                        {/* Móvil: línea 1 = asa, casilla, nombre y «Usar»; línea 2 = monto, moneda y medio. Las demás acciones, deslizando. */}
+                        <div className="grid grid-cols-[1.75rem_1.5rem_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-2 py-2 md:grid-cols-[1.75rem_1.5rem_minmax(0,1fr)_8.5rem_5rem_8.5rem_7rem] md:gap-y-1.5 md:py-2">
+                          <AsaOrden {...dnd.asa(p.id)} habilitado={puedeOrdenar} motivo="Quita la búsqueda y el filtro para reordenar" />
+                          <Checkbox label={`Seleccionar ${p.descripcion}`} checked={on} onChange={() => toggle(p.id)} disabled={!!rev && !on} color={l.color} />
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: `${l.color}1F`, color: l.color }}><l.Icon className="size-4" /></span>
+                            <div className="min-w-0">
+                              <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold"><span className="truncate">{p.descripcion}</span>
+                                {p.esCompromiso && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#E7F7F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#0F7A5F] dark:bg-[#0F7A5F]/25 dark:text-[#6EE7C5]" title="Cuenta en Compromisos mensuales"><Repeat className="size-2.5" /> Compromiso</span>}</p>
+                              <p className="truncate text-[11px] text-muted">{p.ambito} · {p.categoria}{p.subcategoria !== p.descripcion ? ` · ${p.subcategoria}` : ''}</p>
+                              {rev && <p className="flex items-center gap-1 text-[11px] font-medium text-[#92400E]"><AlertTriangle className="size-3" /> Requiere revisión: {rev}</p>}
+                              {errores[p.id] && <p className="text-[11px] font-medium text-[#D2463C]" role="alert">{errores[p.id]}</p>}
+                            </div>
+                          </div>
+                          {/* Edición rápida: valores temporales del lote, no cambian la plantilla */}
+                          <div className="col-span-3 col-start-2 grid grid-cols-[minmax(0,1fr)_4.5rem_minmax(0,1fr)] items-center gap-1.5 max-md:row-start-2 md:contents">
+                            <label className="relative block">
+                              <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-xs text-muted">{simbolo(f.moneda)}</span>
+                              <input aria-label={`Monto de ${p.descripcion}`} inputMode="decimal" value={f.monto} placeholder="0.00" onChange={e => setValor(p.id, { monto: e.target.value.replace(/[^\d.,]/g, '') })}
+                                className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
+                            </label>
+                            <Combobox compact label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={v => setValor(p.id, { moneda: v })} options={opcionesMoneda(monedas, f.moneda)} />
+                            <Combobox compact label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={v => setValor(p.id, { medioPago: v })} placeholder="Medio…" options={opcionesMedio(medios, f.medioPago)} />
+                          </div>
+                          <div className="flex items-center justify-end gap-1 max-md:col-start-4 max-md:row-start-1" data-testid="acciones-plantilla">
+                            {busy ? <Loader2 className="size-4 animate-spin text-muted" /> : <>
+                              <Button className="h-10 px-4 text-sm md:h-8 md:px-2.5 md:text-xs" disabled={!!rev} aria-label={`Usar plantilla ${p.descripcion}`} title="Abrir Nuevo gasto con estos datos"
+                                onClick={() => onUse({ ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria, descripcion: p.descripcion,
+                                  monto: Number(f.monto.replace(',', '.')) || null, moneda: f.moneda, medioPago: medioOk(f.medioPago) ? f.medioPago : '',
+                                  tipoGasto: p.tipoGasto, esRecurrente: p.esRecurrente, plantillaId: p.id, plantillaNombre: p.descripcion })}>Usar</Button>
+                              {!movil && <RowMenu label={p.descripcion} canMove={puedeOrdenar} first={idx === 0} last={idx === items.length - 1}
+                                onEdit={() => setView({ kind: 'form', plantilla: p })} onClone={() => setView({ kind: 'form', plantilla: null, cloneOf: p })}
+                                onDelete={() => setView({ kind: 'delete', plantilla: p })} onUp={() => mover(p.id, null, -1)} onDown={() => mover(p.id, null, 1)} />}
+                            </>}
+                          </div>
                         </div>
-                      </div>
-                      {/* Edición rápida: valores temporales del lote, no cambian la plantilla */}
-                      <div className="col-span-3 grid grid-cols-[minmax(0,1fr)_4.75rem_minmax(0,1fr)] items-center gap-1.5 md:contents">
-                        <label className="relative block">
-                          <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-xs text-muted">{simbolo(f.moneda)}</span>
-                          <input aria-label={`Monto de ${p.descripcion}`} inputMode="decimal" value={f.monto} placeholder="0.00" onChange={e => setValor(p.id, { monto: e.target.value.replace(/[^\d.,]/g, '') })}
-                            className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
-                        </label>
-                        <Combobox compact label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={v => setValor(p.id, { moneda: v })} options={opcionesMoneda(monedas, f.moneda)} />
-                        <Combobox compact label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={v => setValor(p.id, { medioPago: v })} placeholder="Medio…" options={opcionesMedio(medios, f.medioPago)} />
-                      </div>
-                      {/* Acciones: en móvil, grupo centrado en su propia fila; en escritorio, compactas a la derecha. */}
-                      <div className="col-span-3 flex items-center justify-center gap-2 md:col-span-1 md:justify-end md:gap-1" data-testid="acciones-plantilla">
-                        {busy ? <Loader2 className="size-4 animate-spin text-muted" /> : <>
-                          <Button className="h-10 px-4 text-sm md:h-8 md:px-2.5 md:text-xs" disabled={!!rev} aria-label={`Usar plantilla ${p.descripcion}`} title="Abrir Nuevo gasto con estos datos"
-                            onClick={() => onUse({ ambito: p.ambito, categoria: p.categoria, subcategoria: p.subcategoria, descripcion: p.descripcion,
-                              monto: Number(f.monto.replace(',', '.')) || null, moneda: f.moneda, medioPago: medioOk(f.medioPago) ? f.medioPago : '',
-                              tipoGasto: p.tipoGasto, esRecurrente: p.esRecurrente, plantillaId: p.id, plantillaNombre: p.descripcion })}>Usar</Button>
-                          <Button variant="outline" className="h-10 px-3 text-sm md:hidden" aria-label={`Editar plantilla ${p.descripcion}`}
-                            onClick={() => setView({ kind: 'form', plantilla: p })}><Pencil className="size-4" /><span className="max-[359px]:sr-only">Editar</span></Button>
-                          <button type="button" aria-label={`Eliminar plantilla ${p.descripcion}`} onClick={() => setView({ kind: 'delete', plantilla: p })}
-                            className="grid size-10 place-items-center rounded-xl border border-line text-[#D2463C] transition hover:bg-[#FDECEC] focus-visible:ring-2 focus-visible:ring-[#D2463C]/40 outline-none md:hidden"><Trash2 className="size-4" /></button>
-                          <RowMenu label={p.descripcion} canMove={puedeOrdenar} first={idx === 0} last={idx === items.length - 1}
-                            onEdit={() => setView({ kind: 'form', plantilla: p })} onClone={() => setView({ kind: 'form', plantilla: null, cloneOf: p })}
-                            onDelete={() => setView({ kind: 'delete', plantilla: p })} onUp={() => mover(p.id, null, -1)} onDown={() => mover(p.id, null, 1)} />
-                        </>}
-                      </div>
+                      </SwipeFila>
                     </li>
                   )
                 })}

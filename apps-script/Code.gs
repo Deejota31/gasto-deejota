@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.16.0';
+var APP_VERSION = '1.17.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -34,11 +34,14 @@ var SHEETS = {
     'Medio de pago', 'Creado en', 'Actualizado en'],
   // Importes por mes de cada fuente. Modo "solo" = únicamente ese mes; "desde" = ese mes en adelante (hasta otro "desde").
   // Una fila por fuente + mes + modo: volver a guardar actualiza, nunca duplica ni toca otros meses.
-  FUENTES_MESES: ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en']
+  FUENTES_MESES: ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en'],
+  // Plantillas de fuentes y subcajas (v1.17): solo definiciones reutilizables. Estados = JSON por mes (aplicada / omitida).
+  PLANTILLAS_FINANCIERAS: ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
+    'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en']
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0, PLANTILLAS_FINANCIERAS: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -683,7 +686,8 @@ function getData_(fresh) {
     fuentes: ss.getSheetByName('FUENTES') ? readRows_(ss, 'FUENTES').map(fuenteOut_) : [],
     fuentesMeses: ss.getSheetByName('FUENTES_MESES') ? readRows_(ss, 'FUENTES_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
-    }) : []
+    }) : [],
+    plantillasFin: ss.getSheetByName('PLANTILLAS_FINANCIERAS') ? readRows_(ss, 'PLANTILLAS_FINANCIERAS').map(pfOut_) : []
   };
   writeCache_(data, gen);
   data.cache = false;
@@ -817,6 +821,10 @@ var ACTIONS = {
   saveFuente: saveFuente_,
   saveFuenteMes: saveFuenteMes_,
   reorderFuentes: reorderFuentes_,
+  savePlantillaFin: savePlantillaFin_,
+  deletePlantillaFin: deletePlantillaFin_,
+  reorderPlantillasFin: reorderPlantillasFin_,
+  aplicarPlantillasFin: aplicarPlantillasFin_,
   deleteFuente: deleteFuente_,
   migrarGeneralAFuente: migrarGeneralAFuente_,
   completarVacios: completarVacios_,
@@ -1179,6 +1187,246 @@ function savePresupuesto_(p) {
   }
   appendRows_(sh, [[p.periodo, cajaId, monto]]);
   return [p.periodo, cajaId, monto];
+}
+
+/* ===================== Plantillas de fuentes y de subcajas (v1.17) =====================
+ * Una plantilla es SOLO configuración reutilizable (PLANTILLAS_FINANCIERAS, una hoja para ambos tipos). Se distinguen tres cosas:
+ *   - la definición de la plantilla (esta hoja),
+ *   - la entidad original (FUENTES / CAJAS; se enlaza por "Origen ID"),
+ *   - la configuración aplicada a un mes (FUENTES_MESES / PRESUPUESTOS, que ya existían).
+ * Guardar o clonar una plantilla nunca crea fuentes, cajas, dinero ni gastos. Aplicarla a un mes escribe solo ese mes
+ * y es idempotente. El estado de cada mes (aplicada / omitida) queda en la columna Estados (JSON por mes).
+ */
+var PF_TIPOS = ['fuente', 'subcaja'];
+
+function plantillasFinSheet_() {
+  var ss = openSpreadsheet_(false);
+  if (!ss.getSheetByName('PLANTILLAS_FINANCIERAS')) {
+    var props = PropertiesService.getScriptProperties();
+    if (!props.getProperty('PLANTILLAS_FIN_RESPALDO')) props.setProperty('PLANTILLAS_FIN_RESPALDO', backup_().url); // hoja nueva: respaldo previo
+  }
+  return ensureSheet_(ss, 'PLANTILLAS_FINANCIERAS', SHEETS.PLANTILLAS_FINANCIERAS);
+}
+
+function pfRows_(sh) {
+  var n = Math.max(lastDataRow_(sh) - 1, 0);
+  return n ? sh.getRange(2, 1, n, SHEETS.PLANTILLAS_FINANCIERAS.length).getValues() : [];
+}
+
+function pfEstados_(raw) {
+  try { var o = JSON.parse(str_(raw) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (err) { return {}; }
+}
+
+// [id, tipo, nombre, monto, moneda, medios, campo, valor, descripcion, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
+function pfOut_(r) {
+  var est = pfEstados_(r[15]), pub = {};
+  Object.keys(est).forEach(function (m) { if (est[m] && (est[m].e === 'aplicada' || est[m].e === 'omitida')) pub[m] = { e: est[m].e, m: num_(est[m].m) }; });
+  return [str_(r[0]), str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]),
+    str_(r[9]), autoVacio_(r[10]), str_(r[11]) === 'unica' ? 'unica' : 'mensual', str_(r[12]) === '' ? true : bool_(r[12]), num_(r[13]), str_(r[14]), pub, iso_(r[16]), iso_(r[17])];
+}
+
+function savePlantillaFin_(p) {
+  var id = text_(p.id, 'ID de plantilla', 64, true);
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw appError_('VALIDATION', 'ID de plantilla inválido.');
+  var tipo = str_(p.tipo);
+  if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
+  var nombre = text_(p.nombre, 'Nombre de la plantilla', 40, true);
+  var monto = amount_(p.monto, true);
+  var activo = p.activo === undefined ? true : p.activo === true;
+  var origen = str_(p.origenId);
+  var ss = openSpreadsheet_(false);
+  var moneda = '', medios = '', campo = '', valor = '', recurrencia = 'mensual';
+  if (tipo === 'fuente') {
+    moneda = monedaPermitida_(ss, p.moneda);
+    medios = libreVacio_(text_(p.medios, 'Medios de pago', 400, false));
+    recurrencia = p.recurrencia === 'unica' ? 'unica' : 'mensual';
+    if (origen && !(ss.getSheetByName('FUENTES') && findRowByValue_(ss.getSheetByName('FUENTES'), 1, origen))) throw appError_('NOT_FOUND', 'La fuente original ya no existe.');
+  } else {
+    campo = str_(p.campo);
+    if (CAJA_CAMPOS.indexOf(campo) < 1) throw appError_('VALIDATION', 'Alcance de subcaja inválido.');
+    valor = text_(p.valor, 'Valor del alcance', 130, true);
+    if (origen && !(ss.getSheetByName('CAJAS') && findRowByValue_(ss.getSheetByName('CAJAS'), 1, origen))) throw appError_('NOT_FOUND', 'La subcaja original ya no existe.');
+  }
+  var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
+  if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
+  var sh = plantillasFinSheet_();
+  var rows = pfRows_(sh);
+  var idx = -1, maxOrden = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var rid = str_(rows[i][0]);
+    if (!rid) continue;
+    maxOrden = Math.max(maxOrden, num_(rows[i][13]));
+    if (rid === id) { idx = i; continue; }
+    if (str_(rows[i][1]) !== tipo) continue;
+    if (norm_(String(rows[i][2]).replace(/^'/, '')) === norm_(nombre)) throw appError_('VALIDATION', 'Ya existe una plantilla llamada “' + str_(rows[i][2]) + '”.');
+    if (origen && str_(rows[i][14]) === origen) throw appError_('DUPLICATE', 'Ya existe una plantilla vinculada a este registro (“' + str_(rows[i][2]) + '”). Edítala en lugar de crear otra.');
+  }
+  var now = new Date().toISOString(), prev = idx >= 0 ? rows[idx] : null;
+  if (prev && str_(prev[1]) !== tipo) throw appError_('VALIDATION', 'No se puede cambiar el tipo de una plantilla.');
+  var row = [id, tipo, nombre, monto, moneda, medios || 'Libre', campo, valor, text_(p.descripcion, 'Descripción', 200, false),
+    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', icono || 'auto', recurrencia, activo,
+    prev ? num_(prev[13]) : (p.orden === undefined ? maxOrden + 1 : num_(p.orden)), prev && origen === '' ? str_(prev[14]) : origen,
+    prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now];
+  if (idx >= 0) sh.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
+  return pfOut_(row);
+}
+
+// Elimina solo la definición: no toca la fuente/subcaja original ni lo ya aplicado en meses.
+function deletePlantillaFin_(p) {
+  var id = text_(p.id, 'ID de plantilla', 64, true);
+  var sh = plantillasFinSheet_();
+  var row = findRowByValue_(sh, 1, id);
+  if (!row) return { id: id, eliminada: false };
+  sh.deleteRow(row);
+  return { id: id, eliminada: true };
+}
+
+function reorderPlantillasFin_(p) {
+  var tipo = str_(p.tipo);
+  if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
+  var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
+  if (!ids.length || ids.length > 500) throw appError_('VALIDATION', 'Orden de plantillas inválido.');
+  var sh = plantillasFinSheet_();
+  var rows = pfRows_(sh);
+  if (!rows.length) return { ok: true };
+  var pos = {};
+  ids.forEach(function (id, i) { pos[id] = i + 1; });
+  var extra = ids.length + 1;
+  sh.getRange(2, 14, rows.length, 1).setValues(rows.map(function (r) {
+    var id = str_(r[0]);
+    if (!id || str_(r[1]) !== tipo) return [r[13]];
+    return [pos[id] !== undefined ? pos[id] : extra++];
+  }));
+  return { ok: true };
+}
+
+// Importe efectivo de una fuente en un mes (misma regla que la web: "solo" manda; luego "desde"; luego el habitual).
+function fuenteMontoMesGs_(f, mes, meses) {
+  var solo = null, desde = null;
+  meses.forEach(function (m) {
+    if (m[0] !== f[0]) return;
+    if (m[3] === 'solo' && m[1] === mes) solo = m;
+    else if (m[3] === 'desde' && m[1] <= mes && (!desde || m[1] > desde[1])) desde = m;
+  });
+  if (solo) return { monto: solo[2], solo: solo[2] };
+  if (f[8] === 'unica') return { monto: mes === f[9] ? f[2] : 0, solo: null };
+  if (desde) return { monto: desde[2], solo: null };
+  return { monto: !f[9] || mes >= f[9] ? f[2] : 0, solo: null };
+}
+
+function pfIdSeguro_(prefijo, id) { return (prefijo + String(id).replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 60); }
+
+/**
+ * Aplica, omite o revierte plantillas en UN mes. Todo o nada en la validación; idempotente (aplicar dos veces el mismo
+ * importe no cambia nada). Items: [{ id, accion: 'aplicar'|'omitir'|'pendiente', monto }].
+ *  - Fuente: si no hay fuente enlazada, la crea una sola vez (ID estable) y enlaza la plantilla. El importe del mes se
+ *    guarda en FUENTES_MESES (modo "solo") solo si difiere del que ya rige ese mes.
+ *  - Subcaja: igual con CAJAS; el importe del mes va a PRESUPUESTOS. No crea dinero: solo reserva.
+ * Se recuerda qué se escribió (w) y el valor previo (p) para poder volver a Pendiente sin perder ajustes anteriores.
+ */
+function aplicarPlantillasFin_(p) {
+  var mes = str_(p.mes);
+  if (!MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes inválido (AAAA-MM).');
+  var items = Array.isArray(p.items) ? p.items : [];
+  if (!items.length || items.length > 60) throw appError_('VALIDATION', 'Selecciona entre 1 y 60 plantillas.');
+  var ss = openSpreadsheet_(false);
+  var sh = plantillasFinSheet_();
+  var rows = pfRows_(sh), porId = {};
+  rows.forEach(function (r, i) { if (str_(r[0])) porId[str_(r[0])] = i; });
+  var vistos = {};
+  var plan = items.map(function (it) {
+    var id = text_(it.id, 'ID de plantilla', 64, true);
+    if (vistos[id]) throw appError_('VALIDATION', 'Plantilla repetida en la solicitud.');
+    vistos[id] = true;
+    if (porId[id] === undefined) throw appError_('NOT_FOUND', 'Una plantilla ya no existe. Actualiza los datos.');
+    var accion = it.accion === 'omitir' ? 'omitir' : it.accion === 'pendiente' ? 'pendiente' : 'aplicar';
+    var r = rows[porId[id]];
+    var monto = accion === 'aplicar' ? amount_(it.monto === undefined ? r[3] : it.monto, true) : 0;
+    if (accion === 'aplicar' && !(str_(r[12]) === '' ? true : bool_(r[12]))) throw appError_('VALIDATION', 'La plantilla “' + str_(r[2]) + '” está desactivada.');
+    return { id: id, idx: porId[id], accion: accion, monto: monto, tipo: str_(r[1]) };
+  });
+  // Validación previa de lo que habría que crear (para no dejar el lote a medias).
+  var fSh = ss.getSheetByName('FUENTES'), cSh = ss.getSheetByName('CAJAS');
+  var fRows = fSh ? fuentesRows_(fSh) : [], cRows = cSh ? cSh.getRange(2, 1, Math.max(lastDataRow_(cSh) - 1, 0) || 1, SHEETS.CAJAS.length).getValues() : [];
+  plan.forEach(function (it) {
+    if (it.accion !== 'aplicar') return;
+    var r = rows[it.idx], origen = str_(r[14]);
+    if (it.tipo === 'fuente') {
+      if (origen && fRows.some(function (x) { return str_(x[0]) === origen; })) return;
+      var nom = norm_(String(r[2]).replace(/^'/, ''));
+      if (fRows.some(function (x) { return norm_(String(x[1]).replace(/^'/, '')) === nom; }) && !fRows.some(function (x) { return str_(x[0]) === pfIdSeguro_('f-', r[0]); }))
+        throw appError_('VALIDATION', 'Ya existe una fuente llamada “' + str_(r[2]) + '”. Enlaza la plantilla a esa fuente (Guardar como plantilla desde ella).');
+    } else {
+      if (origen && cRows.some(function (x) { return str_(x[0]) === origen; })) return;
+      if (cRows.some(function (x) { return str_(x[0]) !== pfIdSeguro_('c-', r[0]) && (str_(x[7]) === '' ? true : bool_(x[7])) && str_(x[3]) === str_(r[6]) && norm_(x[4]) === norm_(r[7]); }))
+        throw appError_('VALIDATION', 'Ya existe una subcaja con el alcance de “' + str_(r[2]) + '”. Enlaza la plantilla a esa subcaja.');
+    }
+  });
+
+  var mesesRows = function () { return ss.getSheetByName('FUENTES_MESES') ? readRows_(ss, 'FUENTES_MESES').map(function (x) { return [str_(x[0]), periodo_(x[1], tz_()), num_(x[2]), str_(x[3]) === 'desde' ? 'desde' : 'solo']; }) : []; };
+  var pres = function (cajaId) {
+    var out = readRows_(ss, 'PRESUPUESTOS').filter(function (x) { return periodo_(x[0], tz_()) === mes && str_(x[1]) === cajaId; });
+    return out.length ? num_(out[0][2]) : null;
+  };
+  var revertir = function (r, est) {
+    if (!est || est.e !== 'aplicada' || !est.w) return;
+    var origen = str_(r[14]);
+    if (str_(r[1]) === 'fuente') {
+      if (est.p === null || est.p === undefined) saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', quitar: true });
+      else saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: est.p });
+    } else {
+      if (est.p === null || est.p === undefined) {
+        var psh = ss.getSheetByName('PRESUPUESTOS');
+        borrarFilasSi_(psh, SHEETS.PRESUPUESTOS.length, function (x) { return periodo_(x[0], tz_()) === mes && str_(x[1]) === origen; });
+      } else savePresupuesto_({ periodo: mes, cajaId: origen, monto: est.p });
+    }
+  };
+
+  var salida = [];
+  plan.forEach(function (it) {
+    var r = rows[it.idx], est = pfEstados_(r[15]), act = est[mes];
+    if (it.accion === 'aplicar' && act && act.e === 'aplicada' && num_(act.m) === it.monto) { salida.push(pfOut_(r)); return; } // ya aplicada igual: no hace nada
+    if (act && act.e === 'aplicada') { revertir(r, act); act = null; }
+    if (it.accion === 'pendiente') delete est[mes];
+    else if (it.accion === 'omitir') est[mes] = { e: 'omitida', m: 0 };
+    else {
+      var origen = str_(r[14]), w = false, prev = null;
+      if (it.tipo === 'fuente') {
+        if (!origen || !fRows.some(function (x) { return str_(x[0]) === origen; })) {
+          origen = pfIdSeguro_('f-', r[0]);
+          fSh = fuentesSheets_().fuentes;
+          if (!findRowByValue_(fSh, 1, origen)) saveFuente_({ id: origen, nombre: str_(r[2]).replace(/^'/, ''), monto: num_(r[3]), moneda: str_(r[4]), color: str_(r[9]), icono: autoVacio_(r[10]) || 'auto',
+            recurrencia: str_(r[11]) === 'unica' ? 'unica' : 'mensual', mes: mes, activo: true, medioPago: libreVacio_(r[5]), orden: fRows.length + 1 });
+          fRows = fuentesRows_(fSh);
+        }
+        var f = fuenteOut_(fRows.filter(function (x) { return str_(x[0]) === origen; })[0]);
+        var ms = mesesRows(), ef = fuenteMontoMesGs_(f, mes, ms);
+        prev = ef.solo;
+        if (Math.round(it.monto * 100) !== Math.round(ef.monto * 100)) { saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: it.monto }); w = true; }
+      } else {
+        if (!origen || !cRows.some(function (x) { return str_(x[0]) === origen; })) {
+          origen = pfIdSeguro_('c-', r[0]);
+          cSh = cajasSheet_();
+          if (!findRowByValue_(cSh, 1, origen)) saveCaja_({ id: origen, nombre: str_(r[2]).replace(/^'/, ''), presupuesto: num_(r[3]), filtroCampo: str_(r[6]), filtroValor: str_(r[7]),
+            color: str_(r[9]), icono: autoVacio_(r[10]) || '', activo: true, descripcion: str_(r[8]), orden: cRows.length + 1 });
+          cRows = cSh.getRange(2, 1, Math.max(lastDataRow_(cSh) - 1, 0) || 1, SHEETS.CAJAS.length).getValues();
+        }
+        var caja = cRows.filter(function (x) { return str_(x[0]) === origen; })[0];
+        var previo = pres(origen), efc = previo === null ? num_(caja[2]) : previo;
+        prev = previo;
+        if (Math.round(it.monto * 100) !== Math.round(efc * 100)) { savePresupuesto_({ periodo: mes, cajaId: origen, monto: it.monto }); w = true; }
+      }
+      est[mes] = { e: 'aplicada', m: it.monto, w: w, p: prev };
+      r[14] = origen;
+    }
+    var meses = Object.keys(est).sort();
+    while (meses.length > 36) delete est[meses.shift()];
+    r[15] = JSON.stringify(est);
+    r[17] = new Date().toISOString();
+    sh.getRange(it.idx + 2, 1, 1, r.length).setValues([r]);
+    salida.push(pfOut_(r));
+  });
+  return { mes: mes, plantillas: salida };
 }
 
 /* ===================== Datos de prueba (julio–septiembre 2026) ===================== */

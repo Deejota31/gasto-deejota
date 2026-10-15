@@ -2,20 +2,23 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Plus, Power, Search,
-  Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info,
+  Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info, CalendarDays, FilePlus2,
 } from 'lucide-react'
 import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { AppData, Caja, CatalogoItem, Filters, FiltroCampo } from '../lib/types'
-import { normName, otrosAlFinal } from '../lib/orden'
-import { ambitoLook, cajaLook, categoriaLook, COLORS, medioLook, sortMedios, subcategoriaLook } from '../lib/visual'
+import { normName } from '../lib/orden'
+import { opcionesAlcanceCombo, opcionesValor } from '../lib/alcance'
+import { cajaLook, COLORS, sortMedios } from '../lib/visual'
 import { Combobox, type Opcion } from '../components/Combobox'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { FuentesSeccion, Toggle } from '../components/fuentes'
-import { MenuAcciones } from '../components/MenuAcciones'
+import { MenuAcciones, type AccionMenu } from '../components/MenuAcciones'
+import { usePlantillasFin } from '../components/PlantillasFin'
+import { SwipeFila, useEsMovil } from '../components/swipe'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
 import { guardarPref, leerPref } from '../lib/prefs'
 import { dependenciasCaja } from '../lib/dependencias'
@@ -57,6 +60,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   const [vista, setVistaState] = useState<'grid' | 'lista'>(() => leerPref('deejota.vista.subcajas', ['grid', 'lista'] as const, 'lista'))
   const setVista = (v: 'grid' | 'lista') => { setVistaState(v); guardarPref('deejota.vista.subcajas', v) }
   const [form, setForm] = useState<{ caja: Caja | null; clonDe?: Caja | null } | null>(null)
+  const plantillas = usePlantillasFin(store, today.slice(0, 7))
   const [borrar, setBorrar] = useState<Caja | null>(null)
   const [ajustar, setAjustar] = useState<{ caja: Caja; asignado: number } | null>(null)
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
@@ -108,7 +112,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
     <div className="space-y-4">
       <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length}
         onAjustar={c.general && c.origen !== 'fuentes' ? () => setAjustar({ caja: c.general!, asignado: c.presupuesto }) : undefined} />
-      <FuentesSeccion store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
+      <FuentesSeccion plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
 
       <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -122,7 +126,10 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
             </h2>
             <p className="text-xs text-muted">Apartan parte del presupuesto consolidado por ámbito, categoría, subcategoría o medio de pago. No suman dinero.</p>
           </div>
-          <Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Nueva subcaja</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => plantillas.abrir('subcaja')}><CalendarDays className="size-4" /> Subcajas mensuales</Button>
+            <Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Nueva subcaja</Button>
+          </div>
         </div>
 
         {/* Barra de búsqueda, filtros y orden: pensada para muchas cajas */}
@@ -162,7 +169,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
           <ListadoCajas visibles={visibles} manual={manual} puedeOrdenar={puedeOrdenar} vista={vista} catalogo={catalogo} money={money} solapes={solapes} store={store}
             motivo={orden !== 'manual' ? 'Usa “Orden manual” para reordenar' : 'Quita la búsqueda y los filtros para reordenar'}
             onToggle={i => activar(i.caja)} onMover={mover} onEdit={caja => setForm({ caja })} onClone={caja => setForm({ caja: null, clonDe: caja })} onDelete={setBorrar}
-            onAjustar={i => i.r && setAjustar({ caja: i.caja, asignado: i.r.asignado })}
+            onAjustar={i => i.r && setAjustar({ caja: i.caja, asignado: i.r.asignado })} onPlantilla={caja => plantillas.guardarComoPlantilla('subcaja', caja.id)}
             onCommit={ids => store.track('cajas:orden', { pending: 'Guardando el orden…', ok: 'Orden de cajas guardado.', error: 'No se pudo guardar el orden de las cajas. Se restauró el anterior.' },
               () => store.actions.reorderCajas(ids), { retry: false })} />
         )}
@@ -170,6 +177,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
 
       {form && <CajaForm store={store} caja={form.caja} clonDe={form.clonDe ?? null} cajas={data.cajas} catalogo={catalogo} medios={sortMedios(data.medios.map(m => m.nombre))} onClose={() => setForm(null)} />}
       {borrar && <BorrarCaja store={store} caja={data.cajas.find(x => x.id === borrar.id) ?? borrar} data={data} onClose={() => setBorrar(null)} onDesactivar={() => { const x = borrar; setBorrar(null); if (cajaActiva(x)) activar(x) }} />}
+      {plantillas.nodo}
       {ajustar && <CajaModal store={store} target={ajustar} cajas={c} mes={mes} money={money} onClose={() => setAjustar(null)} />}
     </div>
   )
@@ -232,9 +240,9 @@ function estadoDe(i: Item, money: (n: number) => string) {
 const resumirNombres = (xs: string[]) => (xs.length <= 3 ? xs.join(', ') : `${xs.slice(0, 3).join(', ')} y ${xs.length - 3} más`)
 const alcanceTxt = (c: Caja) => `${c.filtroCampo} · ${c.filtroValor}`
 
-function ListadoCajas({ visibles, manual, puedeOrdenar, vista, catalogo, money, solapes, store, motivo, onToggle, onMover, onEdit, onClone, onDelete, onAjustar, onCommit }: {
+function ListadoCajas({ visibles, manual, puedeOrdenar, vista, catalogo, money, solapes, store, motivo, onToggle, onMover, onEdit, onClone, onDelete, onAjustar, onCommit, onPlantilla }: {
   visibles: Item[]; manual: string[]; puedeOrdenar: boolean; vista: 'grid' | 'lista'; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; store: AppStore; motivo: string
-  onToggle: (i: Item) => void; onMover: (id: string, d: number) => void; onEdit: (c: Caja) => void; onClone: (c: Caja) => void; onDelete: (c: Caja) => void; onAjustar: (i: Item) => void; onCommit: (ids: string[]) => void
+  onToggle: (i: Item) => void; onMover: (id: string, d: number) => void; onEdit: (c: Caja) => void; onClone: (c: Caja) => void; onDelete: (c: Caja) => void; onAjustar: (i: Item) => void; onCommit: (ids: string[]) => void; onPlantilla: (c: Caja) => void
 }) {
   // Arrastrar solo en "Orden manual" y sin búsqueda ni filtros: el orden visible es entonces el orden global.
   const habilitado = puedeOrdenar && manual.length > 1
@@ -242,7 +250,13 @@ function ListadoCajas({ visibles, manual, puedeOrdenar, vista, catalogo, money, 
   const porId = new Map(visibles.map(i => [i.caja.id, i]))
   const items = (habilitado ? dnd.orden : visibles.map(i => i.caja.id)).map(id => porId.get(id)).filter((i): i is Item => !!i)
   const acc = (i: Item) => <Acciones caja={i.caja} puedeOrdenar={puedeOrdenar} first={manual[0] === i.caja.id} last={manual.at(-1) === i.caja.id}
-    onEdit={() => onEdit(i.caja)} onUp={() => onMover(i.caja.id, -1)} onDown={() => onMover(i.caja.id, 1)} onClone={() => onClone(i.caja)} onDelete={() => onDelete(i.caja)} />
+    onEdit={() => onEdit(i.caja)} onUp={() => onMover(i.caja.id, -1)} onDown={() => onMover(i.caja.id, 1)} onClone={() => onClone(i.caja)} onDelete={() => onDelete(i.caja)} onPlantilla={() => onPlantilla(i.caja)} />
+  const swipe = (i: Item): AccionMenu[] => [
+    { key: 'edit', label: 'Editar', icon: <Pencil className="size-4" />, onClick: () => onEdit(i.caja) },
+    { key: 'clone', label: 'Clonar', icon: <Copy className="size-4" />, onClick: () => onClone(i.caja) },
+    { key: 'tpl', label: 'Plantilla', icon: <FilePlus2 className="size-4" />, onClick: () => onPlantilla(i.caja) },
+    { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-4" />, onClick: () => onDelete(i.caja), danger: true },
+  ]
   const asa = (i: Item) => <AsaOrden {...dnd.asa(i.caja.id)} habilitado={habilitado} motivo={motivo} />
   return (
     <>
@@ -252,7 +266,7 @@ function ListadoCajas({ visibles, manual, puedeOrdenar, vista, catalogo, money, 
             dnd={dnd.item(i.caja.id)} asa={asa(i)} acciones={acc(i)} onAjustar={() => onAjustar(i)} />)}
         </ul>
       ) : (
-        <ListaCajas items={items} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending} acciones={acc} asa={asa} dnd={id => dnd.item(id)} onToggle={onToggle} />
+        <ListaCajas items={items} catalogo={catalogo} money={money} solapes={solapes} pending={store.pending} acciones={acc} swipe={swipe} asa={asa} dnd={id => dnd.item(id)} onToggle={onToggle} />
       )}
       <AvisoOrden texto={dnd.aviso} />
     </>
@@ -323,9 +337,11 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, o
   )
 }
 
-function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onToggle, asa, dnd }: {
-  asa: (i: Item) => ReactNode; dnd: (id: string) => DndItem; items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>; acciones: (i: Item) => ReactNode; onToggle: (i: Item) => void
+function ListaCajas({ items, catalogo, money, solapes, pending, acciones, swipe, onToggle, asa, dnd }: {
+  asa: (i: Item) => ReactNode; dnd: (id: string) => DndItem; items: Item[]; catalogo: CatalogoItem[]; money: (n: number) => string; solapes: Map<string, string[]>; pending: ReadonlySet<string>
+  acciones: (i: Item) => ReactNode; swipe: (i: Item) => AccionMenu[]; onToggle: (i: Item) => void
 }) {
+  const movil = useEsMovil()
   return (
     <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label="Lista de cajas">
       {items.map(i => {
@@ -333,24 +349,30 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onTogg
         const { Icon, color } = cajaLook(caja, catalogo)
         const e = estadoDe(i, money)
         return (
-          <li key={caja.id} {...dnd(caja.id)} data-testid="caja" className={`${CLASE_ARRASTRE} grid grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-3 border border-transparent px-3 py-2.5 transition hover:bg-bg/60 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_7rem_auto_auto] ${cajaActiva(caja) ? '' : 'opacity-70'}`}>
-            {asa(i)}
-            <span className="grid size-10 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
-            <div className="min-w-0">
-              <p className="flex items-center gap-2 truncate text-sm font-semibold">{caja.nombre}
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: e.tono.fg, background: e.tono.bg }}>{e.txt}</span>
-                {pending.has(`caja:${caja.id}`) && <span className="text-[10px] font-normal text-muted">Guardando…</span>}</p>
-              <p className="truncate text-[11px] text-muted">{alcanceTxt(caja)}{solapes.get(caja.id)?.length ? ` · comparte con ${resumirNombres(solapes.get(caja.id)!)}` : ''}</p>
-            </div>
-            <div className="order-last col-span-4 sm:order-none sm:col-span-1">
-              {r ? (<>
-                <span className="block h-1.5 overflow-hidden rounded-full bg-bg"><span className="bar-grow block h-full rounded-full" style={{ width: `${Math.min(r.pct ?? 0, 100)}%`, background: r.excedido ? TONO.alerta.fg : color }} /></span>
-                <span className="tabular mt-1 block text-[11px] text-muted">{money(r.gastado)} de {r.asignado ? money(r.asignado) : '—'}</span>
-              </>) : <span className="text-[11px] text-muted">Inactiva</span>}
-            </div>
-            <span className="tabular hidden text-right text-sm font-bold sm:block" style={{ color: r && r.disponible < 0 ? TONO.alerta.fg : 'var(--ink)' }}>{r?.asignado ? money(r.disponible) : '—'}</span>
-            <Toggle on={cajaActiva(caja)} onChange={() => onToggle(i)} label={`${cajaActiva(caja) ? 'Desactivar' : 'Activar'} ${caja.nombre}`} disabled={pending.has(`caja:${caja.id}`)} />
-            {acciones(i)}
+          <li key={caja.id} {...dnd(caja.id)} data-testid="caja" className={`${CLASE_ARRASTRE} border border-transparent transition hover:bg-bg/60`}>
+            <SwipeFila nombre={caja.nombre} acciones={swipe(i)} activo={movil} testId="caja-fila">
+              {/* Móvil: línea 1 = asa, icono, nombre, interruptor; línea 2 = progreso y montos. Escritorio: una sola fila. */}
+              <div className="grid grid-cols-[2rem_2.25rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 px-2.5 py-2 sm:grid-cols-[2rem_2.5rem_minmax(0,1.4fr)_minmax(0,1fr)_6.5rem_auto_auto] sm:gap-x-3 sm:px-3 sm:py-2.5">
+                {asa(i)}
+                <span className="grid size-9 place-items-center rounded-xl sm:size-10" style={{ background: `${color}1A`, color }}><Icon className="size-4" /></span>
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 truncate text-sm font-semibold"><span className="truncate">{caja.nombre}</span>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: e.tono.fg, background: e.tono.bg }} data-testid="estado-caja">{e.txt}</span>
+                    {pending.has(`caja:${caja.id}`) && <span className="text-[10px] font-normal text-muted">Guardando…</span>}</p>
+                  <p className="truncate text-[11px] text-muted">{alcanceTxt(caja)}{solapes.get(caja.id)?.length ? ` · comparte con ${resumirNombres(solapes.get(caja.id)!)}` : ''}</p>
+                </div>
+                <div className="col-start-3 col-end-5 row-start-2 min-w-0 sm:col-end-auto sm:row-start-1">
+                  {r ? (<>
+                    <span className="block h-1.5 overflow-hidden rounded-full bg-bg"><span className="bar-grow block h-full rounded-full" style={{ width: `${Math.min(r.pct ?? 0, 100)}%`, background: r.excedido ? TONO.alerta.fg : color }} /></span>
+                    <span className="tabular mt-1 flex justify-between gap-2 text-[11px] text-muted"><span className="truncate">{money(r.gastado)} de {r.asignado ? money(r.asignado) : '—'}</span>
+                      <b className="shrink-0 sm:hidden" style={{ color: r.disponible < 0 ? TONO.alerta.fg : TONO.ok.fg }}>{r.asignado ? `Disp. ${money(r.disponible)}` : ''}</b></span>
+                  </>) : <span className="text-[11px] text-muted">Inactiva: no reserva dinero</span>}
+                </div>
+                <span className="tabular hidden text-right text-sm font-bold sm:block" style={{ color: r && r.disponible < 0 ? TONO.alerta.fg : 'var(--ink)' }}>{r?.asignado ? money(r.disponible) : '—'}</span>
+                <Toggle on={cajaActiva(caja)} onChange={() => onToggle(i)} label={`${cajaActiva(caja) ? 'Desactivar' : 'Activar'} ${caja.nombre}`} disabled={pending.has(`caja:${caja.id}`)} />
+                {!movil && acciones(i)}
+              </div>
+            </SwipeFila>
           </li>
         )
       })}
@@ -358,8 +380,8 @@ function ListaCajas({ items, catalogo, money, solapes, pending, acciones, onTogg
   )
 }
 
-function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete }: {
-  caja: Caja; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void
+function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onClone, onDelete, onPlantilla }: {
+  caja: Caja; puedeOrdenar: boolean; first: boolean; last: boolean; onEdit: () => void; onUp: () => void; onDown: () => void; onClone: () => void; onDelete: () => void; onPlantilla: () => void
 }) {
   const sinOrden = puedeOrdenar ? undefined : 'Usa “Orden manual” y quita la búsqueda y los filtros para reordenar'
   return (
@@ -369,6 +391,7 @@ function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onClo
         { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: sinOrden },
         { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: sinOrden },
         { key: 'clone', label: 'Clonar', icon: <Copy className="size-3.5" />, onClick: onClone },
+        { key: 'tpl', label: 'Guardar como plantilla', icon: <FilePlus2 className="size-3.5" />, onClick: onPlantilla },
         { key: 'delete', label: 'Eliminar', icon: <Trash2 className="size-3.5" />, onClick: onDelete, danger: true },
       ]} />
     </div>
@@ -412,14 +435,6 @@ export function calcularSolapes(cajas: Caja[], catalogo: CatalogoItem[], medios:
 
 /* ============================== Crear / editar ============================== */
 
-function opcionesValor(campo: Alcance, catalogo: CatalogoItem[], medios: string[]): string[] {
-  const vig = catalogo.filter(c => c.activo !== false)
-  if (campo === 'Ámbito') return [...new Set(vig.map(c => c.ambito))]
-  if (campo === 'Categoría') return otrosAlFinal([...new Set(vig.filter(c => c.categoria).map(c => c.categoria))].sort((a, b) => a.localeCompare(b)))
-  if (campo === 'Subcategoría') return [...new Set(vig.filter(c => c.subcategoria).map(c => `${c.categoria} › ${c.subcategoria}`))].sort((a, b) => a.localeCompare(b))
-  return medios
-}
-
 function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose }: {
   store: AppStore; caja: Caja | null; clonDe?: Caja | null; cajas: Caja[]; catalogo: CatalogoItem[]; medios: string[]; onClose: () => void
 }) {
@@ -441,14 +456,7 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
     return valor && !xs.includes(valor) ? [valor, ...xs] : xs
   }, [campo, catalogo, medios, valor])
   // Opciones con el icono y color del catálogo; las subcategorías se agrupan por su categoría (que también se ve en el campo).
-  const opcionesCombo = useMemo<Opcion[]>(() => opciones.map(o => {
-    if (campo === 'Ámbito') { const l = ambitoLook(o, catalogo); return { value: o, label: o, Icon: l.Icon, color: l.color } }
-    if (campo === 'Categoría') { const l = categoriaLook(o, catalogo); return { value: o, label: o, Icon: l.Icon, color: l.color } }
-    if (campo === 'Medio de pago') { const l = medioLook(o); return { value: o, label: o, Icon: l.Icon, color: l.color } }
-    const [cat, sub] = o.includes(' › ') ? o.split(' › ') : ['', o]
-    const l = subcategoriaLook(sub, cat, catalogo)
-    return { value: o, label: sub, desc: cat ? `en ${cat}` : undefined, group: cat || 'Otras', Icon: l.Icon, color: l.color }
-  }), [opciones, campo, catalogo])
+  const opcionesCombo = useMemo<Opcion[]>(() => opcionesAlcanceCombo(opciones, campo, catalogo), [opciones, campo, catalogo])
   const otras = cajas.filter(x => x.id !== id && x.filtroCampo !== 'Todos')
   // Automático: el de su alcance (medio de pago, ámbito, categoría o subcategoría). Elegir un icono o un color lo fija.
   const colorBase = caja?.color || COLORS[cajas.length % COLORS.length]

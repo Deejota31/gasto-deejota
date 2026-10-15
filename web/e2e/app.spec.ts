@@ -715,12 +715,12 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     await expect.poll(async () => (await orden()).slice(0, 2)).toEqual(['Agua', 'Luz'])
     expect(((await calls(page)).reorderPlantillas ?? 0) - (c0.reorderPlantillas ?? 0)).toBe(1)
     // arrastrar Internet sobre Agua
-    await m.getByRole('button', { name: 'Arrastrar Internet' }).dragTo(m.getByRole('button', { name: 'Arrastrar Agua' }))
+    await m.getByRole('button', { name: 'Reordenar Internet' }).dragTo(m.getByRole('button', { name: 'Reordenar Agua' }))
     await expect.poll(async () => (await orden()).slice(0, 3)).toEqual(['Internet', 'Agua', 'Luz'])
     expect(((await calls(page)).reorderPlantillas ?? 0) - (c0.reorderPlantillas ?? 0)).toBe(2)
     // con filtros activos no se reordena
     await m.getByLabel('Buscar plantilla').fill('a')
-    await expect(m.getByRole('button', { name: 'Arrastrar Agua' })).toBeDisabled()
+    await expect(m.getByRole('button', { name: 'Reordenar Agua' })).toBeDisabled()
     await m.getByRole('button', { name: 'Más acciones de Agua' }).click()
     await expect(m.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
     await m.getByRole('button', { name: 'Más acciones de Agua' }).click() // cierra el menú
@@ -951,7 +951,7 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
       }))
       for (const x of medidas) {
         expect(x.dentro).toBe(true)
-        if (vp.width < 768) { expect(Math.abs(x.centro - x.centroFila)).toBeLessThan(3); expect(x.alturas).toHaveLength(1) }
+        if (vp.width < 768) { expect(x.alturas).toHaveLength(1); expect(x.der).toBeLessThanOrEqual(x.derFila) }   // v1.17: «Usar» en la línea 1 junto al nombre; el resto, deslizando
         else expect(x.derFila - x.der).toBeLessThan(20)
       }
       await expect.poll(sinScrollH).toBe(true)
@@ -1853,8 +1853,8 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
 
   test('fuentes: el menú ⋯ trae Subir, Bajar, Clonar y Eliminar (en ese orden), no se corta y respeta primero/último', async ({ page }) => {
     await menuF(page, 'General').click()
-    await expect(page.getByRole('menuitem')).toHaveCount(4)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await expect(page.getByRole('menuitem')).toHaveCount(5)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
     await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()          // primera
     await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeEnabled()
     const vp = page.viewportSize()!
@@ -1973,8 +1973,8 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await menuC(page, 'Caja Auto').scrollIntoViewIfNeeded()
     await page.waitForTimeout(400)
     await menuC(page, 'Caja Auto').click()
-    await expect(page.getByRole('menuitem')).toHaveCount(4)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await expect(page.getByRole('menuitem')).toHaveCount(5)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
     await page.keyboard.press('Escape')
     // Subir / Bajar con persistencia
     const antes = await nombres()
@@ -2010,8 +2010,8 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await page.getByRole('region', { name: /Reservas/ }).getByRole('radio', { name: 'Lista' }).click()
     await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toBeVisible()
     await abrirMenu(menuC(page, 'Caja Auto (Copia)'))
-    await expect(page.getByRole('menuitem')).toHaveCount(4)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Eliminar'])
+    await expect(page.getByRole('menuitem')).toHaveCount(5)
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     // la copia está inactiva (no toma gastos): se puede eliminar
     await expect(dialog(page)).toContainText('Está inactiva')

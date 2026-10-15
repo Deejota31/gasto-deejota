@@ -104,6 +104,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     presupuestos: [] as unknown[][],
     fuentes: demoFuentes(nFuentes, today.slice(0, 7)),
     fuentesMeses: [] as unknown[][],
+    // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
+    plantillasFin: [] as unknown[][],
     // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto, moneda, medio, orden]
     plantillas: ([
       ['Familia', 'Servicios', 'Luz', 'Luz', 120, 'PEN', 'Yape'],
@@ -140,8 +142,29 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
   const CARPETA_DEMO = { id: 'demo-backup-folder', nombre: 'Backup', url: 'https://drive.google.com/drive/', personalizada: false }
   let carpeta = { ...CARPETA_DEMO }
   const fail = (code: string, message: string) => Object.assign(new Error(message), { code })
+
+  // ---- Plantillas de fuentes y de subcajas (misma lógica que el backend) ----
+  const pfPub = (r: unknown[]) => {
+    const est = r[15] as Record<string, { e: string; m: number }>
+    return [...r.slice(0, 15), Object.fromEntries(Object.entries(est).map(([m, v]) => [m, { e: v.e, m: v.m }])), r[16], r[17]]
+  }
+  const MES = /^\d{4}-(0[1-9]|1[0-2])$/
+  const seguro = (pre: string, id: unknown) => (pre + String(id).replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 60)
+  const eq = (a: number, b: number) => Math.round(a * 100) === Math.round(b * 100)
+  const efectivoFuente = (f: unknown[], mes: string) => {
+    let solo: unknown[] | undefined, desde: unknown[] | undefined
+    for (const m of db.fuentesMeses) {
+      if (m[0] !== f[0]) continue
+      if (m[3] === 'solo' && m[1] === mes) solo = m
+      else if (m[3] === 'desde' && String(m[1]) <= mes && (!desde || String(m[1]) > String(desde[1]))) desde = m
+    }
+    if (solo) return { monto: Number(solo[2]), solo: Number(solo[2]) }
+    if (f[8] === 'unica') return { monto: mes === f[9] ? Number(f[2]) : 0, solo: null }
+    if (desde) return { monto: Number(desde[2]), solo: null }
+    return { monto: !f[9] || mes >= String(f[9]) ? Number(f[2]) : 0, solo: null }
+  }
   const handlers: Record<string, (p: Record<string, unknown>) => unknown> = {
-    data: () => structuredClone({ ...db, vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
+    data: () => structuredClone({ ...db, plantillasFin: db.plantillasFin.map(pfPub), vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
     saveGasto: p => {
       const now = new Date().toISOString()
       const i = db.gastos.findIndex(r => r[13] === p.id)
@@ -282,6 +305,108 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const row = [p.id, nombre, Math.round(Number(p.monto) * 100) / 100, p.moneda, p.color || '#1e3a8a', p.icono ?? '', activo,
         p.orden === undefined && prev ? prev[7] : Number(p.orden ?? 0), p.recurrencia === 'unica' ? 'unica' : 'mensual', mes, medio, prev ? prev[11] : now, now]
       return upsert(db.fuentes, 1, row)
+    },
+    savePlantillaFin: p => {
+      const tipo = String(p.tipo)
+      if (tipo !== 'fuente' && tipo !== 'subcaja') throw fail('VALIDATION', 'Tipo de plantilla inválido.')
+      const nombre = String(p.nombre ?? '').trim()
+      if (!nombre) throw fail('VALIDATION', 'Nombre de la plantilla es obligatorio.')
+      if (!(Number(p.monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
+      const origen = String(p.origenId ?? '')
+      if (tipo === 'subcaja' && (!['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'].includes(String(p.campo)) || !String(p.valor ?? '').trim())) throw fail('VALIDATION', 'Alcance de subcaja inválido.')
+      if (origen && !(tipo === 'fuente' ? db.fuentes : db.cajas).some(r => r[0] === origen)) throw fail('NOT_FOUND', tipo === 'fuente' ? 'La fuente original ya no existe.' : 'La subcaja original ya no existe.')
+      let maxOrden = 0
+      for (const r of db.plantillasFin) {
+        maxOrden = Math.max(maxOrden, Number(r[13]))
+        if (r[0] === p.id || r[1] !== tipo) continue
+        if (normName(String(r[2])) === normName(nombre)) throw fail('VALIDATION', `Ya existe una plantilla llamada “${r[2]}”.`)
+        if (origen && r[14] === origen) throw fail('DUPLICATE', `Ya existe una plantilla vinculada a este registro (“${r[2]}”). Edítala en lugar de crear otra.`)
+      }
+      const prev = db.plantillasFin.find(r => r[0] === p.id)
+      const now = new Date().toISOString()
+      const medios = String(p.medios ?? '').split('|').map(x => x.trim()).filter(x => x && x !== 'Libre')
+      const row = [p.id, tipo, nombre, Math.round(Number(p.monto) * 100) / 100, tipo === 'fuente' ? String(p.moneda || 'PEN') : '', tipo === 'fuente' ? [...new Set(medios)].join('|') : '',
+        tipo === 'subcaja' ? String(p.campo) : '', tipo === 'subcaja' ? String(p.valor).trim() : '', String(p.descripcion ?? ''), String(p.color || '#1e3a8a'), String(p.icono ?? ''),
+        p.recurrencia === 'unica' ? 'unica' : 'mensual', p.activo !== false, prev ? prev[13] : p.orden === undefined ? maxOrden + 1 : Number(p.orden),
+        prev && !origen ? prev[14] : origen, prev ? prev[15] : {}, prev ? prev[16] : now, now]
+      upsert(db.plantillasFin, 1, row)
+      return pfPub(row)
+    },
+    deletePlantillaFin: p => {
+      const antes = db.plantillasFin.length
+      db.plantillasFin = db.plantillasFin.filter(r => r[0] !== p.id)
+      return { id: p.id, eliminada: db.plantillasFin.length < antes }
+    },
+    reorderPlantillasFin: p => {
+      const ids = (p.ids as string[]) ?? []
+      let extra = ids.length + 1
+      for (const r of db.plantillasFin) if (r[1] === p.tipo) r[13] = ids.indexOf(String(r[0])) >= 0 ? ids.indexOf(String(r[0])) + 1 : extra++
+      return { ok: true }
+    },
+    aplicarPlantillasFin: p => {
+      const mes = String(p.mes)
+      if (!MES.test(mes)) throw fail('VALIDATION', 'Mes inválido (AAAA-MM).')
+      const items = (p.items as { id: string; accion?: string; monto?: number }[]) ?? []
+      if (!items.length || items.length > 60) throw fail('VALIDATION', 'Selecciona entre 1 y 60 plantillas.')
+      const plan = items.map(it => {
+        const r = db.plantillasFin.find(x => x[0] === it.id)
+        if (!r) throw fail('NOT_FOUND', 'Una plantilla ya no existe. Actualiza los datos.')
+        const accion = it.accion === 'omitir' ? 'omitir' : it.accion === 'pendiente' ? 'pendiente' : 'aplicar'
+        const monto = accion === 'aplicar' ? Number(it.monto ?? r[3]) : 0
+        if (accion === 'aplicar' && !(monto >= 0)) throw fail('VALIDATION', 'Monto inválido.')
+        if (accion === 'aplicar' && r[12] === false) throw fail('VALIDATION', `La plantilla “${r[2]}” está desactivada.`)
+        if (accion === 'aplicar' && !r[14]) {
+          if (r[1] === 'fuente' && db.fuentes.some(f => f[0] !== seguro('f-', r[0]) && normName(String(f[1])) === normName(String(r[2])))) throw fail('VALIDATION', `Ya existe una fuente llamada “${r[2]}”. Enlaza la plantilla a esa fuente (Guardar como plantilla desde ella).`)
+          if (r[1] === 'subcaja' && db.cajas.some(c => c[0] !== seguro('c-', r[0]) && c[7] !== false && c[3] === r[6] && normName(String(c[4])) === normName(String(r[7])))) throw fail('VALIDATION', `Ya existe una subcaja con el alcance de “${r[2]}”. Enlaza la plantilla a esa subcaja.`)
+        }
+        return { r, accion, monto }
+      })
+      const revertir = (r: unknown[], est: { e: string; w?: boolean; p?: number | null } | undefined) => {
+        if (!est || est.e !== 'aplicada' || !est.w) return
+        const origen = r[14]
+        if (r[1] === 'fuente') {
+          db.fuentesMeses = db.fuentesMeses.filter(x => !(x[0] === origen && x[1] === mes && x[3] === 'solo'))
+          if (est.p != null) db.fuentesMeses.push([origen, mes, est.p, 'solo'])
+        } else {
+          db.presupuestos = db.presupuestos.filter(x => !(x[0] === mes && x[1] === origen))
+          if (est.p != null) db.presupuestos.push([mes, origen, est.p])
+        }
+      }
+      const out: unknown[] = []
+      for (const { r, accion, monto } of plan) {
+        const est = r[15] as Record<string, { e: string; m: number; w?: boolean; p?: number | null }>
+        const act = est[mes]
+        if (accion === 'aplicar' && act?.e === 'aplicada' && act.m === monto) { out.push(pfPub(r)); continue }
+        if (act?.e === 'aplicada') revertir(r, act)
+        if (accion === 'pendiente') delete est[mes]
+        else if (accion === 'omitir') est[mes] = { e: 'omitida', m: 0 }
+        else {
+          let w = false, prev: number | null = null, origen = String(r[14])
+          if (r[1] === 'fuente') {
+            if (!db.fuentes.some(f => f[0] === origen)) {
+              origen = seguro('f-', r[0])
+              if (!db.fuentes.some(f => f[0] === origen)) handlers.saveFuente({ id: origen, nombre: r[2], monto: r[3], moneda: r[4], color: r[9], icono: r[10], recurrencia: r[11], mes, activo: true, medioPago: r[5] || 'Libre', orden: db.fuentes.length + 1 })
+            }
+            const ef = efectivoFuente(db.fuentes.find(f => f[0] === origen)!, mes)
+            prev = ef.solo
+            if (!eq(monto, ef.monto)) { handlers.saveFuenteMes({ fuenteId: origen, mes, modo: 'solo', monto }); w = true }
+          } else {
+            if (!db.cajas.some(c => c[0] === origen)) {
+              origen = seguro('c-', r[0])
+              if (!db.cajas.some(c => c[0] === origen)) handlers.saveCaja({ id: origen, nombre: r[2], presupuesto: r[3], filtroCampo: r[6], filtroValor: r[7], color: r[9], icono: r[10], activo: true, descripcion: r[8], orden: db.cajas.length + 1 })
+            }
+            const pr = db.presupuestos.find(x => x[0] === mes && x[1] === origen)
+            prev = pr ? Number(pr[2]) : null
+            const ef = pr ? Number(pr[2]) : Number(db.cajas.find(c => c[0] === origen)![2])
+            if (!eq(monto, ef)) { handlers.savePresupuesto({ periodo: mes, cajaId: origen, monto }); w = true }
+          }
+          est[mes] = { e: 'aplicada', m: monto, w, p: prev }
+          r[14] = origen
+        }
+        r[17] = new Date().toISOString()
+        out.push(pfPub(r))
+      }
+      return { mes, plantillas: out }
     },
     saveFuenteMes: p => {
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.mes))) throw fail('VALIDATION', 'Mes inválido (AAAA-MM).')

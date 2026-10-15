@@ -10,7 +10,7 @@ import { isOtros, normName, otrosAlFinal } from '../lib/orden'
 import { dependenciasCategoria } from '../lib/dependencias'
 import { MenuAcciones } from '../components/MenuAcciones'
 import { Combobox } from '../components/Combobox'
-import { Button, Checkbox, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, useDismiss } from '../components/ui'
+import { Button, Checkbox, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch } from '../components/ui'
 
 type Nivel = 'ambito' | 'categoria' | 'subcategoria'
 interface Target { mode: 'create' | 'edit'; nivel: Nivel; ambito?: string; categoria?: string; subcategoria?: string }
@@ -48,10 +48,8 @@ export default function Categorias({ store }: { store: AppStore }) {
   const [sel, setSel] = useState('')
   const [q, setQ] = useState('')
   const [target, setTarget] = useState<Target | null>(null)
-  const [menu, setMenu] = useState(false)
   const [medioEd, setMedioEd] = useState<MedioEdicion>(null)
   const [borrar, setBorrar] = useState<{ ambito: string; cat: CatNode } | null>(null)
-  const menuRef = useDismiss(menu, () => setMenu(false))
   const term = q.trim().toLowerCase()
   const current = tree.find(a => a.name === sel) ?? tree[0]
 
@@ -100,19 +98,15 @@ export default function Categorias({ store }: { store: AppStore }) {
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
             <input aria-label="Buscar en el catálogo" placeholder="Buscar ámbito, categoría o subcategoría…" className={`${inputCls} h-10 pl-9`} value={q} onChange={e => setQ(e.target.value)} />
           </label>
-          <div ref={menuRef} className="relative">
-            <Button onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} disabled={!store.data}><Plus className="size-4" /> Agregar <ChevronDown className="size-4" /></Button>
-            {menu && (
-              <div role="menu" className="absolute top-11 right-0 z-40 w-60 rounded-2xl border border-line bg-card p-1.5 shadow-xl">
-                {([['ambito', 'Nuevo ámbito', Layers], ['categoria', 'Nueva categoría', Shapes], ['subcategoria', 'Nueva subcategoría', Tag]] as const).map(([nivel, label, Icon]) => (
-                  <button key={nivel} role="menuitem" type="button" onClick={() => { setMenu(false); setTarget({ mode: 'create', nivel, ambito: current?.name }) }}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Icon className="size-4 text-muted" />{label}</button>
-                ))}
-                <button role="menuitem" type="button" onClick={() => { setMenu(false); setQ(''); setMedioEd('nuevo') }}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-bg"><Wallet className="size-4 text-muted" />Nuevo medio de pago</button>
-              </div>
-            )}
-          </div>
+          <MenuAcciones label="Agregar al catálogo" ancho={240} disabled={!store.data}
+            triggerClass="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy px-3 text-sm font-medium text-white shadow-sm transition hover:brightness-110 disabled:opacity-50 dark:text-[#0E1525]"
+            trigger={<><Plus className="size-4" /> Agregar <ChevronDown className="size-4" /></>}
+            acciones={[
+              { key: 'ambito', label: 'Nuevo ámbito', icon: <Layers className="size-4" />, onClick: () => setTarget({ mode: 'create', nivel: 'ambito', ambito: current?.name }) },
+              { key: 'categoria', label: 'Nueva categoría', icon: <Shapes className="size-4" />, onClick: () => setTarget({ mode: 'create', nivel: 'categoria', ambito: current?.name }) },
+              { key: 'subcategoria', label: 'Nueva subcategoría', icon: <Tag className="size-4" />, onClick: () => setTarget({ mode: 'create', nivel: 'subcategoria', ambito: current?.name }) },
+              { key: 'medio', label: 'Nuevo medio de pago', icon: <Wallet className="size-4" />, onClick: () => { setQ(''); setMedioEd('nuevo') } },
+            ]} />
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {stats.map(s => (
