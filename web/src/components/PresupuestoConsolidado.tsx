@@ -8,7 +8,7 @@ import { InfoTooltip } from './ui'
  * No calcula nada: todo sale de `aggregate().cajas`. El presupuesto usa el período completo (sin filtros de
  * categoría, ámbito o medio), por eso su "Gastado del período" puede diferir del KPI "Total gastado" con filtros.
  */
-export const ESTADO = { ok: '#0F8A6B', atencion: '#B7791F', alerta: '#C0362C' }
+export const ESTADO = { ok: 'var(--success)', atencion: 'var(--warning)', alerta: 'var(--danger)' }
 
 export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode }) {
   const P = c.presupuesto

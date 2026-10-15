@@ -228,7 +228,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
-              {errores._lote && <p className="text-xs font-medium text-[#D2463C]" role="alert">{errores._lote}</p>}
+              {errores._lote && <p className="text-xs font-medium text-danger" role="alert">{errores._lote}</p>}
               <p className="text-xs text-muted" aria-live="polite"><b className="text-ink">{n}</b> gasto{n === 1 ? '' : 's'} seleccionado{n === 1 ? '' : 's'}</p>
               <p className="tabular flex flex-wrap gap-x-3 text-base font-bold text-ink" data-testid="totales">
                 {totales.size ? [...totales].map(([m, c]) => <span key={m} className="whitespace-nowrap">Total {m}: {formatMoney(c, m)}</span>) : <span className="font-medium text-muted">Total: —</span>}
@@ -306,10 +306,10 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                             <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: `${l.color}1F`, color: l.color }}><l.Icon className="size-4" /></span>
                             <div className="min-w-0">
                               <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold"><span className="truncate">{p.descripcion}</span>
-                                {p.esCompromiso && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#E7F7F2] px-1.5 py-0.5 text-[10px] font-semibold text-[#0F7A5F] dark:bg-[#0F7A5F]/25 dark:text-[#6EE7C5]" title="Cuenta en Compromisos mensuales"><Repeat className="size-2.5" /> Compromiso</span>}</p>
+                                {p.esCompromiso && <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-[#0F7A5F] dark:bg-[#0F7A5F]/25 dark:text-[#6EE7C5]" title="Cuenta en Compromisos mensuales"><Repeat className="size-2.5" /> Compromiso</span>}</p>
                               <p className="truncate text-[11px] text-muted">{p.ambito} · {p.categoria}{p.subcategoria !== p.descripcion ? ` · ${p.subcategoria}` : ''}</p>
-                              {rev && <p className="flex items-center gap-1 text-[11px] font-medium text-[#92400E]"><AlertTriangle className="size-3" /> Requiere revisión: {rev}</p>}
-                              {errores[p.id] && <p className="text-[11px] font-medium text-[#D2463C]" role="alert">{errores[p.id]}</p>}
+                              {rev && <p className="flex items-center gap-1 text-[11px] font-medium text-warning"><AlertTriangle className="size-3" /> Requiere revisión: {rev}</p>}
+                              {errores[p.id] && <p className="text-[11px] font-medium text-danger" role="alert">{errores[p.id]}</p>}
                             </div>
                           </div>
                           {/* Edición rápida: valores temporales del lote, no cambian la plantilla */}
@@ -317,7 +317,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView }: {
                             <label className="relative block">
                               <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-xs text-muted">{simbolo(f.moneda)}</span>
                               <input aria-label={`Monto de ${p.descripcion}`} inputMode="decimal" value={f.monto} placeholder="0.00" onChange={e => setValor(p.id, { monto: e.target.value.replace(/[^\d.,]/g, '') })}
-                                className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : editado ? 'border-navy/50' : 'border-line'}`} />
+                                className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-danger' : editado ? 'border-navy/50' : 'border-line'}`} />
                             </label>
                             <Combobox compact label={`Moneda de ${p.descripcion}`} value={f.moneda} onChange={v => setValor(p.id, { moneda: v })} options={opcionesMoneda(monedas, f.moneda)} />
                             <Combobox compact label={`Medio de pago de ${p.descripcion}`} value={f.medioPago} onChange={v => setValor(p.id, { medioPago: v })} placeholder="Medio…" options={opcionesMedio(medios, f.medioPago)} />
@@ -365,7 +365,7 @@ function RowMenu({ label, canMove, first, last, onEdit, onClone, onDelete, onUp,
           <button role="menuitem" type="button" className={item} onClick={run(onClone)}><Copy className="size-3.5 text-muted" /> Clonar</button>
           <button role="menuitem" type="button" className={item} disabled={!canMove || first} onClick={run(onUp)}><ArrowUp className="size-3.5 text-muted" /> Subir</button>
           <button role="menuitem" type="button" className={item} disabled={!canMove || last} onClick={run(onDown)}><ArrowDown className="size-3.5 text-muted" /> Bajar</button>
-          <button role="menuitem" type="button" className={`${item} text-[#D2463C]`} onClick={run(onDelete)}><Trash2 className="size-3.5" /> Eliminar</button>
+          <button role="menuitem" type="button" className={`${item} text-danger`} onClick={run(onDelete)}><Trash2 className="size-3.5" /> Eliminar</button>
         </div>
       )}
     </div>

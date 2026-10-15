@@ -3,7 +3,7 @@ import { Banknote, Bell, CalendarDays, Clock, Coins, Globe2, Moon, Palette, Plus
 import { formatDate } from '../lib/dates'
 import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
 import { Combobox, type Opcion } from './Combobox'
-import { Field, inputCls } from './ui'
+import { Field, inputCls, Switch } from './ui'
 
 /** Rótulo de campo con icono: misma jerarquía en todas las secciones. */
 function Label({ icon, children }: { icon: ReactNode; children: ReactNode }) {
@@ -15,7 +15,7 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 function nombreMoneda(code: string): string {
   try { return cap(new Intl.DisplayNames(['es'], { type: 'currency' }).of(code) ?? code) } catch { return code }
 }
-export const opcionMoneda = (code: string): Opcion => ({ value: code, label: `${code} — ${nombreMoneda(code)}`, Icon: code === 'USD' ? Banknote : Coins, color: code === 'USD' ? '#0F8A6B' : '#4F7BE8', desc: PAISES[code] ? `Moneda de ${PAISES[code]}.` : 'Moneda permitida.' })
+export const opcionMoneda = (code: string): Opcion => ({ value: code, label: `${code} — ${nombreMoneda(code)}`, Icon: code === 'USD' ? Banknote : Coins, color: code === 'USD' ? 'var(--success)' : '#4F7BE8', desc: PAISES[code] ? `Moneda de ${PAISES[code]}.` : 'Moneda permitida.' })
 const monedaValida = (c: string) => {
   if (!/^[A-Z]{3}$/.test(c)) return false
   try { const todas = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('currency'); return todas ? todas.includes(c) : true } catch { return true }
@@ -115,24 +115,18 @@ export function Preferencias({ cfg, saveCfg, setError }: { cfg: Record<string, s
         <Field label={<Label icon={<Palette />}>Tema visual</Label>} htmlFor="cfg-tema">
           <Combobox id="cfg-tema" label="Tema visual" value={tema} onChange={v => v !== tema && saveCfg('tema', v)}
             options={[
-              { value: 'claro', label: 'Claro', desc: 'Fondo blanco, ideal de día', Icon: Sun, color: '#B7791F' },
+              { value: 'claro', label: 'Claro', desc: 'Fondo blanco, ideal de día', Icon: Sun, color: 'var(--warning)' },
               { value: 'oscuro', label: 'Oscuro', desc: 'Fondo oscuro, descansa la vista', Icon: Moon, color: '#4F46E5' },
             ]} />
         </Field>
         <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
           <Combobox id="cfg-refresco" label="Actualizar datos automáticamente" value={String(segundos)} onChange={v => v !== String(segundos) && saveCfg('refresco_segundos', v)}
-            options={REFRESCO_OPCIONES.map<Opcion>(o => ({ value: String(o.segundos), label: o.label, desc: o.desc, Icon: o.segundos ? Clock : RefreshCw, color: o.segundos ? '#0F8A6B' : '#64748B' }))} />
+            options={REFRESCO_OPCIONES.map<Opcion>(o => ({ value: String(o.segundos), label: o.label, desc: o.desc, Icon: o.segundos ? Clock : RefreshCw, color: o.segundos ? 'var(--success)' : '#64748B' }))} />
         </Field>
         <div className="flex items-center gap-3 rounded-xl bg-bg/60 px-3 py-2.5">
           <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-card text-muted"><Bell className="size-4" /></span>
           <span className="min-w-0 flex-1"><span className="block text-sm font-medium text-ink">Mostrar notificaciones al guardar</span><span className="block text-[11px] text-muted">Los errores siempre se notifican.</span></span>
-          <button type="button" role="switch" aria-checked={notifOn} aria-label="Mostrar notificaciones al guardar" onClick={() => saveCfg('notificaciones', String(!notifOn))}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full p-1 text-[11px] font-bold outline-none focus-visible:ring-2 focus-visible:ring-navy/50">
-            <span className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${notifOn ? 'bg-navy' : 'bg-line'}`}>
-              <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-all duration-200 ${notifOn ? 'left-[22px]' : 'left-0.5'}`} />
-            </span>
-            <span className={`w-7 text-left ${notifOn ? 'text-navy' : 'text-muted'}`}>{notifOn ? 'ON' : 'OFF'}</span>
-          </button>
+          <Switch estado checked={notifOn} onChange={() => saveCfg('notificaciones', String(!notifOn))} label="Mostrar notificaciones al guardar" />
         </div>
       </fieldset>
     </div>

@@ -23,7 +23,7 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
   )
   return (
     <div className="grid items-start gap-3 lg:grid-cols-2" data-testid="resumen-cajas">
-      <Acordeon icon={<CircleDollarSign className="size-4" />} color="#0F8A6B" titulo="Fuentes de dinero" resumen={resumenFuentes}
+      <Acordeon icon={<CircleDollarSign className="size-4" />} color="var(--success)" titulo="Fuentes de dinero" resumen={resumenFuentes}
         open={abierto.fuentes} onToggle={() => setAbierto(x => ({ ...x, fuentes: !x.fuentes }))}>
         {c.fuentes.lista.length ? (
           <ul className="divide-y divide-line/70" aria-label="Fuentes del período">

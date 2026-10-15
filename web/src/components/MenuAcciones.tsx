@@ -9,7 +9,12 @@ export interface AccionMenu { key: string; label: string; icon: ReactNode; onCli
  * overflow-hidden y un menú absoluto quedaba cortado. Se abre hacia arriba si abajo no cabe y se cierra con Esc,
  * al tocar fuera, al desplazar o al cambiar el tamaño de la ventana.
  */
-export function MenuAcciones({ label, acciones, ancho = 192, trigger, triggerClass, triggerStyle, disabled }: { label: string; acciones: AccionMenu[]; ancho?: number; trigger?: ReactNode; triggerClass?: string; triggerStyle?: CSSProperties; disabled?: boolean }) {
+/** Orden canónico de acciones CRUD en TODOS los menús ⋯: Editar, Clonar, Guardar como plantilla, Subir, Bajar … y Eliminar al final. */
+const RANGO: Record<string, number> = { edit: 0, clone: 1, tpl: 2, up: 3, down: 4, delete: 99 }
+export const ordenarAcciones = (xs: AccionMenu[]) => xs.some(a => a.key in RANGO) ? xs.map((a, i) => [a, i] as const).sort((a, b) => (RANGO[a[0].key] ?? 10) - (RANGO[b[0].key] ?? 10) || a[1] - b[1]).map(([a]) => a) : xs
+
+export function MenuAcciones({ label, acciones: sinOrden, ancho = 224, trigger, triggerClass, triggerStyle, disabled }: { label: string; acciones: AccionMenu[]; ancho?: number; trigger?: ReactNode; triggerClass?: string; triggerStyle?: CSSProperties; disabled?: boolean }) {
+  const acciones = ordenarAcciones(sinOrden)
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
@@ -43,7 +48,7 @@ export function MenuAcciones({ label, acciones, ancho = 192, trigger, triggerCla
     return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', close, true) }
   }, [open])
 
-  const item = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg disabled:cursor-not-allowed disabled:opacity-40'
+  const item = 'flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-bg focus-visible:bg-bg focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40'
   return (
     <>
       <button ref={btn} type="button" aria-haspopup="menu" aria-expanded={open} aria-label={trigger ? undefined : label} disabled={disabled} onClick={() => setOpen(o => !o)} style={triggerStyle}
@@ -54,9 +59,9 @@ export function MenuAcciones({ label, acciones, ancho = 192, trigger, triggerCla
           {acciones.map((a, i) => (
             <div key={a.key}>
               {a.danger && i > 0 && <div className="my-1 h-px bg-line" role="separator" />}
-              <button role="menuitem" type="button" title={a.title} disabled={a.disabled} className={`${item} ${a.danger ? 'font-medium text-[#C0362C] hover:bg-[#FDECEC]' : ''}`}
+              <button role="menuitem" type="button" title={a.title} disabled={a.disabled} className={`${item} ${a.danger ? 'font-medium text-danger hover:bg-danger-soft' : ''}`}
                 onClick={() => { setOpen(false); a.onClick() }}>
-                <span className={a.danger ? '' : 'text-muted'}>{a.icon}</span> {a.label}
+                <span className={`grid size-4 shrink-0 place-items-center [&>svg]:size-4 ${a.danger ? '' : 'text-muted'}`}>{a.icon}</span> {a.label}
               </button>
             </div>
           ))}

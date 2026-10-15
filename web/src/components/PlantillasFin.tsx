@@ -21,7 +21,7 @@ import { MonthPicker } from './DatePicker'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
 import { SwipeFila, useEsMovil } from './swipe'
-import { Button, Checkbox, Empty, Field, inputCls, Modal, Segmented, Skeleton, Switch } from './ui'
+import { Button, Checkbox, Empty, Field, inputCls, Modal, Segmented, Skeleton, Switch, claseBoton } from './ui'
 
 export type InicioPlantillasFin =
   | { modo: 'lista' }
@@ -89,8 +89,8 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
 }
 
 const BADGE = {
-  pendiente: { txt: 'Pendiente', fg: '#B7791F', bg: '#FFF6DB' },
-  aplicada: { txt: 'Aplicada', fg: '#0F8A6B', bg: '#E7F7F2' },
+  pendiente: { txt: 'Pendiente', fg: 'var(--warning)', bg: 'var(--warning-soft)' },
+  aplicada: { txt: 'Aplicada', fg: 'var(--success)', bg: 'var(--success-soft)' },
   omitida: { txt: 'No aplica este mes', fg: '#64748B', bg: 'var(--bg)' },
 } as const
 
@@ -261,7 +261,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
             <div className="w-48"><MonthPicker id="pf-mes" value={mes} onChange={v => { setMes(v); setValores({}); setErrores({}) }} today={`${hoyMes}-01`} label="Mes a aplicar" /></div>
           </Field>
           <MenuAcciones label="Nueva plantilla" ancho={270}
-            triggerClass="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-primary-soft px-3 text-sm font-medium text-navy transition hover:brightness-95"
+            triggerClass={claseBoton('primary')}
             trigger={<><Plus className="size-4" /> Nueva plantilla <ChevronDown className="size-4" /></>}
             acciones={[
               { key: 'cero', label: 'Crear desde cero', icon: <Plus className="size-4" />, onClick: () => onForm(null) },
@@ -325,12 +325,12 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, onForm, onBorrar
                         <span className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-xs text-muted">{moneda(p) === 'PEN' ? 'S/' : moneda(p) === 'USD' ? 'US$' : moneda(p)}</span>
                         <input aria-label={`Monto de ${p.nombre}`} inputMode="decimal" value={montoDe(p)} placeholder="0.00" disabled={!p.activo}
                           onChange={ev => { setValores(v => ({ ...v, [p.id]: ev.target.value.replace(/[^\d.,]/g, '') })); setErrores(x => { const y = { ...x }; delete y[p.id]; return y }) }}
-                          className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-[#D2463C]' : valores[p.id] !== undefined ? 'border-navy/50' : 'border-line'}`} />
+                          className={`tabular h-10 w-full rounded-lg border bg-card pr-2 pl-8 text-right text-base outline-none focus:border-navy md:h-8 md:text-sm ${errores[p.id] ? 'border-danger' : valores[p.id] !== undefined ? 'border-navy/50' : 'border-line'}`} />
                       </label>
                       <div className="hidden md:col-start-7 md:row-start-1 md:block">
                         <MenuAcciones label={`Más acciones de la plantilla ${p.nombre}`} acciones={accionesFila(p)} />
                       </div>
-                      {errores[p.id] && <p className="col-span-4 text-[11px] font-medium text-[#D2463C] md:col-span-7" role="alert">{errores[p.id]}</p>}
+                      {errores[p.id] && <p className="col-span-4 text-[11px] font-medium text-danger md:col-span-7" role="alert">{errores[p.id]}</p>}
                     </div>
                   </SwipeFila>
                 </li>
@@ -442,7 +442,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
             </Field>
           )}
           {yaVinculada && (
-            <p className="flex flex-wrap items-center gap-2 rounded-xl bg-[#FFF6DB] px-3 py-2 text-xs text-[#B7791F]" role="alert" data-testid="pf-ya-vinculada">
+            <p className="flex flex-wrap items-center gap-2 rounded-xl bg-warning-soft px-3 py-2 text-xs text-warning" role="alert" data-testid="pf-ya-vinculada">
               <AlertTriangle className="size-4 shrink-0" /> <span className="min-w-0 flex-1">Ya existe la plantilla <b>{yaVinculada.nombre}</b> vinculada a este registro. No se creará otra.</span>
               <Button type="button" variant="outline" className="h-8 text-xs" onClick={() => onEditar(yaVinculada)}>Editar plantilla</Button>
             </p>
@@ -451,10 +451,10 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Nombre" htmlFor="pf-nombre" error={errors.nombre}>
-          <input id="pf-nombre" className={`${inputCls} ${errors.nombre ? 'border-[#D2463C]' : ''}`} maxLength={40} value={nombre} onChange={e => setNombre(e.target.value)} autoComplete="off" />
+          <input id="pf-nombre" className={`${inputCls} ${errors.nombre ? 'border-danger' : ''}`} maxLength={40} value={nombre} onChange={e => setNombre(e.target.value)} autoComplete="off" />
         </Field>
         <Field label={tipo === 'fuente' ? 'Monto predeterminado' : 'Presupuesto predeterminado'} htmlFor="pf-monto" error={errors.monto}>
-          <input id="pf-monto" className={`${inputCls} tabular text-right ${errors.monto ? 'border-[#D2463C]' : ''}`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} placeholder="0.00" autoComplete="off" />
+          <input id="pf-monto" className={`${inputCls} tabular text-right ${errors.monto ? 'border-danger' : ''}`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} placeholder="0.00" autoComplete="off" />
         </Field>
       </div>
       {tipo === 'fuente' ? (

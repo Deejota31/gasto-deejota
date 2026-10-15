@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
-  Percent, PieChart as PieIcon, PiggyBank, Plus, Shapes, TrendingUp, Trophy, Wallet,
+  Percent, PieChart as PieIcon, PiggyBank, Shapes, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
 import { subKey } from '../lib/engine'
 import { formatMoney } from '../lib/money'
@@ -12,7 +12,7 @@ import type { Caja, Filters } from '../lib/types'
 import { categoriaLook, subcategoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
-import { Button, Card, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
+import { BotonMensual, BotonNuevo, Card, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
@@ -49,9 +49,9 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
         </div>
         {/* Abre el mismo formulario de la pestaña Gastos (un solo modal en toda la app). */}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={onNuevoGasto} disabled={!data}><Plus className="size-4" /> Nuevo gasto</Button>
+          <BotonNuevo onClick={onNuevoGasto} disabled={!data}>Nuevo gasto</BotonNuevo>
           {/* Plantillas rápidas de gastos frecuentes: solo lee su propia hoja, no el histórico. */}
-          <Button variant="soft" onClick={onGastosMensuales} disabled={!data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
+          <BotonMensual onClick={onGastosMensuales} disabled={!data}>Gastos mensuales</BotonMensual>
         </div>
       </div>
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={store.data?.gastos} />
@@ -160,7 +160,7 @@ const TONES: Record<string, { tile: string; bar: string }> = {
   blue: { tile: 'bg-primary-soft text-navy', bar: 'bg-navy' },
   coral: { tile: 'bg-coral-soft text-coral', bar: 'bg-coral' },
   green: { tile: 'bg-verde-soft text-verde', bar: 'bg-verde' },
-  red: { tile: 'bg-coral-soft text-[#D2463C]', bar: 'bg-[#D2463C]' },
+  red: { tile: 'bg-coral-soft text-danger', bar: 'bg-danger' },
   violet: { tile: 'bg-morado-soft text-morado', bar: 'bg-morado' },
   sky: { tile: 'bg-celeste-soft text-celeste', bar: 'bg-celeste' },
 }
@@ -175,12 +175,12 @@ function Kpi({ icon, label, value, hint, info, tone, progress, tag }: { icon: Re
       </div>
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted">{label}{tag && <span className="rounded-full bg-bg px-1.5 py-px text-[10px]">{tag}</span>}</p>
-        <p className={`tabular truncate text-lg font-bold tracking-tight sm:text-xl ${tone === 'red' ? 'text-[#D2463C]' : 'text-ink'}`}>{value}</p>
+        <p className={`tabular truncate text-lg font-bold tracking-tight sm:text-xl ${tone === 'red' ? 'text-danger' : 'text-ink'}`}>{value}</p>
         {hint && <p className="truncate text-[11px] text-muted" title={hint}>{hint}</p>}
       </div>
       {progress != null && (
         <div className="h-1.5 overflow-hidden rounded-full bg-bg" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-          <div className={`bar-grow h-full rounded-full ${progress > 100 ? 'bg-[#D2463C]' : t.bar}`} style={{ width: `${Math.min(progress, 100)}%` }} />
+          <div className={`bar-grow h-full rounded-full ${progress > 100 ? 'bg-danger' : t.bar}`} style={{ width: `${Math.min(progress, 100)}%` }} />
         </div>
       )}
     </div>

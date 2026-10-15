@@ -24,6 +24,14 @@
   --color-rosa-soft: var(--pink-soft);
   --color-bebe: #EC6FA9;
   --color-auto: #64748B;
+  /* Design System (v1.18): colores FUNCIONALES. Los colores de ámbitos/categorías/medios vienen del catálogo y no pasan por aquí. */
+  --color-success: var(--success); --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning); --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger); --color-danger-soft: var(--danger-soft); --color-danger-solid: var(--danger-solid);
+  --color-info: var(--info); --color-info-soft: var(--info-soft);
+  --color-switch-off: var(--switch-off);
+  --radius-control: 0.75rem;
+  --shadow-control: 0 1px 2px rgb(15 23 42 / 0.08);
 }
 
 :root {
@@ -42,6 +50,13 @@
   /* Paleta categórica validada (orden fijo; el color sigue a la entidad, no al ranking). */
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  /* Semánticos (estados, no clasificación financiera) */
+  --success: #0F8A6B; --success-soft: #E7F7F2;
+  --warning: #B7791F; --warning-soft: #FFF6DB;
+  --danger: #C0362C; --danger-soft: #FDECEC; --danger-solid: #D2463C;
+  --info: #294690; --info-soft: #E8F0FF;
+  --switch-off: #A8B3C4;
+  --control-h: 2.5rem; --control-h-touch: 2.75rem;
   color-scheme: light;
 }
 
@@ -60,6 +75,11 @@
   --pink-soft: #3A1E2C;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --success: #4FD1AE; --success-soft: #12332C;
+  --warning: #F0B84A; --warning-soft: #3A2E12;
+  --danger: #F28B82; --danger-soft: #3A1E22; --danger-solid: #E66767;
+  --info: #8FA9F0; --info-soft: #1D2B4D;
+  --switch-off: #46557A;
   color-scheme: dark;
 }
 

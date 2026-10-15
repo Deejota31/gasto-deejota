@@ -90,7 +90,7 @@ export function ClasificacionPicker({ catalogo, value, onChange, errors = {}, ke
   children?: ReactNode
 }) {
   const o = opcionesClasif(catalogo, value, keepCurrent)
-  const err = (k: string) => errors[k] && <span className="text-xs text-[#D2463C]">{errors[k]}</span>
+  const err = (k: string) => errors[k] && <span className="text-xs text-danger">{errors[k]}</span>
   return (
     <div className="space-y-4">
       <div>

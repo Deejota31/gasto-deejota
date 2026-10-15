@@ -106,7 +106,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
     },
     {
       id: 'evolucion', titulo: 'Evolución', icon: TrendingUp, tone: evo.hayHistorial ? TONO.info : TONO.neutro,
-      valor: evo.hayHistorial ? <span className="flex items-center gap-2"><span className="text-[#C0362C]">{evo.aumentaron.length} ↑</span><span className="text-[#0F7A5F]">{evo.disminuyeron.length} ↓</span></span> : 'Sin historial aún',
+      valor: evo.hayHistorial ? <span className="flex items-center gap-2"><span className="text-danger">{evo.aumentaron.length} ↑</span><span className="text-[#0F7A5F]">{evo.disminuyeron.length} ↓</span></span> : 'Sin historial aún',
       valorTxt: evo.hayHistorial ? `${evo.aumentaron.length} ↑ · ${evo.disminuyeron.length} ↓` : 'Sin historial aún',
       sub: evo.hayHistorial ? (evo.aumentaron[0] ? `Más subió: ${evo.aumentaron[0].nombre} (${variacionTxt(evo.aumentaron[0])})` : 'Nada subió frente al período anterior') : 'Sigue registrando: compararemos con el mes anterior',
       cta: evo.hayHistorial ? 'Ver comparación' : 'Ver período actual',
@@ -161,10 +161,10 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
 type Tono = { fg: string; bg: string; ring: string }
 /** Color funcional: verde/teal sano, ámbar atención, rojo suave alerta, azul/morado información, gris neutro. */
 const TONO = {
-  ok: { fg: '#0F8A6B', bg: '#E7F7F2', ring: '#16A08540' },
-  atencion: { fg: '#B7791F', bg: '#FFF6DB', ring: '#E0A10040' },
+  ok: { fg: 'var(--success)', bg: 'var(--success-soft)', ring: 'color-mix(in srgb, var(--success) 25%, transparent)' },
+  atencion: { fg: 'var(--warning)', bg: 'var(--warning-soft)', ring: '#E0A10040' },
   cerca: { fg: '#C2410C', bg: '#FFEDE3', ring: '#C2410C33' },
-  alerta: { fg: '#C0362C', bg: '#FDECEC', ring: '#E2556340' },
+  alerta: { fg: 'var(--danger)', bg: 'var(--danger-soft)', ring: 'color-mix(in srgb, var(--danger) 25%, transparent)' },
   info: { fg: '#6D5DD3', bg: '#F1EEFF', ring: '#8B7CF640' },
   neutro: { fg: '#64748B', bg: 'var(--bg)', ring: 'var(--line)' },
 } satisfies Record<string, Tono>
@@ -531,7 +531,7 @@ function PanelEvolucion({ evo, ahorro, money, fmt, per, modo, setModo, nivel, se
         )}
 
         <div>
-          <Subtitulo extra={<Chip tono={TONO.info}>Simulación</Chip>}><span className="flex items-center gap-1.5"><Lightbulb className="size-3.5 text-[#B7791F]" /> Oportunidades de ahorro</span></Subtitulo>
+          <Subtitulo extra={<Chip tono={TONO.info}>Simulación</Chip>}><span className="flex items-center gap-1.5"><Lightbulb className="size-3.5 text-warning" /> Oportunidades de ahorro</span></Subtitulo>
           {ahorro.length === 0
             ? <Vacio icon={Lightbulb} titulo="Sin oportunidades relevantes" tono={TONO.neutro}>No hay gastos discrecionales importantes (delivery, antojos, suscripciones, salidas o compras no esenciales) en el período.</Vacio>
             : (
@@ -725,7 +725,7 @@ function MenuAcciones({ label, items }: { label: string; items: { txt: string; I
         <div role="menu" className="absolute top-9 right-0 z-30 w-52 rounded-xl border border-line bg-card p-1 shadow-xl">
           {items.map(it => (
             <button key={it.txt} role="menuitem" type="button" onClick={e => { e.stopPropagation(); setOpen(false); it.run() }}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg ${it.peligro ? 'text-[#C0362C]' : ''}`}>
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg ${it.peligro ? 'text-danger' : ''}`}>
               <it.Icon className="size-3.5 shrink-0" />{it.txt}
             </button>
           ))}
@@ -921,7 +921,7 @@ function RevisionDatos({ store, c, fmt, onClose, onRevisarGasto }: { store: AppS
                     <div className="flex flex-wrap items-center justify-center gap-2 border-t border-line bg-bg/60 px-4 py-2.5 sm:justify-end">
                       <Button variant={s.estado === 'legitimo' ? 'primary' : 'soft'} className="h-9 text-xs" onClick={() => marcar(s, 'legitimo')}><CheckCircle2 className="size-3.5" /> Son legítimos</Button>
                       <Button variant="outline" className="h-9 text-xs" onClick={() => marcar(s, 'pendiente')}><CircleDashed className="size-3.5" /> Dejar pendiente</Button>
-                      <Button variant="outline" className="h-9 text-xs text-[#C0362C]" onClick={() => marcar(s, 'duplicado')}><AlertTriangle className="size-3.5" /> Confirmar duplicado</Button>
+                      <Button variant="outline" className="h-9 text-xs text-danger" onClick={() => marcar(s, 'duplicado')}><AlertTriangle className="size-3.5" /> Confirmar duplicado</Button>
                     </div>
                     {s.estado === 'duplicado' && <p className="px-4 pb-3 text-[11px] text-muted">Confirmado como duplicado: resta puntos de calidad. No se eliminó nada; si sobra un registro, ábrelo y elimínalo tú.</p>}
                   </div>

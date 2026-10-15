@@ -139,7 +139,7 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
                 className="tabular w-full min-w-0 bg-transparent text-3xl font-bold text-ink outline-none placeholder:text-muted/40"
                 value={form.montoText} onChange={e => set({ montoText: e.target.value.replace(/[^\d.,]/g, '') })} />
             </div>
-            {errors.monto && <span className="text-xs text-[#D2463C]">{errors.monto}</span>}
+            {errors.monto && <span className="text-xs text-danger">{errors.monto}</span>}
             {monedas.length > 1 && (
               <div className="mt-2">
                 <Segmented label="Moneda" value={form.moneda} onChange={moneda => set({ moneda })} options={withCurrent(monedas, form.moneda).map(m => ({ value: m, label: m }))} />
@@ -175,7 +175,7 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
                 )
               })}
             </div>
-            {errors.medioPago && <span className="text-xs text-[#D2463C]">{errors.medioPago}</span>}
+            {errors.medioPago && <span className="text-xs text-danger">{errors.medioPago}</span>}
           </div>
           <Switch checked={form.esRecurrente} onChange={v => set({ esRecurrente: v })} label="Es recurrente" />
         </div>

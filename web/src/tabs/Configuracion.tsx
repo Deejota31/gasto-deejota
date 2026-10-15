@@ -11,7 +11,7 @@ import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { Preferencias } from '../components/Preferencias'
 
-export const APP_VERSION = '1.17.0'
+export const APP_VERSION = '1.18.0'
 
 export default function Configuracion({ store, conn, onConnect, notify, goCatalogo }: {
   store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
@@ -85,7 +85,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
             <Stat icon={<RefreshCw />} label="Última sincronización" value={store.lastSync ? store.lastSync.toLocaleTimeString('es-PE') : '—'} />
             <Stat icon={<ShieldCheck />} label="Versión backend" value={store.data?.version ?? '—'} />
           </div>
-          {store.error && <p className="mt-2 text-xs text-[#9B2C24]">{store.error}</p>}
+          {store.error && <p className="mt-2 text-xs text-danger">{store.error}</p>}
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted"><KeyRound className="size-3.5" />
             {conn ? 'Conectado a tu Apps Script.' : 'Sin conexión: estás viendo datos de demostración en memoria.'} La URL y el token se guardan solo en este navegador.
           </p>
@@ -137,7 +137,7 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
 }
 
 function StatusPill({ tone, text }: { tone: string; text: string }) {
-  const s = tone === 'error' ? 'bg-[#FDF0EF] text-[#9B2C24]' : tone === 'sync' ? 'bg-primary-soft text-navy' : tone === 'ok' ? 'bg-[#EEF9F2] text-[#17603A]' : 'bg-bg text-muted'
+  const s = tone === 'error' ? 'bg-danger-soft text-danger' : tone === 'sync' ? 'bg-primary-soft text-navy' : tone === 'ok' ? 'bg-success-soft text-success' : 'bg-bg text-muted'
   const Icon = tone === 'error' ? CircleAlert : tone === 'sync' ? Loader2 : CheckCircle2
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s}`}><Icon className={`size-3.5 ${tone === 'sync' ? 'animate-spin' : ''}`} />{text}</span>
 }
@@ -149,7 +149,7 @@ function Stat({ icon, label, value, tone }: { icon: ReactNode; label: string; va
       <div className="min-w-0">
         <p className="text-[11px] text-muted">{label}</p>
         <p className="flex items-center gap-1.5 truncate text-sm font-medium">
-          {tone && <span className={`size-2 shrink-0 rounded-full ${tone === 'ok' ? 'bg-lima' : 'bg-[#D2463C]'}`} aria-hidden />}{value}
+          {tone && <span className={`size-2 shrink-0 rounded-full ${tone === 'ok' ? 'bg-lima' : 'bg-danger'}`} aria-hidden />}{value}
         </p>
       </div>
     </div>
@@ -211,7 +211,7 @@ function CarpetaRespaldos({ store }: { store: AppStore }) {
         </form>
       )}
       <p className="mt-1.5 text-[11px] text-muted">En Drive abre la carpeta que quieras y copia el enlace de la barra de direcciones. Cada respaldo es una copia completa de tu hoja.</p>
-      {error && <p className="mt-1 text-xs text-[#C0362C]">{error}</p>}
+      {error && <p className="mt-1 text-xs text-danger">{error}</p>}
     </div>
   )
 }

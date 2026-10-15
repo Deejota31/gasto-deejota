@@ -124,7 +124,7 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
         aria-label={label} aria-invalid={invalid || undefined} disabled={disabled}
         onClick={() => (open ? cerrar(false) : abrir())}
         onKeyDown={e => { if (!open && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); abrir() } else if (open && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar() } }}
-        className={triggerClass ?? `${controlCls} ${compact ? '!h-9 !min-h-9 !px-2.5 !py-1 text-[13px]' : ''} flex items-center gap-2 pr-9 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-[#D2463C]' : ''}`}
+        className={triggerClass ?? `${controlCls} ${compact ? '!h-9 !min-h-9 !px-2.5 !py-1 text-[13px]' : ''} flex items-center gap-2 pr-9 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`}
         style={{ position: 'relative' }}>
         {sel
           ? <>
