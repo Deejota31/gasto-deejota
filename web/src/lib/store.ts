@@ -269,18 +269,19 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fuentes, cajas, importes del mes). */
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]) {
       const pl = await api.aplicarPlantillasFin(mes, items)
-      const raw = await api.getData(true)
+      const raw = await api.getData(true)   // relectura real de Sheets: de aquí sale la verificación de lo aplicado
       patch(d => ({
         ...d, plantillasFin: (d.plantillasFin ?? []).map(x => pl.find(y => y.id === x.id) ?? x).concat(pl.filter(y => !(d.plantillasFin ?? []).some(x => x.id === y.id))),
         fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos,
       }))
-      return pl
+      return { plantillas: pl, datos: { fuentes: raw.fuentes ?? [], fuentesMeses: raw.fuentesMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos } }
     },
     /** Aplica fuentes o subcajas existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
     async aplicarEntidadesMes(tipo: 'fuente' | 'subcaja', mes: string, items: { id: string; monto: number }[]) {
       await api.aplicarEntidadesMes(tipo, mes, items)
       const raw = await api.getData(true)
       patch(d => ({ ...d, fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos }))
+      return { fuentes: raw.fuentes ?? [], fuentesMeses: raw.fuentesMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos }
     },
     /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
     async saveFuente(f: FuenteInput) {
@@ -368,7 +369,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
    * (misma clave) ya está en curso, para evitar envíos duplicados.
    * Una operación en curso no sobrevive a recargar o cerrar la pestaña: no es una cola persistente.
    */
-  const track = useCallback((key: string, msg: OpMessages, fn: () => Promise<unknown>, extra?: { retry?: boolean; onErrorActions?: ToastAction[] }): boolean => {
+  const track = useCallback((key: string, msg: OpMessages, fn: () => Promise<unknown>, extra?: { retry?: boolean; onErrorActions?: ToastAction[]; onDone?: (ok: boolean, error?: string) => void }): boolean => {
     if (inflight.current.has(key)) { showToast('info', 'Esa operación ya se está guardando.'); return false }
     inflight.current.add(key)
     setPending(new Set(inflight.current))
@@ -377,6 +378,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     fn().then(() => {
       done()
       if (quiet.current) dismiss(id); else updateToast(id, 'success', msg.ok)
+      extra?.onDone?.(true)
     }, (e: unknown) => {
       done()
       const actions: ToastAction[] = [...(extra?.retry !== false ? [{ label: 'Reintentar', run: () => { track(key, msg, fn, extra) } }] : []), ...(extra?.onErrorActions ?? [])]
@@ -386,6 +388,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const incierto = code === 'TIMEOUT' || code === 'NETWORK' || code === 'HTTP'
         ? ' Resultado incierto: puede que sí se haya guardado; reintentar no duplica.' : ''
       updateToast(id, 'error', `${msg.error} ${detail}${incierto}`.trim(), actions)
+      extra?.onDone?.(false, `${msg.error} ${detail}${incierto}`.trim())
     })
     return true
   }, [])

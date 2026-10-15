@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Bell, CalendarCheck2, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Copy, FileClock, Settings2, SkipForward, Wallet } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Ban, Bell, CalendarCheck2, CheckCircle2, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Copy, FileClock, Loader2, RotateCcw, Settings2, SkipForward, Wallet } from 'lucide-react'
 import { ETAPAS, estadoDesdeEtapas, leerEstadoPlan, mesAnterior, nombreMes, proximasFechas, serializarEstadoPlan, type Etapa, type EstadoEtapa, type EstadoPlan, type PlanMes } from '../lib/plan'
-import { candidatos, recordatoriosVigentes, resumenMes, type Candidato, type TipoEntidad } from '../lib/planificar'
+import { candidatos, recordatoriosVigentes, resumenMes, resumenReal, verificarEntidadesAplicadas, type Candidato, type ContextoPlan, type TipoEntidad } from '../lib/planificar'
 import { aislaDesde } from '../lib/engine'
 import { formatMoney } from '../lib/money'
 import { formatDate } from '../lib/dates'
@@ -21,7 +21,6 @@ export const ESTADO_TXT: Record<EstadoPlan, string> = { pendiente: 'Pendiente', 
 const ESTADO_TONO: Record<EstadoPlan, string> = {
   pendiente: 'bg-warning-soft text-warning', en_progreso: 'bg-primary-soft text-navy', completada: 'bg-success-soft text-success', descartada: 'bg-bg text-muted',
 }
-const ETAPA_ESTADO = ['Pendiente', 'Hecha', 'Omitida']
 const MONTO_RE = /^\d{1,9}([.,]\d{1,2})?$/
 
 export const Insignia = ({ estado, posp }: { estado: EstadoPlan; posp?: boolean }) => (
@@ -32,7 +31,7 @@ function mananaDe(hoy: string): string {
   const d = new Date(`${hoy}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10)
 }
 
-export interface PlanificacionOpts { hoy: string; onGastosMensuales: () => void; onPlantillas: (t: TipoEntidad) => void; onConfigurar: () => void }
+export interface PlanificacionOpts { hoy: string; onGastosMensuales: (ctx?: ContextoPlan) => void; onPlantillas: (t: TipoEntidad, ctx?: ContextoPlan) => void; onConfigurar: () => void }
 
 export function usePlanificacion(store: AppStore, o: PlanificacionOpts) {
   const [wiz, setWiz] = useState<{ mes: string; etapa: Etapa | null; key: number } | null>(null)
@@ -216,115 +215,251 @@ export function UsarMesAnterior({ store, tipo, mes, onClose }: { store: AppStore
 
 /* ============================== Asistente ============================== */
 
-type Decision = 'pendiente' | 'hacer' | 'omitir'
+/**
+ * «Prepara tu mes» (v1.20): asistente continuo. Reglas:
+ *  - El asistente NUNCA se cierra para abrir un módulo hijo (Fuentes/Subcajas/Gastos mensuales): se queda montado y oculto,
+ *    así conserva período, etapa, selecciones y estados. El hijo avisa al terminar (ContextoPlan) y el asistente reaparece.
+ *  - Una etapa solo pasa a «Completada» cuando el backend confirmó y la relectura de Sheets lo verificó. Se guarda en CONFIG.
+ *  - Omitir/retomar también se guardan al instante (por mes), así el progreso sobrevive a cerrar, recargar o cambiar de dispositivo.
+ *  - Avanzar de etapa jamás escribe dinero ni gastos.
+ */
+type EstadoVisual = 'pendiente' | 'en_progreso' | 'completada' | 'omitida' | 'error'
+const VISUAL: Record<EstadoVisual, { txt: string; cls: string }> = {
+  pendiente: { txt: 'Pendiente', cls: 'border-line text-muted hover:bg-bg' },
+  en_progreso: { txt: 'En progreso', cls: 'border-navy/50 bg-primary-soft text-navy' },
+  completada: { txt: 'Completada', cls: 'border-success/40 bg-success-soft text-success' },
+  omitida: { txt: 'Omitida', cls: 'border-line bg-bg text-muted' },
+  error: { txt: 'Error', cls: 'border-danger/40 bg-danger-soft text-danger' },
+}
+const ETAPA_SIG: Record<Etapa, string> = { fuentes: 'Configurar fuentes', subcajas: 'Configurar subcajas', gastos: 'Registrar gastos mensuales' }
+const ETAPA_OK: Record<Etapa, string> = { fuentes: 'Fuentes configuradas correctamente', subcajas: 'Subcajas configuradas correctamente', gastos: 'Gastos mensuales registrados correctamente' }
+const money = (c: number, m: string) => formatMoney(c, m)
+
 function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; mes: string; etapaInicial: Etapa | null; o: PlanificacionOpts; onClose: () => void }) {
   const data = store.data!
   const plan = useMemo(() => leerEstadoPlan(data.config, mes), [data.config, mes])
+  const planRef = useRef(plan); planRef.current = plan
+  /** Cambios de etapa ya enviados pero aún no reflejados en CONFIG: evita que dos guardados seguidos se pisen (último gana sobre lo viejo). */
+  const localRef = useRef<Partial<Record<Etapa, EstadoEtapa>>>({})
+  const etapasConLocal = (e?: Etapa, valor?: EstadoEtapa) => { if (e && valor !== undefined) localRef.current = { ...localRef.current, [e]: valor }; return { ...planRef.current.etapas, ...localRef.current } as Record<Etapa, EstadoEtapa> }
+  const sinLocal = (e: Etapa) => { const x = { ...localRef.current }; delete x[e]; localRef.current = x }
   const cf = useMemo(() => candidatos(data, 'fuente', mes), [data, mes])
   const cs = useMemo(() => candidatos(data, 'subcaja', mes), [data, mes])
   const primera = etapaInicial ?? ETAPAS.find(e => plan.etapas[e] === 0) ?? 'fuentes'
   const [paso, setPaso] = useState<number>(ETAPAS.indexOf(primera))   // 0..2 etapas · 3 resumen
   const [selF, setSelF] = useState(() => aSel(cf))
   const [selS, setSelS] = useState(() => aSel(cs))
-  const [dec, setDec] = useState<Record<Etapa, Decision>>({ fuentes: 'pendiente', subcajas: 'pendiente', gastos: 'pendiente' })
-  const [gastosOk, setGastosOk] = useState(false)
+  const [hijo, setHijo] = useState<Etapa | null>(null)              // módulo hijo abierto: el asistente queda oculto pero montado
+  const [fallo, setFallo] = useState<Partial<Record<Etapa | 'final', { msg: string; reintentar: () => void }>>>({})
   const etapa = ETAPAS[paso] as Etapa | undefined
   const aisl = aislaDesde(data.config), antesCorte = mes < aisl
   const itF = itemsAAplicar(cf, selF), itS = itemsAAplicar(cs, selS)
   const invalidoF = cf.some(c => selF[c.id]?.on && !MONTO_RE.test(selF[c.id].monto.trim()))
   const invalidoS = cs.some(c => selS[c.id]?.on && !MONTO_RE.test(selS[c.id].monto.trim()))
-  const marca = (e: Etapa, d: Decision) => setDec(x => ({ ...x, [e]: d }))
-  const siguiente = () => { if (etapa) marca(etapa, 'hacer'); setPaso(p => Math.min(3, p + 1)) }
-  const omitir = () => { if (etapa) marca(etapa, 'omitir'); setPaso(p => Math.min(3, p + 1)) }
+  const keyFinal = `plan:${mes}`
+  const ocupado = (e: Etapa | 'final') => store.pending.has(e === 'final' ? keyFinal : `plan:${mes}:${e}`)
+  const hayOcupado = ETAPAS.some(e => ocupado(e)) || ocupado('final')
+  const real = useMemo(() => resumenReal(data, mes), [data, mes])
+  const monedaBase = data.config.moneda || 'PEN'
+
+  /** Estado visual de una etapa: sale de lo guardado (CONFIG + datos releídos), no de que se haya pulsado un botón. */
+  const visual = (e: Etapa): EstadoVisual => {
+    if (fallo[e]) return 'error'
+    const pend = e === 'fuentes' ? itF.length : e === 'subcajas' ? itS.length : 0
+    if (ocupado(e) || pend > 0) return 'en_progreso'
+    return plan.etapas[e] === 1 ? 'completada' : plan.etapas[e] === 2 ? 'omitida' : 'pendiente'
+  }
+  const siguientePaso = (desde: number): number => {
+    for (let i = desde + 1; i < 3; i++) { const v = visual(ETAPAS[i]); if (v !== 'omitida' && v !== 'completada') return i }
+    return 3
+  }
   const bloqueado = etapa === 'fuentes' ? invalidoF : etapa === 'subcajas' ? invalidoS : false
 
-  const estadoFinal = (e: Etapa): EstadoEtapa => {
-    if (dec[e] === 'hacer') return e === 'gastos' ? (gastosOk ? 1 : plan.etapas.gastos === 1 ? 1 : 0) : 1
-    if (dec[e] === 'omitir') return 2
-    return plan.etapas[e]
+  /** Guarda el estado de UNA etapa en CONFIG (solo configuración del asistente: no toca dinero ni gastos). */
+  const persistir = (e: Etapa, valor: EstadoEtapa, textos: { pending: string; ok: string }, despues?: () => void) => {
+    const ejecutar = () => store.track(`plan:${mes}:${e}`, { pending: textos.pending, ok: textos.ok, error: 'No se pudo guardar el avance de la planificación.' },
+      () => {
+        const et = etapasConLocal(e, valor)
+        return store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
+      }, { retry: false, onDone: (ok, err) => {
+        if (!ok) sinLocal(e)
+        setFallo(f => { const x = { ...f }; if (ok) delete x[e]; else x[e] = { msg: err ?? 'No se pudo guardar el avance.', reintentar: ejecutar }; return x })
+        if (ok) despues?.()
+      } })
+    ejecutar()
   }
-  const etapasFinal = Object.fromEntries(ETAPAS.map(e => [e, estadoFinal(e)])) as Record<Etapa, EstadoEtapa>
-  const key = `plan:${mes}`
-  const aplicar = () => {
-    if (invalidoF || invalidoS) return
-    const ok = store.track(key, { pending: `Aplicando la planificación de ${nombreMes(mes)}…`, ok: `Planificación de ${nombreMes(mes)} aplicada.`, error: 'No se pudo aplicar la planificación. No se guardó el estado; puedes reintentar.' },
+
+  /** Vuelve del módulo hijo: el hijo ya verificó contra Sheets; aquí se guarda la etapa como completada. */
+  const confirmarEtapa = (e: Etapa) => {
+    setHijo(null)
+    persistir(e, 1, { pending: 'Guardando el avance de la planificación…', ok: `${ETAPA_OK[e]} en ${nombreMes(mes)}.` })
+  }
+  const ctxPara = (e: Etapa): ContextoPlan => ({ mes, onCerrar: () => setHijo(null), onAplicado: () => confirmarEtapa(e) })
+  const abrirHijo = (e: Etapa) => {
+    setHijo(e)
+    if (e === 'gastos') o.onGastosMensuales(ctxPara(e)); else o.onPlantillas(e === 'fuentes' ? 'fuente' : 'subcaja', ctxPara(e))
+  }
+
+  /** Aplica las selecciones hechas dentro del asistente (si las hay), las verifica y marca la etapa. */
+  const aplicarSeleccion = (e: 'fuentes' | 'subcajas') => {
+    const tipo: TipoEntidad = e === 'fuentes' ? 'fuente' : 'subcaja', items = e === 'fuentes' ? itF : itS
+    if (!items.length) return
+    const ejecutar = () => store.track(`plan:${mes}:${e}`, { pending: `Aplicando ${e === 'fuentes' ? 'fuentes' : 'subcajas'} a ${nombreMes(mes)}…`, ok: `${ETAPA_OK[e]} en ${nombreMes(mes)}.`, error: `No se pudieron aplicar las ${e}.` },
       async () => {
-        if (dec.fuentes === 'hacer' && itF.length) await store.actions.aplicarEntidadesMes('fuente', mes, itF)
-        if (dec.subcajas === 'hacer' && itS.length) await store.actions.aplicarEntidadesMes('subcaja', mes, itS)
-        const nuevo: PlanMes = { mes, etapas: etapasFinal, estado: estadoDesdeEtapas(etapasFinal), posponerHasta: '' }
-        await store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan(nuevo))
-      })
-    if (ok) onClose()
+        const fresco = await store.actions.aplicarEntidadesMes(tipo, mes, items)
+        const problemas = verificarEntidadesAplicadas({ ...data, ...fresco }, tipo, mes, items)
+        if (problemas.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${problemas.join(' ')}`)
+        const et = etapasConLocal(e, 1)
+        await store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
+      }, { retry: false, onDone: (ok, err) => setFallo(f => { const x = { ...f }; if (ok) delete x[e]; else x[e] = { msg: err ?? 'No se pudo confirmar la operación.', reintentar: ejecutar }; return x }) })
+    ejecutar()
   }
-  const ocupado = store.pending.has(key)
-  const nombresDec = (e: Etapa) => dec[e] === 'hacer' ? (e === 'gastos' && !gastosOk ? 'Sin confirmar' : 'Se aplicará') : dec[e] === 'omitir' ? 'Omitida' : ETAPA_ESTADO[plan.etapas[e]]
+
+  const omitir = () => {
+    if (!etapa) return
+    const e = etapa, destino = siguientePaso(paso)
+    persistir(e, 2, { pending: 'Guardando…', ok: `${ETAPA_TXT[e].titulo} omitidas en ${nombreMes(mes)}.`.replace('Gastos omitidas', 'Gastos omitidos') })
+    setPaso(destino)
+  }
+  const retomar = (e: Etapa) => persistir(e, 0, { pending: 'Guardando…', ok: `${ETAPA_TXT[e].titulo} vuelve a estar pendiente.` })
+
+  /** Finalizar: aplica lo que haya quedado seleccionado en el asistente (verificado) y guarda el estado del mes. No crea nada más. */
+  const finalizar = () => {
+    if (invalidoF || invalidoS) return
+    const ejecutar = () => store.track(keyFinal, { pending: `Finalizando la planificación de ${nombreMes(mes)}…`, ok: `Planificación de ${nombreMes(mes)} guardada.`, error: 'No se pudo finalizar la planificación. No se guardó el estado; puedes reintentar.' },
+      async () => {
+        let d = data
+        const et = etapasConLocal()
+        if (itF.length) { const fr = await store.actions.aplicarEntidadesMes('fuente', mes, itF); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'fuente', mes, itF); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.fuentes = 1 }
+        if (itS.length) { const fr = await store.actions.aplicarEntidadesMes('subcaja', mes, itS); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'subcaja', mes, itS); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.subcajas = 1 }
+        await store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
+      }, { retry: false, onDone: (ok, err) => { setFallo(f => { const x = { ...f }; if (ok) delete x.final; else x.final = { msg: err ?? 'No se pudo finalizar.', reintentar: ejecutar }; return x }); if (ok) onClose() } })
+    ejecutar()
+  }
+
+  if (hijo) return null   // el módulo hijo está abierto: el asistente conserva su estado pero no se dibuja
+
+  const sigTxt = (e: Etapa) => { const i = siguientePaso(ETAPAS.indexOf(e)); return i === 3 ? { label: 'Continuar con el Resumen', sig: 'Resumen de la planificación', i } : { label: `Continuar con ${ETAPA_TXT[ETAPAS[i]].titulo}`, sig: ETAPA_SIG[ETAPAS[i]], i } }
+  const nCompletadas = ETAPAS.filter(e => plan.etapas[e] === 1).length, nOmitidas = ETAPAS.filter(e => plan.etapas[e] === 2).length
+  const finalizada = plan.estado === 'completada'
+  const totalesTxt = (t: Record<string, number>) => { const k = Object.keys(t); return k.length ? k.map(m => money(t[m], m)).join(' + ') : '—' }
+  const libre = (() => { const k = Object.keys(real.fuentes.totales); return k.length <= 1 && (k[0] ?? monedaBase) === monedaBase ? money((real.fuentes.totales[monedaBase] ?? 0) - real.subcajas.reservado, monedaBase) : '—' })()
+
+  const Aviso = ({ e }: { e: Etapa | 'final' }) => fallo[e] ? (
+    <div className="space-y-2" data-testid={`error-${e}`}>
+      <ErrorBox message={fallo[e]!.msg} onRetry={fallo[e]!.reintentar} />
+      <p className="text-[11px] text-muted">Tu selección y tu avance se conservan. No se marcó nada como completado.</p>
+    </div>
+  ) : null
+
+  const Continuar = ({ e }: { e: Etapa }) => {
+    if (plan.etapas[e] !== 1 || visual(e) !== 'completada') return null
+    const s = sigTxt(e)
+    const n = e === 'fuentes' ? real.fuentes.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
+    const unidad = e === 'fuentes' ? `${n} fuente${n === 1 ? '' : 's'}` : e === 'subcajas' ? `${n} subcaja${n === 1 ? '' : 's'}` : `${n} gasto${n === 1 ? '' : 's'}`
+    return (
+      <div className="rounded-2xl border border-success/30 bg-success-soft p-3" data-testid={`ok-${e}`}>
+        <p className="flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="size-4" /> {ETAPA_OK[e]}</p>
+        <p className="mt-0.5 text-xs text-ink">{e === 'gastos' ? `${unidad} en ${nombreMes(mes)} (según los movimientos confirmados).` : `${unidad} aplicada${n === 1 ? '' : 's'} al período ${nombreMes(mes)}.`}</p>
+        <p className="mt-2 text-[11px] text-muted">Siguiente etapa: <b className="text-ink">{s.sig}</b></p>
+        <div className="mt-2"><Button className="h-9 text-xs" onClick={() => setPaso(s.i)} data-testid={`continuar-${e}`}>{s.label} <ArrowRight className="size-3.5" /></Button></div>
+      </div>
+    )
+  }
 
   return (
-    <Modal open onClose={onClose} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fuentes, subcajas y gastos de este mes. Nada se guarda hasta que apliques la planificación." icon={<CalendarCheck2 className="size-5" />}
+    <Modal open onClose={onClose} bloqueado={hayOcupado} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fuentes, subcajas y gastos de este mes. Cada etapa se guarda cuando la confirmas." icon={<CalendarCheck2 className="size-5" />}
       footer={<>
-        <Button variant="outline" onClick={() => setPaso(p => Math.max(0, p - 1))} disabled={paso === 0}><ChevronLeft className="size-4" /> Anterior</Button>
-        {etapa && <Button variant="ghost" onClick={omitir}><SkipForward className="size-4" /> Omitir</Button>}
-        {etapa ? <Button onClick={siguiente} disabled={bloqueado}>{paso === 2 ? 'Revisar resumen' : 'Siguiente'} <ChevronRight className="size-4" /></Button>
-          : <Button onClick={aplicar} disabled={ocupado || invalidoF || invalidoS}>Aplicar planificación</Button>}
+        <Button variant="outline" onClick={() => setPaso(p => Math.max(0, p - 1))} disabled={paso === 0 || hayOcupado}><ChevronLeft className="size-4" /> Anterior</Button>
+        {etapa && (plan.etapas[etapa] === 2
+          ? <Button variant="ghost" onClick={() => retomar(etapa)} disabled={ocupado(etapa)}><RotateCcw className="size-4" /> Retomar etapa</Button>
+          : <Button variant="ghost" onClick={omitir} disabled={ocupado(etapa)}><SkipForward className="size-4" /> Omitir</Button>)}
+        {etapa ? <Button onClick={() => setPaso(siguientePaso(paso))} disabled={bloqueado}>{siguientePaso(paso) === 3 ? 'Revisar resumen' : 'Siguiente'} <ChevronRight className="size-4" /></Button>
+          : <Button onClick={finalizar} disabled={ocupado('final') || invalidoF || invalidoS}>{ocupado('final') && <Loader2 className="size-4 animate-spin" />} Finalizar planificación</Button>}
       </>}>
       <div className="space-y-4" data-testid="asistente-plan">
         <ol className="grid grid-cols-4 gap-1.5" aria-label="Etapas">
-          {ETAPAS.map((e, i) => { const T = ETAPA_TXT[e]; return (
-            <li key={e}><button type="button" onClick={() => setPaso(i)} aria-current={paso === i ? 'step' : undefined} data-testid={`etapa-${e}`}
-              className={`flex h-full w-full flex-col items-center gap-0.5 rounded-xl border px-1.5 py-2 text-center text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-navy/60 ${paso === i ? 'border-navy bg-primary-soft text-navy' : 'border-line text-muted hover:bg-bg'}`}>
-              <T.icon className="size-4" />{T.titulo}<span className="text-[10px] font-normal">{nombresDec(e)}</span></button></li>) })}
-          <li><button type="button" onClick={() => setPaso(3)} aria-current={paso === 3 ? 'step' : undefined} data-testid="etapa-resumen"
-            className={`flex h-full w-full flex-col items-center gap-0.5 rounded-xl border px-1.5 py-2 text-center text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-navy/60 ${paso === 3 ? 'border-navy bg-primary-soft text-navy' : 'border-line text-muted hover:bg-bg'}`}>
-            <CheckCircle2 className="size-4" />Resumen<span className="text-[10px] font-normal">Aplicar</span></button></li>
+          {ETAPAS.map((e, i) => { const T = ETAPA_TXT[e], v = visual(e), V = VISUAL[v]; return (
+            <li key={e}><button type="button" onClick={() => setPaso(i)} aria-current={paso === i ? 'step' : undefined} data-testid={`etapa-${e}`} data-estado={v}
+              className={`flex h-full w-full flex-col items-center gap-0.5 rounded-xl border px-1.5 py-2 text-center text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-navy/60 ${V.cls} ${paso === i ? 'ring-2 ring-navy/40' : ''}`}>
+              {v === 'completada' ? <CheckCircle2 className="size-4" /> : v === 'error' ? <AlertTriangle className="size-4" /> : v === 'omitida' ? <Ban className="size-4" /> : <T.icon className="size-4" />}
+              {T.titulo}<span className="text-[10px] font-normal" data-testid={`etapa-${e}-estado`}>{V.txt}</span></button></li>) })}
+          <li><button type="button" onClick={() => setPaso(3)} aria-current={paso === 3 ? 'step' : undefined} data-testid="etapa-resumen" data-estado={finalizada ? 'completada' : 'pendiente'}
+            className={`flex h-full w-full flex-col items-center gap-0.5 rounded-xl border px-1.5 py-2 text-center text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-navy/60 ${finalizada ? VISUAL.completada.cls : VISUAL.pendiente.cls} ${paso === 3 ? 'ring-2 ring-navy/40' : ''}`}>
+            <CheckCircle2 className="size-4" />Resumen<span className="text-[10px] font-normal">{finalizada ? 'Finalizada' : 'Por finalizar'}</span></button></li>
         </ol>
         {antesCorte && <ErrorBox tone="warning" message={`${nombreMes(mes)} es anterior al aislamiento mensual (${nombreMes(aisl)}): conserva su comportamiento histórico y no necesita preparación.`} />}
 
         {etapa === 'fuentes' && (
           <div className="space-y-2.5">
+            <Continuar e="fuentes" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-ink">¿Qué fuentes de dinero tendrás en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
                 <Button variant="outline" className="h-8 text-xs" onClick={() => setSelF(s => ({ ...s, ...Object.fromEntries(cf.filter(c => !c.aplicada && c.previo !== null).map(c => [c.id, { on: true, monto: String(c.previo) }])) }))}><Copy className="size-3.5" /> Usar mes anterior</Button>
-                <Button variant="outline" className="h-8 text-xs" onClick={() => { onClose(); o.onPlantillas('fuente') }}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
+                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('fuentes')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
               </div>
             </div>
             <ListaSel cands={cf} sel={selF} setSel={setSelF} tipo="fuente" />
+            <Aviso e="fuentes" />
+            {itF.length > 0 && <Button className="h-9 text-xs" disabled={invalidoF || ocupado('fuentes')} onClick={() => aplicarSeleccion('fuentes')} data-testid="aplicar-fuentes">{ocupado('fuentes') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itF.length} fuente{itF.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
           </div>
         )}
         {etapa === 'subcajas' && (
           <div className="space-y-2.5">
+            <Continuar e="subcajas" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-ink">¿Cuánto reservas en cada subcaja en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
                 <Button variant="outline" className="h-8 text-xs" onClick={() => setSelS(s => ({ ...s, ...Object.fromEntries(cs.filter(c => !c.aplicada && c.previo !== null).map(c => [c.id, { on: true, monto: String(c.previo) }])) }))}><Copy className="size-3.5" /> Usar mes anterior</Button>
-                <Button variant="outline" className="h-8 text-xs" onClick={() => { onClose(); o.onPlantillas('subcaja') }}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
+                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('subcajas')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
               </div>
             </div>
             <ListaSel cands={cs} sel={selS} setSel={setSelS} tipo="subcaja" />
+            <Aviso e="subcajas" />
+            {itS.length > 0 && <Button className="h-9 text-xs" disabled={invalidoS || ocupado('subcajas')} onClick={() => aplicarSeleccion('subcajas')} data-testid="aplicar-subcajas">{ocupado('subcajas') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itS.length} subcaja{itS.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
           </div>
         )}
         {etapa === 'gastos' && (
           <div className="space-y-3">
+            <Continuar e="gastos" />
             <p className="text-sm font-semibold text-ink">Gastos de {nombreMes(mes)}</p>
-            <p className="text-xs text-muted">Avanzar aquí <b>no registra ningún gasto</b>. Los compromisos mensuales se aplican desde “Gastos mensuales”, donde ves cada uno antes de confirmar.</p>
+            <p className="text-xs text-muted">Avanzar aquí <b>no registra ningún gasto</b>. Los compromisos mensuales se registran desde “Gastos mensuales”, donde ves cada uno antes de confirmar.</p>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="h-9 text-xs" onClick={() => { onClose(); o.onGastosMensuales() }}><ClipboardList className="size-3.5" /> Abrir gastos mensuales</Button>
+              <Button variant="outline" className="h-9 text-xs" onClick={() => abrirHijo('gastos')}><ClipboardList className="size-3.5" /> Abrir gastos mensuales</Button>
             </div>
+            <Aviso e="gastos" />
             <label className="flex items-center gap-2 rounded-xl border border-line p-3 text-sm">
-              <input type="checkbox" className="size-4 accent-[var(--navy)]" checked={gastosOk} onChange={e => { setGastosOk(e.target.checked); marca('gastos', e.target.checked ? 'hacer' : 'pendiente') }} />
+              <input type="checkbox" className="size-4 accent-[var(--navy)]" checked={plan.etapas.gastos === 1} disabled={ocupado('gastos')}
+                onChange={e => persistir('gastos', e.target.checked ? 1 : 0, { pending: 'Guardando…', ok: e.target.checked ? `Gastos de ${nombreMes(mes)} marcados como revisados.` : 'Gastos vuelve a estar pendiente.' })} />
               Ya revisé mis gastos mensuales de {nombreMes(mes)}
             </label>
           </div>
         )}
         {paso === 3 && (
-          <div className="space-y-2" data-testid="plan-resumen-final">
-            <p className="text-sm font-semibold text-ink">Resumen de la planificación</p>
+          <div className="space-y-3" data-testid="plan-resumen-final">
+            <p className="text-sm font-semibold text-ink">Planificación de {nombreMes(mes)}</p>
             <ul className="space-y-1.5 text-sm">
-              <li className="flex justify-between gap-3 rounded-xl bg-bg px-3 py-2"><span>Fuentes</span><span className="font-medium">{dec.fuentes === 'hacer' ? `${itF.length} por aplicar` : dec.fuentes === 'omitir' ? 'Omitida' : ETAPA_ESTADO[plan.etapas.fuentes]}</span></li>
-              <li className="flex justify-between gap-3 rounded-xl bg-bg px-3 py-2"><span>Subcajas</span><span className="font-medium">{dec.subcajas === 'hacer' ? `${itS.length} por aplicar` : dec.subcajas === 'omitir' ? 'Omitida' : ETAPA_ESTADO[plan.etapas.subcajas]}</span></li>
-              <li className="flex justify-between gap-3 rounded-xl bg-bg px-3 py-2"><span>Gastos</span><span className="font-medium">{dec.gastos === 'hacer' && gastosOk ? 'Revisados' : dec.gastos === 'omitir' ? 'Omitida' : ETAPA_ESTADO[plan.etapas.gastos]}</span></li>
+              {ETAPAS.map(e => { const v = visual(e), n = e === 'fuentes' ? real.fuentes.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
+                const detalle = v === 'omitida' ? 'Omitida (no se ejecutó)' : e === 'fuentes' ? `${n} configurada${n === 1 ? '' : 's'} · Total ${totalesTxt(real.fuentes.totales)}`
+                  : e === 'subcajas' ? `${n} configurada${n === 1 ? '' : 's'} · Total reservado ${money(real.subcajas.reservado, monedaBase)}` : `${n} registrado${n === 1 ? '' : 's'} · Total ${totalesTxt(real.gastos.totales)}`
+                return (
+                  <li key={e} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl bg-bg px-3 py-2" data-testid={`resumen-${e}`}>
+                    <span className="font-medium">{ETAPA_TXT[e].titulo} <span className="ml-1 text-[11px] font-semibold text-muted">· {VISUAL[v].txt}</span></span>
+                    <span className="flex items-center gap-2"><span className="text-xs text-muted">{detalle}</span>
+                      <button type="button" className="text-xs font-semibold text-navy underline" onClick={() => setPaso(ETAPAS.indexOf(e))}>Revisar {ETAPA_TXT[e].titulo}</button></span>
+                  </li>) })}
             </ul>
-            <p className="text-[11px] text-muted">Estado resultante: <b>{ESTADO_TXT[estadoDesdeEtapas(etapasFinal)]}</b>. Las etapas pendientes se podrán retomar luego desde el aviso de la campana.</p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-xl border border-line p-3 text-xs sm:grid-cols-3" data-testid="plan-indicadores">
+              <div><dt className="text-muted">Presupuesto consolidado</dt><dd className="font-semibold text-ink">{totalesTxt(real.fuentes.totales)}</dd></div>
+              <div><dt className="text-muted">Total reservado</dt><dd className="font-semibold text-ink">{money(real.subcajas.reservado, monedaBase)}</dd></div>
+              <div><dt className="text-muted">Presupuesto libre</dt><dd className="font-semibold text-ink">{libre}</dd></div>
+              <div><dt className="text-muted">Gastos registrados</dt><dd className="font-semibold text-ink">{real.gastos.n}</dd></div>
+              <div><dt className="text-muted">Etapas completadas</dt><dd className="font-semibold text-ink">{nCompletadas}</dd></div>
+              <div><dt className="text-muted">Etapas omitidas</dt><dd className="font-semibold text-ink">{nOmitidas}</dd></div>
+            </dl>
+            <Aviso e="final" />
+            <p className="text-[11px] text-muted">Estado: <b>{ESTADO_TXT[plan.estado]}</b>{itF.length + itS.length > 0 ? ` · Al finalizar se aplicarán ${itF.length} fuente(s) y ${itS.length} subcaja(s) que elegiste.` : ''}. Finalizar solo guarda el estado: no vuelve a crear fuentes, reservas ni gastos. Las etapas pendientes se pueden retomar desde la campana.</p>
           </div>
         )}
       </div>
