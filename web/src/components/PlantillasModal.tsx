@@ -43,10 +43,10 @@ const opcionesMedio = (medios: string[], actual: string, vacio?: string): Opcion
 ]
 const montoTxt = (n: number | null) => (n === null ? '' : n.toFixed(2))
 
-export default function PlantillasModal({ store, onClose, onUse, draft, onReopen, ctx, onRegistrado }: {
+export default function PlantillasModal({ store, onClose, onUse, draft, onReopen, ctx, onRegistrado, onSegundoPlano }: {
   store: AppStore; onClose: () => void; onUse: (p: GastoPreset) => void
   /** Abierto desde «Prepara tu mes»: al confirmarse el registro en Sheets se avisa al asistente (onRegistrado). */
-  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void
+  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
   /** Reabrir tras un error al guardar una plantilla: vuelve al formulario con lo que habías escrito. */
   draft?: PlantillaDraft; onReopen: (d: PlantillaDraft) => void
 }) {
@@ -95,14 +95,14 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
       </Modal>
     )
   }
-  return <Lista store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} ctx={ctx} onRegistrado={onRegistrado} />
+  return <Lista store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} ctx={ctx} onRegistrado={onRegistrado} onSegundoPlano={onSegundoPlano} />
 }
 
 /* ============================== Lista + lote ============================== */
 
-function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRegistrado }: {
+function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRegistrado, onSegundoPlano }: {
   store: AppStore; items: Plantilla[]; loaded: boolean; error: string | null; onClose: () => void; onUse: (p: GastoPreset) => void; setView: (v: View) => void
-  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void
+  ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
 }) {
   const { lote, setLote } = store
   const cfg = store.data?.config ?? {}
@@ -192,7 +192,7 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRe
     const loteId = lote.loteId
     const usadas = elegidas.map(p => p.id)
     const n = gastos.length
-    store.track(`lote:${loteId}`,
+    const ejecutar = (): void => { store.track(`lote:${loteId}`,
       { pending: `Registrando ${n} gasto${n === 1 ? '' : 's'}…`, ok: `Se registraron correctamente ${n} gasto${n === 1 ? '' : 's'}.`,
         error: 'No se pudo confirmar el registro de los gastos. Puedes reintentar sin riesgo de duplicarlos.' },
       async () => {
@@ -208,7 +208,10 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRe
           usadas.forEach(id => { delete valores[id]; delete ids[id] })
           return { ...l, seleccion: l.seleccion.filter(id => !usadas.includes(id)), valores, gastoIds: ids, loteId: store.nuevoLote().loteId }
         })
-      }, { onDone: ok => { if (ok && ctx) onRegistrado?.({ mes: ctx.mes, n }) } })
+      }, { onDone: (ok, err) => { if (!ctx) return; if (ok) onRegistrado?.({ mes: ctx.mes, n }); else ctx.onFallo?.(err ?? 'No se pudo confirmar el registro de los gastos.', ejecutar) } }) }
+    // Desde «Prepara tu mes» el registro sigue en segundo plano: el módulo se cierra y la etapa muestra su avance sin mover al usuario.
+    if (ctx) onSegundoPlano?.()
+    ejecutar()
   }
 
   const n = elegidas.length

@@ -74,6 +74,8 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await expect(page.getByTestId('resumen-gastos')).toContainText('Completada')
     await expect(r.getByTestId('plan-indicadores')).toContainText('Etapas omitidas')
     await page.getByRole('button', { name: 'Finalizar planificación' }).click()
+    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')   // permanece en el Resumen, ya finalizada
+    await page.getByTestId('cerrar-plan').click()
     await asistenteOculto(page)
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
     expect(await nFuentes(page)).toBeGreaterThan(antes)
@@ -232,8 +234,10 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await expect(page.getByTestId('error-fuentes')).toBeVisible()
     await expect(page.getByTestId('ok-fuentes')).toHaveCount(0)
     expect(await nFuentes(page)).toBe(antes)
-    await page.getByTestId('error-fuentes').getByRole('button', { name: /Reintentar/ }).click()   // reabre el módulo para volver a intentarlo
-    await expect(page.getByTestId('pf-lista')).toBeVisible()
+    await page.getByTestId('error-fuentes').getByRole('button', { name: /Reintentar/ }).click()   // reintenta la misma operación (idempotente), sin reabrir nada
+    await expect(page.getByTestId('pf-lista')).toHaveCount(0)
+    await expect(estado(page, 'fuentes')).toHaveText('Error')
+    expect(await llamadas(page, 'aplicarPlantillasFin')).toBe(2)
   })
 
   test('error del backend: sin éxito falso, estado Error visible y nada aplicado', async ({ page }) => {
@@ -246,6 +250,96 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await expect(page.getByTestId('error-fuentes')).toBeVisible()
     await expect(page.getByTestId('ok-fuentes')).toHaveCount(0)
     expect(await nFuentes(page)).toBe(antes)
+  })
+})
+
+test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', () => {
+  const toastOk = (page: Page, t: RegExp) => page.getByRole('status').filter({ hasText: t })
+
+  test('al terminar «Fuentes» el usuario sigue en el módulo de Gastos mensuales: no se reabre el asistente ni se cierra el módulo', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1800#cajas')
+    await sembrarPlantillas(page)
+    await abrirAsistente(page)
+    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
+    await aplicarFilaFuente(page, 'Sueldo QA')
+    await expect(estado(page, 'fuentes')).toHaveText('En progreso')
+    // Sin esperar: avanza a Gastos y abre Gastos mensuales mientras Fuentes aún guarda.
+    await page.getByTestId('etapa-gastos').click()
+    await dialog(page).getByRole('button', { name: 'Abrir gastos mensuales' }).click()
+    await asistenteOculto(page)
+    const m = dialog(page)
+    await expect(m.getByRole('list', { name: 'Plantillas' })).toBeVisible()
+    // Termina la operación anterior: aviso verde, y el módulo de Gastos sigue ahí, sin asistente encima.
+    await expect(toastOk(page, /plantilla aplicada/)).toBeVisible({ timeout: 10000 })
+    await page.waitForTimeout(600)
+    await asistenteOculto(page)
+    await expect(m.getByRole('list', { name: 'Plantillas' })).toBeVisible()
+    await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
+    // Seguimos en Gastos: seleccionar y registrar sigue funcionando.
+    await m.getByLabel('Seleccionar Gas').check()
+    await expect(m.getByText('1 gasto seleccionado')).toBeVisible()
+  })
+
+  test('registrar gastos en segundo plano: se cierra el módulo, el asistente muestra «En progreso» y al terminar «Completada» con aviso verde', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1200#cajas')
+    await abrirAsistente(page)
+    await page.getByTestId('etapa-gastos').click()
+    await dialog(page).getByRole('button', { name: 'Abrir gastos mensuales' }).click()
+    const m = dialog(page)
+    await m.getByLabel('Seleccionar Gas').check()
+    await m.getByRole('button', { name: 'Registrar 1 gasto' }).click()
+    await expect(page.getByTestId('asistente-plan')).toBeVisible()
+    await expect(estado(page, 'gastos')).toHaveText('En progreso')
+    await expect(page.getByTestId('bg-gastos')).toBeVisible()
+    await expect(toastOk(page, /Se registraron correctamente 1 gasto/)).toBeVisible({ timeout: 10000 })
+    await expect(estado(page, 'gastos')).toHaveText('Completada')
+    await expect(page.getByTestId('bg-gastos')).toHaveCount(0)
+    expect(await llamadas(page, 'saveGastosBatch')).toBe(1)
+  })
+
+  test('navegar entre etapas mientras guarda no se interrumpe: la etapa donde estoy no cambia al completarse otra', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1500#cajas')
+    await sembrarPlantillas(page)
+    await abrirAsistente(page)
+    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
+    await aplicarFilaFuente(page, 'Sueldo QA')
+    await page.getByTestId('etapa-subcajas').click()
+    await expect(page.getByRole('button', { name: 'Omitir', exact: true })).toBeVisible()
+    await expect(estado(page, 'fuentes')).toHaveText('Completada', { timeout: 10000 })
+    // Sigue en Subcajas (no lo devolvió a Fuentes), con su propio contenido.
+    await expect(page.getByTestId('etapa-subcajas')).toHaveAttribute('aria-current', 'step')
+    await expect(page.getByTestId('etapa-fuentes')).not.toHaveAttribute('aria-current', 'step')
+    await expect(page.getByText('¿Cuánto reservas en cada subcaja')).toBeVisible()
+  })
+
+  test('Finalizar en segundo plano: no cierra ni redirige; al terminar queda «Finalizada» con aviso verde y botón Cerrar', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1200#cajas')
+    await abrirAsistente(page)
+    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
+    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
+    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
+    await page.getByTestId('etapa-resumen').click()
+    await page.getByRole('button', { name: 'Finalizar planificación' }).click()
+    await expect(page.getByRole('button', { name: 'Finalizar planificación' })).toBeVisible()      // sigue en el Resumen
+    await expect(toastOk(page, /Planificación de .* guardada/)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('asistente-plan')).toBeVisible()                                  // no se cerró solo
+    await expect(page.getByTestId('cerrar-plan')).toBeVisible()
+    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')
+  })
+
+  test('el asistente se puede cerrar mientras guarda y la operación termina igual (estado guardado)', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1200#cajas')
+    await sembrarPlantillas(page)
+    await abrirAsistente(page)
+    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
+    await aplicarFilaFuente(page, 'Sueldo QA')
+    await page.keyboard.press('Escape')
+    await asistenteOculto(page)
+    await expect(toastOk(page, /plantilla aplicada/)).toBeVisible({ timeout: 10000 })
+    await page.waitForTimeout(500)
+    await asistenteOculto(page)                                                                       // terminar no reabre el asistente
+    await abrirAsistente(page)
+    await expect(estado(page, 'fuentes')).toHaveText('Completada')
   })
 })
 

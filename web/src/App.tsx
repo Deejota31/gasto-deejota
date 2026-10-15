@@ -154,7 +154,8 @@ export default function App({ api }: { api?: Api }) {
       {/* "Usar" cierra las plantillas y abre el mismo formulario de Nuevo gasto con los datos precargados. */}
       {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} ctx={plantillasOpen.ctx}
         onClose={() => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onCerrar() }}
-        onRegistrado={r => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onAplicado(r) }}
+        onRegistrado={r => { plantillasOpen.ctx?.onAplicado(r) }}   // solo avisa al asistente: nunca cierra ni cambia lo que el usuario tenga abierto
+        onSegundoPlano={() => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onIniciado?.() }}
         onUse={p => { const c = plantillasOpen.ctx; setPlantillasOpen(false); c?.onCerrar(); openGasto('create', null, undefined, p) }}
         onReopen={draft => { setModal(null); setPlantillasOpen({ draft, key: Date.now() }) }} />}
       {plan.nodo}

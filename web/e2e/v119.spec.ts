@@ -114,6 +114,9 @@ test.describe('v1.19 asistente y campana', () => {
     await expect(page.getByTestId('plan-resumen-final')).toContainText('Omitida')
     await expect(page.getByTestId('plan-resumen-final')).toContainText('Completada')
     await page.getByRole('button', { name: 'Finalizar planificación' }).click()
+    // v1.20.3: finalizar guarda en segundo plano y NO cierra ni redirige: el asistente queda en el Resumen como «Finalizada».
+    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')
+    await page.getByTestId('cerrar-plan').click()
     await expect(page.getByTestId('asistente-plan')).toHaveCount(0)
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
     expect(await fuentesAplicadas(page)).toBeGreaterThan(antesF)             // las fuentes del mes anterior quedaron aplicadas
