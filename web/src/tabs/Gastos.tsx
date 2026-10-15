@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowLeft, CalendarDays, ChevronDown, ChevronUp, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Plus, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowLeft, ChevronDown, ChevronUp, ListOrdered, ArrowUp, ArrowUpDown, Copy, Download, Loader2, Pencil, Receipt, RefreshCw, Repeat, Search, Trash2, Undo2 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
@@ -8,7 +8,7 @@ import { matchesDims } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook } from '../lib/visual'
 import type { ModalMode } from '../components/GastoModal'
 import { Pagination, SwipeRow } from '../components/table'
-import { Button, Checkbox, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
+import { BotonMensual, BotonNuevo, Button, Checkbox, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
 import { FilterBar } from '../components/shared'
 
@@ -193,7 +193,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   const actionsFor = (g: Gasto, compact = false) => isBusy(g) ? (
     <span className="inline-flex items-center gap-1.5 px-2 text-xs text-muted"><Loader2 className="size-3.5 animate-spin" /> Guardando…</span>
   ) : g.problemaId ? (
-    <span className="inline-flex items-center gap-1 rounded-lg bg-[#FEF3C7] px-2 py-1 text-[11px] font-medium text-[#92400E]" title={ID_AVISO[g.problemaId]}><AlertTriangle className="size-3.5" /> ID por reparar</span>
+    <span className="inline-flex items-center gap-1 rounded-lg bg-warning-soft px-2 py-1 text-[11px] font-medium text-warning" title={ID_AVISO[g.problemaId]}><AlertTriangle className="size-3.5" /> ID por reparar</span>
   ) : g.estado === 'Activo' ? (
     <>
       <IconButton label="Editar" tone="primary" onClick={() => open('edit', g)}><Pencil className="size-4" /></IconButton>
@@ -237,8 +237,8 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
           <Button variant="outline" onClick={() => downloadCsv(rows, `gastos-${filters.desde}_${filters.hasta}.csv`)} disabled={!rows.length}><Download className="size-4" /> CSV</Button>
           <Button variant={personal ? 'soft' : 'outline'} onClick={() => setSort(personal ? { key: 'fecha', dir: -1 } : { key: 'personalizado', dir: 1 })} aria-pressed={personal} aria-label="Orden personalizado"
             title="Ordena la tabla a tu manera arrastrando las filas"><ListOrdered className="size-4" /> <span className="hidden sm:inline">Orden personalizado</span></Button>
-          <Button onClick={() => open('create', null)} disabled={!store.data}><Plus className="size-4" /> Nuevo gasto</Button>
-          <Button variant="soft" onClick={onGastosMensuales} disabled={!store.data}><CalendarDays className="size-4" /> Gastos mensuales</Button>
+          <BotonNuevo onClick={() => open('create', null)} disabled={!store.data}>Nuevo gasto</BotonNuevo>
+          <BotonMensual onClick={onGastosMensuales} disabled={!store.data}>Gastos mensuales</BotonMensual>
         </div>
         {foco && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-primary-soft px-3 py-2 text-xs text-navy" role="status" data-testid="foco-banner">
@@ -251,7 +251,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
           </div>
         )}
         {personal && (
-          <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${bloqueo ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-primary-soft text-navy'}`}>
+          <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${bloqueo ? 'bg-warning-soft text-warning' : 'bg-primary-soft text-navy'}`}>
             {bloqueo || 'Orden personalizado: arrastra el asa ⠿ (o enfócala y usa Espacio y las flechas) para mover un movimiento. Funciona con filtros y páginas; se guarda al soltar y no cambia fechas, montos ni el orden de tu hoja.'}
           </p>
         )}
@@ -335,7 +335,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                       </div>
                     )}
                     <SwipeRow width={off ? 120 : 168} actions={g.problemaId ? (
-                      <span className="flex flex-1 items-center justify-center gap-1 bg-[#FEF3C7] px-2 text-center text-[11px] text-[#92400E]"><AlertTriangle className="size-4 shrink-0" />ID por reparar</span>
+                      <span className="flex flex-1 items-center justify-center gap-1 bg-warning-soft px-2 text-center text-[11px] text-warning"><AlertTriangle className="size-4 shrink-0" />ID por reparar</span>
                     ) : isBusy(g) ? (
                       <span className="flex flex-1 items-center justify-center gap-1.5 bg-bg text-xs text-muted"><Loader2 className="size-4 animate-spin" />Guardando…</span>
                     ) : off ? (

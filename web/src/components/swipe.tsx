@@ -112,7 +112,7 @@ export function SwipeFila({ nombre, acciones, children, activo = true, className
         className="absolute inset-y-0 right-0 flex" style={{ width: ancho }}>
         {acciones.map(a => (
           <button key={a.key} type="button" disabled={a.disabled} title={a.title} onClick={() => { cerrar(); a.onClick() }}
-            className={`flex flex-col items-center justify-center gap-1 text-[10px] font-semibold transition disabled:opacity-40 ${a.danger ? 'bg-[#E25563] text-white' : 'bg-primary-soft text-navy'}`}
+            className={`flex flex-col items-center justify-center gap-1 text-[10px] font-semibold transition disabled:opacity-40 ${a.danger ? 'bg-danger-solid text-white' : 'bg-primary-soft text-navy'}`}
             style={{ width: ANCHO_ACCION }}>
             {a.icon}<span>{a.label}</span>
           </button>

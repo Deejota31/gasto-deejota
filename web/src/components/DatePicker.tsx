@@ -194,7 +194,7 @@ export function DatePicker({ id, value, onChange, format, min, max, invalid, lab
       <button ref={btn} id={id} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? uid : undefined} data-value={value}
         aria-label={`${label}${texto ? `: ${texto}` : ''}`} aria-invalid={invalid || undefined}
         onClick={() => setOpen(o => !o)}
-        className={`${controlCls} flex items-center pr-10 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-[#D2463C]' : ''}`}>
+        className={`${controlCls} flex items-center pr-10 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`}>
         <span className={`tabular truncate ${texto ? '' : 'text-muted/70'}`}>{texto || placeholder || (format || 'dd/MM/yyyy').toLowerCase()}</span>
         <CalendarDays aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
       </button>
@@ -227,7 +227,7 @@ export function MonthPicker({ id, value, onChange, invalid, label = 'Mes', today
     <div className="relative">
       <button ref={btn} id={id} type="button" aria-haspopup="dialog" aria-expanded={open} data-value={value}
         aria-label={`${label}${texto ? `: ${texto}` : ''}`} aria-invalid={invalid || undefined} onClick={() => setOpen(o => !o)}
-        className={`${controlCls} flex items-center pr-10 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-[#D2463C]' : ''}`}>
+        className={`${controlCls} flex items-center pr-10 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`}>
         <span className={`truncate ${texto ? '' : 'text-muted/70'}`}>{texto || 'Elige un mes'}</span>
         <CalendarDays aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
       </button>

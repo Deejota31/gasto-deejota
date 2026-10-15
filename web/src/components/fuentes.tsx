@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
-  Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, X,
+  Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Search, Star, Trash2, X,
 } from 'lucide-react'
 import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel, todayIn } from '../lib/dates'
@@ -11,7 +11,7 @@ import type { AppStore } from '../lib/store'
 import type { AppData, Fuente, FuenteMes, Recurrencia } from '../lib/types'
 import { dependenciasFuente } from '../lib/dependencias'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
-import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
+import { BotonEditar, BotonMensual, BotonNuevo, Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 import { Combobox } from './Combobox'
 import { MonthPicker } from './DatePicker'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
@@ -29,7 +29,7 @@ const NINGUNO = '__ninguno__'
  */
 
 const TONO = {
-  ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
+  ok: { fg: 'var(--success)', bg: 'var(--success-soft)' }, atencion: { fg: 'var(--warning)', bg: 'var(--warning-soft)' }, alerta: { fg: 'var(--danger)', bg: 'var(--danger-soft)' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
 }
 const MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/
@@ -97,7 +97,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-            <span className="grid size-8 place-items-center rounded-xl" style={{ background: '#E7F7F2', color: '#0F8A6B' }}><CircleDollarSign className="size-4" /></span>
+            <span className="grid size-8 place-items-center rounded-xl" style={{ background: 'var(--success-soft)', color: 'var(--success)' }}><CircleDollarSign className="size-4" /></span>
             Fuentes de dinero <span className="rounded-full bg-bg px-2 py-0.5 text-xs font-semibold text-muted" data-testid="n-fuentes">{fuentes.length}</span>
             <InfoTooltip title="Cómo suman las fuentes" align="left">
               <p>El <b>presupuesto consolidado</b> es la suma de lo que aporta cada fuente <b>activa</b> en el período. Las reservas no suman: reparten ese mismo dinero.</p>
@@ -111,8 +111,8 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
             : 'Aún no tienes fuentes: el presupuesto sale de la caja general.'}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => plantillas.abrir('fuente')}><CalendarDays className="size-4" /> Fuentes mensuales</Button>
-          <Button onClick={() => abrir(null)}><Plus className="size-4" /> Nueva fuente</Button>
+          <BotonNuevo onClick={() => abrir(null)}>Nueva fuente</BotonNuevo>
+          <BotonMensual onClick={() => plantillas.abrir('fuente')}>Fuentes mensuales</BotonMensual>
         </div>
       </div>
 
@@ -216,15 +216,7 @@ function estadoFuente(r: FuenteResumen) {
 }
 
 export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: () => void; label: string; disabled?: boolean }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} title={on ? 'Activa: suma al presupuesto' : 'Inactiva: no suma'} disabled={disabled} onClick={onChange}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-1 py-1 text-[11px] font-bold disabled:opacity-50">
-      <span className={`relative h-5 w-9 rounded-full transition ${on ? 'bg-[#0F8A6B]' : 'bg-line'}`}>
-        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
-      </span>
-      <span className={on ? 'text-[#0F8A6B]' : 'text-muted'}>{on ? 'ON' : 'OFF'}</span>
-    </button>
-  )
+  return <Switch estado checked={on} onChange={() => onChange()} label={label} disabled={disabled} title={on ? 'Activa: suma al presupuesto' : 'Inactiva: no suma'} />
 }
 
 function Badges({ r }: { r: FuenteResumen }) {
@@ -316,7 +308,7 @@ function AccionesFuente({ f, puedeOrdenar, first, last, onEdit, onUp, onDown, on
 }) {
   return (
     <div className="relative flex shrink-0 items-center gap-1">
-      <button type="button" aria-label={`Editar fuente ${f.nombre}`} title="Editar" onClick={onEdit} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg hover:text-navy"><Pencil className="size-4" /></button>
+      <BotonEditar label={`Editar fuente ${f.nombre}`} onClick={onEdit} />
       <MenuAcciones label={`Más acciones de la fuente ${f.nombre}`} acciones={[
         { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },
         { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: puedeOrdenar ? undefined : 'Quita la búsqueda y los filtros para reordenar' },

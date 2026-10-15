@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, ChevronDown, Info, Loader2, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, ChevronDown, Info, Loader2, Pencil, Plus, X } from 'lucide-react'
 import { DatePicker } from './DatePicker'
 import { useModalLayer } from '../lib/toast'
 import Toaster from './Toaster'
@@ -82,19 +82,23 @@ export function Card({ title, icon, action, info, children, className = '', body
 
 type Variant = 'primary' | 'ghost' | 'danger' | 'outline' | 'soft'
 const variants: Record<Variant, string> = {
-  primary: 'bg-navy text-white shadow-sm hover:brightness-110 dark:text-[#0E1525]',
-  outline: 'border border-line bg-card text-ink hover:bg-bg',
-  ghost: 'text-muted hover:bg-bg hover:text-ink',
-  danger: 'bg-[#E25563] text-white hover:brightness-110',
-  soft: 'bg-primary-soft text-navy hover:brightness-95',
+  primary: 'bg-navy text-white shadow-sm hover:brightness-110 active:brightness-95 dark:text-[#0E1525]',
+  outline: 'border border-line bg-card text-ink hover:bg-bg active:bg-line/60',
+  ghost: 'text-muted hover:bg-bg hover:text-ink active:bg-line/60',
+  danger: 'bg-danger-solid text-white shadow-sm hover:brightness-110 active:brightness-95 dark:text-[#0E1525]',
+  soft: 'bg-primary-soft text-navy hover:brightness-95 active:brightness-90',
 }
+
+export const BTN_BASE = 'inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy'
+/** Clases de un botón para disparadores que no pueden ser <Button> (p. ej. el trigger de un menú). */
+export const claseBoton = (v: Variant = 'primary') => `${BTN_BASE} ${variants[v]}`
 
 export function Button({ variant = 'primary', loading, children, className = '', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
   return (
     <button
       {...rest}
       disabled={rest.disabled || loading}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy ${variants[variant]} ${className}`}
+      className={`${BTN_BASE} ${variants[variant]} ${className}`}
     >
       {loading && <Loader2 className="size-4 animate-spin" aria-hidden />}
       {children}
@@ -102,8 +106,26 @@ export function Button({ variant = 'primary', loading, children, className = '',
   )
 }
 
+/** Botón principal de creación (Nuevo gasto, Nueva fuente, Nueva subcaja…): misma variante en todos los módulos. */
+export function BotonNuevo({ children, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> & { loading?: boolean }) {
+  return <Button variant="primary" {...rest}><Plus className="size-4" aria-hidden />{children}</Button>
+}
+/** Botón secundario de módulos mensuales (Gastos / Fuentes / Subcajas mensuales): idéntico en los tres. Va justo después de BotonNuevo. */
+export function BotonMensual({ children, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'>) {
+  return <Button variant="soft" {...rest}><CalendarDays className="size-4" aria-hidden />{children}</Button>
+}
+/** Editar (acción externa de tarjetas y filas): mismo lápiz, tamaño y hover en todos los módulos. */
+export function BotonEditar({ label, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'aria-label'> & { label: string }) {
+  return (
+    <button type="button" aria-label={label} title="Editar" {...rest}
+      className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg hover:text-navy focus-visible:outline-2 focus-visible:outline-navy disabled:opacity-40">
+      <Pencil className="size-4" aria-hidden />
+    </button>
+  )
+}
+
 export function IconButton({ label, children, tone = 'default', className = '', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; tone?: 'default' | 'danger' | 'primary' }) {
-  const tones = { default: 'text-muted hover:bg-bg hover:text-ink', danger: 'text-muted hover:bg-coral-soft hover:text-coral', primary: 'text-muted hover:bg-primary-soft hover:text-navy' }
+  const tones = { default: 'text-muted hover:bg-bg hover:text-ink', danger: 'text-muted hover:bg-danger-soft hover:text-danger', primary: 'text-muted hover:bg-primary-soft hover:text-navy' }
   return (
     <button type="button" aria-label={label} title={label} {...rest}
       className={`grid size-8 place-items-center rounded-lg transition focus-visible:outline-2 focus-visible:outline-navy disabled:opacity-40 ${tones[tone]} ${className}`}>
@@ -117,7 +139,7 @@ export function Field({ label, children, error, hint, htmlFor }: { label: ReactN
     <div className="flex flex-col gap-1">
       <label htmlFor={htmlFor} className="text-xs font-medium text-muted">{label}</label>
       {children}
-      {error ? <span className="text-xs text-[#D2463C]">{error}</span> : hint && <span className="text-[11px] text-muted">{hint}</span>}
+      {error ? <span className="text-xs text-danger">{error}</span> : hint && <span className="text-[11px] text-muted">{hint}</span>}
     </div>
   )
 }
@@ -146,7 +168,7 @@ export function SelectField({ id, value, onChange, children, label, invalid }: {
   return (
     <div className="relative">
       <select id={id} aria-label={label} value={value} onChange={e => onChange(e.target.value)} aria-invalid={invalid || undefined}
-        className={`${controlCls} appearance-none pr-10 ${invalid ? 'border-[#D2463C]' : ''}`}>{children}</select>
+        className={`${controlCls} appearance-none pr-10 ${invalid ? 'border-danger' : ''}`}>{children}</select>
       <ChevronDown aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
     </div>
   )
@@ -174,15 +196,17 @@ export function Checkbox({ checked, onChange, label, indeterminate, disabled, co
     aria-label={label} checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)} />
 }
 
-export function Switch({ checked, onChange, label, compact, disabled, title }: { checked: boolean; onChange: (v: boolean) => void; label: string; compact?: boolean; disabled?: boolean; title?: string }) {
+/** ÚNICO interruptor ON/OFF de la app: ON azul principal, OFF gris neutro, mismo tamaño, animación y foco en todos los módulos.
+ *  `estado` añade el texto ON/OFF a la derecha. Activar no confirma nada: el guardado lo informa el propio flujo (loading/error). */
+export function Switch({ checked, onChange, label, compact, disabled, title, estado }: { checked: boolean; onChange: (v: boolean) => void; label: string; compact?: boolean; disabled?: boolean; title?: string; estado?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={compact ? label : undefined} title={title ?? (compact ? label : undefined)} disabled={disabled}
+    <button type="button" role="switch" aria-checked={checked} aria-label={compact || estado ? label : undefined} title={title ?? (compact ? label : undefined)} disabled={disabled}
       onClick={e => { e.stopPropagation(); onChange(!checked) }}
       className="inline-flex shrink-0 items-center gap-2 rounded-full text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy disabled:cursor-wait disabled:opacity-60">
-      <span className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? 'bg-navy' : 'bg-line'}`}>
-        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${checked ? 'left-[18px]' : 'left-0.5'}`} />
+      <span data-ds="switch" className={`relative h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${checked ? 'bg-navy' : 'bg-switch-off'}`}>
+        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all duration-200 ${checked ? 'left-[18px]' : 'left-0.5'}`} />
       </span>
-      {!compact && label}
+      {estado ? <span className={`w-6 text-left text-[11px] font-bold ${checked ? 'text-navy' : 'text-muted'}`} aria-hidden>{checked ? 'ON' : 'OFF'}</span> : !compact && label}
     </button>
   )
 }
@@ -238,8 +262,8 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
 
 export function ErrorBox({ message, onRetry, tone = 'error' }: { message: ReactNode; onRetry?: () => void; tone?: 'error' | 'warning' }) {
   const cls = tone === 'error'
-    ? 'border-[#F5C2C0] bg-[#FDEEEE] text-[#9F2D2D] dark:border-[#5a2a2a] dark:bg-[#3a1d1d] dark:text-[#f3b4b4]'
-    : 'border-[#F5DDA8] bg-[#FFF7E6] text-[#8A5A0B] dark:border-[#5a4a20] dark:bg-[#33290f] dark:text-[#f1d391]'
+    ? 'border-danger/30 bg-danger-soft text-danger'
+    : 'border-warning/30 bg-warning-soft text-warning'
   return (
     <div role={tone === 'error' ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${cls}`}>
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />

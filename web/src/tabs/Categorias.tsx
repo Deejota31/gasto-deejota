@@ -10,7 +10,7 @@ import { isOtros, normName, otrosAlFinal } from '../lib/orden'
 import { dependenciasCategoria } from '../lib/dependencias'
 import { MenuAcciones } from '../components/MenuAcciones'
 import { Combobox } from '../components/Combobox'
-import { Button, Checkbox, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch } from '../components/ui'
+import { Button, Checkbox, Empty, ErrorBox, Field, IconButton, IconTile, inputCls, Modal, Skeleton, Switch, claseBoton } from '../components/ui'
 
 type Nivel = 'ambito' | 'categoria' | 'subcategoria'
 interface Target { mode: 'create' | 'edit'; nivel: Nivel; ambito?: string; categoria?: string; subcategoria?: string }
@@ -99,7 +99,7 @@ export default function Categorias({ store }: { store: AppStore }) {
             <input aria-label="Buscar en el catálogo" placeholder="Buscar ámbito, categoría o subcategoría…" className={`${inputCls} h-10 pl-9`} value={q} onChange={e => setQ(e.target.value)} />
           </label>
           <MenuAcciones label="Agregar al catálogo" ancho={240} disabled={!store.data}
-            triggerClass="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-navy px-3 text-sm font-medium text-white shadow-sm transition hover:brightness-110 disabled:opacity-50 dark:text-[#0E1525]"
+            triggerClass={claseBoton('primary')}
             trigger={<><Plus className="size-4" /> Agregar <ChevronDown className="size-4" /></>}
             acciones={[
               { key: 'ambito', label: 'Nuevo ámbito', icon: <Layers className="size-4" />, onClick: () => setTarget({ mode: 'create', nivel: 'ambito', ambito: current?.name }) },
@@ -124,7 +124,7 @@ export default function Categorias({ store }: { store: AppStore }) {
           {results.map(a => (
             <div key={a.name} className="rounded-2xl border border-line bg-card p-4">
               <AmbHeader a={a} catalogo={catalogo} q={term} />
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {a.cats.map(c => <CatCard key={c.name} a={a.name} ambActivo={a.activo} c={c} catalogo={catalogo} q={term} onEdit={setTarget} reorder={false} busy={store.pending.has(`act:${a.name}|${c.name}`)}
                   onToggle={v => alternar(a.name, c.name, v)} onDelete={() => setBorrar({ ambito: a.name, cat: c })} />)}
               </div>
@@ -170,7 +170,7 @@ export default function Categorias({ store }: { store: AppStore }) {
                 </div>
               </div>
               {!current.cats.length ? <Empty icon={<Shapes className="size-5" />} title="Sin categorías">Agrega la primera categoría de este ámbito.</Empty> : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {current.cats.map(c => {
                     const fijas = current.cats.filter(x => !isOtros(x.name)), i = fijas.findIndex(x => x.name === c.name)
                     return <CatCard key={c.name} a={current.name} ambActivo={current.activo} c={c} catalogo={catalogo} q="" onEdit={setTarget} reorder
@@ -222,7 +222,7 @@ function CatCard({ a, ambActivo, c, catalogo, q, onEdit, reorder, puedeSubir, pu
   const efectiva = c.activo && ambActivo
   const sinOrden = !reorder ? 'Quita la búsqueda para reordenar' : isOtros(c.name) ? '“Otros” siempre va al final' : undefined
   return (
-    <article className={`rounded-2xl border border-line p-3 transition hover:shadow-sm ${efectiva ? '' : 'opacity-60'}`} style={{ background: `linear-gradient(160deg, ${l.color}0D, transparent 60%)` }} data-testid="cat-card" data-cat={c.name}>
+    <article className={`min-w-0 rounded-2xl border border-line p-3 transition hover:shadow-sm ${efectiva ? '' : 'opacity-60'}`} style={{ background: `linear-gradient(160deg, ${l.color}0D, transparent 60%)` }} data-testid="cat-card" data-cat={c.name}>
       <div className="flex items-center gap-2">
         <IconTile color={l.color} Icon={l.Icon} />
         <div className="min-w-0 flex-1">
@@ -402,7 +402,7 @@ function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store:
       <div className="space-y-3 text-sm" data-testid="eliminar-categoria">
         <p className="font-semibold">“{cat.name}” · {ambito}</p>
         {!listo || !deps ? <p className="text-xs text-muted" role="status">Revisando dónde se usa…</p> : bloqueada ? (
-          <p className="rounded-xl bg-[#FFF6DB] px-3 py-2 text-xs text-[#B7791F]" data-testid="categoria-en-uso">
+          <p className="rounded-xl bg-warning-soft px-3 py-2 text-xs text-warning" data-testid="categoria-en-uso">
             Esta categoría está en uso: {uso.join(', ')}. Para conservar el historial no se elimina.
             {cat.activo ? ' Puedes desactivarla: deja de ofrecerse en formularios y filtros, y puedes reactivarla cuando quieras.' : ' Ya está inactiva: se conserva sin ofrecerse.'}
           </p>

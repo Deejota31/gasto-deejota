@@ -306,7 +306,7 @@ test('notificaciones arriba a la derecha, verdes al confirmar; Top 5 alternable 
   const vw = page.viewportSize()!.width
   expect(box.y).toBeLessThan(80)
   expect(vw - (box.x + box.width)).toBeLessThan(40)
-  expect(await ok.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(238, 249, 242)')
+  expect(await ok.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(231, 247, 242)')
   await expect(ok).toHaveCount(0, { timeout: 7000 }) // desaparece sola (~4 s)
   await page.getByRole('button', { name: 'Período', exact: true }).click()
   await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este año' }).click()
@@ -415,7 +415,7 @@ test.describe('Apps Script lento o caído', () => {
     await newGasto(page, { ambito: 'Amigos', categoria: 'Salidas', sub: 'Cine', monto: '30', medio: 'Plin', desc: 'Falla' })
     const err = page.getByRole('alert').filter({ hasText: 'No se pudo registrar el gasto.' })
     await expect(err).toBeVisible()
-    expect(await err.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(253, 240, 239)')
+    expect(await err.evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgb(253, 236, 236)')
     await expect(page.getByText('Gasto registrado correctamente.')).toHaveCount(0)
     expect(await total(page)).toBe(antes)
     // con otro formulario abierto, el error sigue visible y usable (se muestra dentro del modal).
@@ -1851,10 +1851,10 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
   })
 
-  test('fuentes: el menú ⋯ trae Subir, Bajar, Clonar y Eliminar (en ese orden), no se corta y respeta primero/último', async ({ page }) => {
+  test('fuentes: el menú ⋯ trae Clonar, Plantilla, Subir, Bajar y Eliminar (orden canónico), no se corta y respeta primero/último', async ({ page }) => {
     await menuF(page, 'General').click()
     await expect(page.getByRole('menuitem')).toHaveCount(5)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
     await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()          // primera
     await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeEnabled()
     const vp = page.viewportSize()!
@@ -1974,7 +1974,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await page.waitForTimeout(400)
     await menuC(page, 'Caja Auto').click()
     await expect(page.getByRole('menuitem')).toHaveCount(5)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
     await page.keyboard.press('Escape')
     // Subir / Bajar con persistencia
     const antes = await nombres()
@@ -2011,7 +2011,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toBeVisible()
     await abrirMenu(menuC(page, 'Caja Auto (Copia)'))
     await expect(page.getByRole('menuitem')).toHaveCount(5)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Subir', 'Bajar', 'Clonar', 'Guardar como plantilla', 'Eliminar'])
+    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     // la copia está inactiva (no toma gastos): se puede eliminar
     await expect(dialog(page)).toContainText('Está inactiva')

@@ -100,8 +100,8 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                   </span>
                   {(() => {
                     const err = fs.filter(f => estados[f.nombre] === 'error').length, ok = fs.filter(f => estados[f.nombre] === 'ok').length
-                    return err ? <span className="shrink-0 rounded-full bg-[#FDECEC] px-2 py-0.5 text-[10px] font-semibold text-[#C0362C]" data-testid="estado-grupo">{err} con error</span>
-                      : ok ? <span className="shrink-0 rounded-full bg-[#E7F7F2] px-2 py-0.5 text-[10px] font-semibold text-[#0F8A6B]" data-testid="estado-grupo">{ok} ejecutada{ok === 1 ? '' : 's'}</span>
+                    return err ? <span className="shrink-0 rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-semibold text-danger" data-testid="estado-grupo">{err} con error</span>
+                      : ok ? <span className="shrink-0 rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-semibold text-success" data-testid="estado-grupo">{ok} ejecutada{ok === 1 ? '' : 's'}</span>
                       : <span className="shrink-0 rounded-full bg-bg px-2 py-0.5 text-[10px] font-medium text-muted" data-testid="estado-grupo">Sin ejecutar</span>
                   })()}
                   <ChevronDown className={`size-4 shrink-0 text-muted transition ${abierto ? 'rotate-180' : ''}`} />
@@ -112,7 +112,7 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                       <li key={f.nombre} className="flex items-center gap-2 rounded-lg bg-bg/50 px-2.5 py-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-card px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code></p>
-                          <p className="text-[11px] text-muted">{pide === f.nombre ? <span className="font-medium text-[#B7791F]"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
+                          <p className="text-[11px] text-muted">{pide === f.nombre ? <span className="font-medium text-warning"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
                         </div>
                         {pide === f.nombre ? (
                           <span className="flex shrink-0 gap-1">
@@ -156,7 +156,7 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
             <div id="consola-cuerpo" className="mt-2">
               {res && <p className="mb-2 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
                 <code className="rounded bg-bg px-1 py-0.5">{res.nombre}()</code><span>{res.ms} ms</span>
-                <span className={res.ok ? 'font-semibold text-[#0F8A6B]' : 'font-semibold text-[#C0362C]'}>{res.ok ? 'OK' : 'Error'}</span>
+                <span className={res.ok ? 'font-semibold text-success' : 'font-semibold text-danger'}>{res.ok ? 'OK' : 'Error'}</span>
               </p>}
               {res?.secretos.map((s, i) => (
                 <button key={i} type="button" onClick={() => void copiar(s, `s${i}`)}
@@ -164,7 +164,7 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                   <KeyRound className="size-3.5 shrink-0" /><span className="min-w-0 flex-1 truncate font-mono">{s}</span>{copiado === `s${i}` ? 'Copiado' : 'Copiar token'}
                 </button>
               ))}
-              <pre className={`${ancho ? 'max-h-[70vh]' : 'max-h-56'} min-h-16 overflow-auto rounded-xl p-3 text-xs break-words whitespace-pre-wrap ${res && !res.ok ? 'bg-[#FDECEC] text-[#C0362C]' : 'bg-bg text-ink'}`}>{res ? res.texto : 'Ejecuta una función y su respuesta aparecerá aquí.'}</pre>
+              <pre className={`${ancho ? 'max-h-[70vh]' : 'max-h-56'} min-h-16 overflow-auto rounded-xl p-3 text-xs break-words whitespace-pre-wrap ${res && !res.ok ? 'bg-danger-soft text-danger' : 'bg-bg text-ink'}`}>{res ? res.texto : 'Ejecuta una función y su respuesta aparecerá aquí.'}</pre>
             </div>
           )}
         </div>

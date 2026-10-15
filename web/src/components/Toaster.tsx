@@ -2,8 +2,8 @@ import { CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react'
 import { dismiss, useModalOpen, useToasts, type ToastKind } from '../lib/toast'
 
 const STYLE: Record<ToastKind, { box: string; icon: React.ComponentType<{ className?: string }>; iconCls: string }> = {
-  success: { box: 'border-[#BFE7CF] bg-[#EEF9F2] text-[#17603A] dark:border-[#1F5F3D] dark:bg-[#12291E] dark:text-[#8FE0B0]', icon: CheckCircle2, iconCls: 'text-[#22A35A]' },
-  error: { box: 'border-[#F5C6C2] bg-[#FDF0EF] text-[#9B2C24] dark:border-[#6B2620] dark:bg-[#2C1513] dark:text-[#F3A49C]', icon: XCircle, iconCls: 'text-[#D2463C]' },
+  success: { box: 'border-success/30 bg-success-soft text-success', icon: CheckCircle2, iconCls: 'text-success' },
+  error: { box: 'border-danger/30 bg-danger-soft text-danger', icon: XCircle, iconCls: 'text-danger' },
   pending: { box: 'border-line bg-card text-ink', icon: Loader2, iconCls: 'animate-spin text-navy' },
   info: { box: 'border-line bg-card text-ink', icon: Info, iconCls: 'text-navy' },
 }

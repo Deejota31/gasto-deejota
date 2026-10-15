@@ -108,7 +108,7 @@ export default function App({ api }: { api?: Api }) {
   const avisos = (
     <>
       {!store.isDemo && store.data && !store.confirmado && (
-        <div role="alert" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-[#FFF6DB] px-4 py-1.5 text-center text-xs text-[#B7791F]" data-testid="sin-confirmar">
+        <div role="alert" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-warning-soft px-4 py-1.5 text-center text-xs text-warning" data-testid="sin-confirmar">
           <span>{store.loading ? 'Confirmando tus datos con la hoja…' : 'Estos datos se guardaron en este navegador y no se pudieron confirmar con tu hoja; pueden estar desactualizados.'}</span>
           {!store.loading && <button className="font-semibold underline" onClick={() => void store.refresh()}>Reintentar</button>}
         </div>

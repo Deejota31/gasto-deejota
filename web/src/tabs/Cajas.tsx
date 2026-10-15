@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Plus, Power, Search,
-  Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info, CalendarDays, FilePlus2,
+  Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info, FilePlus2,
 } from 'lucide-react'
 import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney } from '../lib/money'
@@ -22,7 +22,7 @@ import { SwipeFila, useEsMovil } from '../components/swipe'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
 import { guardarPref, leerPref } from '../lib/prefs'
 import { dependenciasCaja } from '../lib/dependencias'
-import { Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch } from '../components/ui'
+import { BotonEditar, BotonMensual, BotonNuevo, Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Skeleton, Switch } from '../components/ui'
 
 type Alcance = Exclude<FiltroCampo, 'Todos'>
 const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
@@ -34,7 +34,7 @@ const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
 const alcanceIcon = (c: FiltroCampo) => ALCANCES.find(a => a.value === c)?.Icon ?? Wallet
 type Orden = 'manual' | 'nombre' | 'monto' | 'mas' | 'menos' | 'uso'
 const TONO = {
-  ok: { fg: '#0F8A6B', bg: '#E7F7F2' }, atencion: { fg: '#B7791F', bg: '#FFF6DB' }, alerta: { fg: '#C0362C', bg: '#FDECEC' },
+  ok: { fg: 'var(--success)', bg: 'var(--success-soft)' }, atencion: { fg: 'var(--warning)', bg: 'var(--warning-soft)' }, alerta: { fg: 'var(--danger)', bg: 'var(--danger-soft)' },
   info: { fg: '#4F6FC8', bg: '#EEF3FF' }, neutro: { fg: '#64748B', bg: 'var(--bg)' },
 }
 const pctTxt = (n: number | null) => (n === null ? '—' : `${n.toLocaleString('es-PE', { maximumFractionDigits: 1 })}%`)
@@ -127,8 +127,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
             <p className="text-xs text-muted">Apartan parte del presupuesto consolidado por ámbito, categoría, subcategoría o medio de pago. No suman dinero.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => plantillas.abrir('subcaja')}><CalendarDays className="size-4" /> Subcajas mensuales</Button>
-            <Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Nueva subcaja</Button>
+            <BotonNuevo onClick={() => setForm({ caja: null })}>Nueva subcaja</BotonNuevo>
+            <BotonMensual onClick={() => plantillas.abrir('subcaja')}>Subcajas mensuales</BotonMensual>
           </div>
         </div>
 
@@ -194,7 +194,7 @@ function Cabecera({ c, money, filters, setFilters, today, n, onAjustar }: {
       style={{ background: 'radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, #F59E0B 12%, var(--card)) 0%, var(--card) 45%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, #4F7BE8 12%, var(--card)) 0%, transparent 60%)' }}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-[#B7791F] shadow-sm ring-1 ring-line"><Wallet className="size-6" /></span>
+          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-warning shadow-sm ring-1 ring-line"><Wallet className="size-6" /></span>
           <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight text-ink">Cajas y presupuestos</h1>
             <p className="mt-0.5 text-sm text-muted">Tus fuentes de dinero forman el presupuesto consolidado; las subcajas reservan partes de él.</p>
@@ -386,7 +386,7 @@ function Acciones({ caja, puedeOrdenar, first, last, onEdit, onUp, onDown, onClo
   const sinOrden = puedeOrdenar ? undefined : 'Usa “Orden manual” y quita la búsqueda y los filtros para reordenar'
   return (
     <div className="relative flex shrink-0 items-center gap-1">
-      <button type="button" aria-label={`Editar ${caja.nombre}`} onClick={onEdit} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-bg hover:text-navy"><Pencil className="size-4" /></button>
+      <BotonEditar label={`Editar ${caja.nombre}`} onClick={onEdit} />
       <MenuAcciones label={`Más acciones de ${caja.nombre}`} acciones={[
         { key: 'up', label: 'Subir', icon: <ArrowUp className="size-3.5" />, onClick: onUp, disabled: !puedeOrdenar || first, title: sinOrden },
         { key: 'down', label: 'Bajar', icon: <ArrowDown className="size-3.5" />, onClick: onDown, disabled: !puedeOrdenar || last, title: sinOrden },
