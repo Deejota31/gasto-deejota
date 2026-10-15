@@ -5,11 +5,14 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.19.0';
+var APP_VERSION = '1.19.2';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
-  'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en'];
+  'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en', 'Datos'];
+// Esquema de la hoja anterior PLANTILLAS_MENSUALES (v1.19.2 la fusiona en PLANTILLAS_FINANCIERAS; solo se lee para migrar).
+var PL_COLS_LEGACY = ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en',
+  'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'];
 var SHEETS = {
   GASTOS: ['Fecha', 'Monto', 'Moneda', 'Categoría', 'Subcategoría', 'Descripción', 'Medio de pago',
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
@@ -21,9 +24,6 @@ var SHEETS = {
   CAJAS: ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción', 'Icono'],
   PRESUPUESTOS: ['Periodo', 'Caja ID', 'Monto'],
   CONFIG: ['Clave', 'Valor'],
-  // Plantillas de gastos frecuentes: solo configuración reutilizable, nunca movimientos ni montos.
-  PLANTILLAS_MENSUALES: ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en',
-    'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'],
   // Orden personalizado de la tabla de Gastos (por ID). Hoja aparte: reordenar nunca mueve ni reescribe GASTOS.
   ORDEN_GASTOS: ['ID', 'Orden'],
   // Qué gasto pagó qué plantilla (compromiso). Hoja aparte: no cambia el esquema de GASTOS. Plantilla vacía = sin vínculo.
@@ -37,13 +37,14 @@ var SHEETS = {
   // Importes por mes de cada fuente. Modo "solo" = únicamente ese mes; "desde" = ese mes en adelante (hasta otro "desde").
   // Una fila por fuente + mes + modo: volver a guardar actualiza, nunca duplica ni toca otros meses.
   FUENTES_MESES: ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en'],
-  // Plantillas de fuentes y subcajas (v1.17; hojas separadas desde v1.19): solo definiciones reutilizables. Estados = JSON por mes.
-  PLANTILLAS_FUENTES: PF_COLS_,
-  PLANTILLAS_SUBCAJAS: PF_COLS_
+  // TODAS las plantillas en una sola hoja (v1.19.2). Tipo = fuente | subcaja | gasto (gasto mensual). Solo definiciones
+  // reutilizables, nunca movimientos. Estados = JSON por mes (fuente/subcaja). Datos = JSON propio de cada tipo
+  // (en 'gasto': ámbito, categoría, subcategoría, tipo de gasto, compromiso, recurrente).
+  PLANTILLAS_FINANCIERAS: PF_COLS_
 };
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
-var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_MENSUALES: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0, PLANTILLAS_FUENTES: 0, PLANTILLAS_SUBCAJAS: 0 };
+var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CAJAS: 0, PRESUPUESTOS: 0, CONFIG: 0, PLANTILLAS_FINANCIERAS: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FUENTES: 0, FUENTES_MESES: 0 };
 
 // Columnas de GASTOS (índice base 0).
 var G = { FECHA: 0, MONTO: 1, MONEDA: 2, CAT: 3, SUB: 4, DESC: 5, MEDIO: 6, TIPO: 7, AMBITO: 8,
@@ -455,10 +456,8 @@ function openSpreadsheet_(create) {
   return ss;
 }
 
-// Crea o completa una hoja. PLANTILLAS_MENSUALES existente pasa por su migración segura (con respaldo y validación).
+// Crea o completa una hoja.
 function asegurarHoja_(ss, name) {
-  var sh = ss.getSheetByName(name);
-  if (name === 'PLANTILLAS_MENSUALES' && sh && sh.getLastRow() > 0) { migrarPlantillasHoja_(ss, sh); return sh; }
   return ensureSheet_(ss, name, SHEETS[name]);
 }
 
@@ -1043,8 +1042,7 @@ function reorderCategorias_(p) {
 function dependenciasCategoria_(ss, ambito, categoria, subs) {
   var amb = norm_(ambito), cat = norm_(categoria);
   var gastos = readRows_(ss, 'GASTOS').filter(function (r) { return norm_(r[G.AMBITO]) === amb && norm_(r[G.CAT]) === cat; }).length;
-  var plSh = ss.getSheetByName('PLANTILLAS_MENSUALES');
-  var pl = plSh ? readRows_(ss, 'PLANTILLAS_MENSUALES').filter(function (r) { return norm_(r[1]) === amb && norm_(r[2]) === cat; }) : [];
+  var pl = plTodasLectura_(ss).filter(function (r) { return norm_(r[1]) === amb && norm_(r[2]) === cat; });
   var compromisos = pl.filter(function (r) { return bool_(r[11]); }).length;
   // Una subcaja por categoría/subcategoría solo se queda sin gastos si esa opción no existe en otro ámbito.
   var catalogo = readRows_(ss, 'CATALOGO');
@@ -1194,59 +1192,36 @@ function savePresupuesto_(p) {
 }
 
 /* ===================== Plantillas de fuentes y de subcajas (v1.17) =====================
- * Una plantilla es SOLO configuración reutilizable (hojas PLANTILLAS_FUENTES y PLANTILLAS_SUBCAJAS). Se distinguen tres cosas:
+ * Una plantilla es SOLO configuración reutilizable (hoja PLANTILLAS_FINANCIERAS, Tipo fuente/subcaja). Se distinguen tres cosas:
  *   - la definición de la plantilla (esta hoja),
  *   - la entidad original (FUENTES / CAJAS; se enlaza por "Origen ID"),
  *   - la configuración aplicada a un mes (FUENTES_MESES / PRESUPUESTOS, que ya existían).
  * Guardar o clonar una plantilla nunca crea fuentes, cajas, dinero ni gastos. Aplicarla a un mes escribe solo ese mes
  * y es idempotente. El estado de cada mes (aplicada / omitida) queda en la columna Estados (JSON por mes).
  */
-var PF_TIPOS = ['fuente', 'subcaja'];
-
-var PF_HOJA = { fuente: 'PLANTILLAS_FUENTES', subcaja: 'PLANTILLAS_SUBCAJAS' };
+var PF_TIPOS = ['fuente', 'subcaja'];   // tipos "financieros"; los gastos mensuales (Tipo 'gasto') comparten la hoja pero tienen su propio código
+var PF_HOJA = 'PLANTILLAS_FINANCIERAS';
 
 function pfRows_(sh) {
   var n = Math.max(lastDataRow_(sh) - 1, 0);
   return n ? sh.getRange(2, 1, n, PF_COLS_.length).getValues() : [];
 }
 
-// v1.19: antes ambos tipos vivían en PLANTILLAS_FINANCIERAS. Se copian (una sola vez por tipo) a su hoja propia; la anterior
-// no se toca ni se borra, así que no hay pérdida de datos y se puede revisar o eliminar a mano cuando quieras.
-function pfMigrarLegacy_(ss, sh, tipo) {
-  var props = PropertiesService.getScriptProperties(), flag = 'PF_MIGRADO_' + tipo;
-  if (props.getProperty(flag)) return;
-  var old = ss.getSheetByName('PLANTILLAS_FINANCIERAS');
-  if (old && old.getLastRow() > 1) {
-    var vals = old.getRange(2, 1, old.getLastRow() - 1, PF_COLS_.length).getValues();
-    var have = {};
-    pfRows_(sh).forEach(function (r) { have[str_(r[0])] = true; });
-    var mover = vals.filter(function (r) { return str_(r[0]) && str_(r[1]) === tipo && !have[str_(r[0])]; });
-    if (mover.length) appendRows_(sh, mover);
-  }
-  props.setProperty(flag, '1');
-}
-
-function plantillasFinSheet_(tipo) {
-  if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
-  var ss = openSpreadsheet_(false), name = PF_HOJA[tipo];
-  if (!ss.getSheetByName(name) && !ss.getSheetByName('PLANTILLAS_FINANCIERAS')) {
+// Hoja única de plantillas, lista para escribir. Si es de una versión anterior (18 columnas) se agrega el encabezado "Datos".
+function plantillasFinSheet_() {
+  var ss = openSpreadsheet_(false);
+  if (!ss.getSheetByName(PF_HOJA)) {
     var props = PropertiesService.getScriptProperties();
     if (!props.getProperty('PLANTILLAS_FIN_RESPALDO')) props.setProperty('PLANTILLAS_FIN_RESPALDO', backup_().url); // hoja nueva: respaldo previo
   }
-  var sh = ensureSheet_(ss, name, PF_COLS_);
-  pfMigrarLegacy_(ss, sh, tipo);
-  return sh;
+  return ensureSheet_(ss, PF_HOJA, PF_COLS_);
 }
 
-// Todas las plantillas (fuentes y subcajas) con la hoja y la fila donde viven. No crea hojas que no existen.
+// Fuentes y subcajas con la hoja y la fila donde viven. No crea la hoja si no existe. Las filas 'gasto' se ignoran.
 function pfTodas_() {
-  var ss = openSpreadsheet_(false), rows = [], refs = [], legacy = !!ss.getSheetByName('PLANTILLAS_FINANCIERAS');
-  PF_TIPOS.forEach(function (tipo) {
-    var sh = ss.getSheetByName(PF_HOJA[tipo]);
-    if (!sh && !legacy) return;
-    if (!sh || (legacy && !PropertiesService.getScriptProperties().getProperty('PF_MIGRADO_' + tipo))) sh = plantillasFinSheet_(tipo);   // asegura la migración desde la hoja anterior
-    pfRows_(sh).forEach(function (r, j) { if (str_(r[0])) { rows.push(r); refs.push({ sh: sh, fila: j + 2 }); } });
-  });
+  var ss = openSpreadsheet_(false), rows = [], refs = [], sh = ss.getSheetByName(PF_HOJA);
+  if (!sh) return { rows: rows, refs: refs };
+  pfRows_(sh).forEach(function (r, j) { if (str_(r[0]) && PF_TIPOS.indexOf(str_(r[1])) >= 0) { rows.push(r); refs.push({ sh: sh, fila: j + 2 }); } });
   return { rows: rows, refs: refs };
 }
 
@@ -1286,15 +1261,13 @@ function savePlantillaFin_(p) {
   }
   var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
   if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
-  var otroTipo = tipo === 'fuente' ? 'subcaja' : 'fuente', otraHoja = ss.getSheetByName(PF_HOJA[otroTipo]);
-  if (otraHoja && findRowByValue_(otraHoja, 1, id)) throw appError_('VALIDATION', 'No se puede cambiar el tipo de una plantilla.');
-  var sh = plantillasFinSheet_(tipo);
+  var sh = plantillasFinSheet_();
   var rows = pfRows_(sh);
   var idx = -1, maxOrden = 0;
   for (var i = 0; i < rows.length; i++) {
     var rid = str_(rows[i][0]);
     if (!rid) continue;
-    maxOrden = Math.max(maxOrden, num_(rows[i][13]));
+    if (str_(rows[i][1]) === tipo) maxOrden = Math.max(maxOrden, num_(rows[i][13]));
     if (rid === id) { idx = i; continue; }
     if (str_(rows[i][1]) !== tipo) continue;
     if (norm_(String(rows[i][2]).replace(/^'/, '')) === norm_(nombre)) throw appError_('VALIDATION', 'Ya existe una plantilla llamada “' + str_(rows[i][2]) + '”.');
@@ -1305,7 +1278,7 @@ function savePlantillaFin_(p) {
   var row = [id, tipo, nombre, monto, moneda, medios || 'Libre', campo, valor, descText_(p.descripcion, false),
     /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', icono || 'auto', recurrencia, activo,
     prev ? num_(prev[13]) : (p.orden === undefined ? maxOrden + 1 : num_(p.orden)), prev && origen === '' ? str_(prev[14]) : origen,
-    prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now];
+    prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now, prev ? str_(prev[18]) : ''];
   if (idx >= 0) sh.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
   return pfOut_(row);
 }
@@ -1325,7 +1298,7 @@ function reorderPlantillasFin_(p) {
   if (PF_TIPOS.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de plantilla inválido.');
   var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
   if (!ids.length || ids.length > 500) throw appError_('VALIDATION', 'Orden de plantillas inválido.');
-  var sh = plantillasFinSheet_(tipo);
+  var sh = plantillasFinSheet_();
   var rows = pfRows_(sh);
   if (!rows.length) return { ok: true };
   var pos = {};
@@ -1575,7 +1548,7 @@ function generarDatosPrueba() {
     appendRows_(medSh, nuevosMed);
     reg.medios = nuevosMed.map(function (m) { return m[0]; });
     // ---------- Compromisos de prueba (plantillas marcadas como compromiso) ----------
-    var plSh = plantillasSheet_();
+    var plSh = plHoja_(true);
     var pl = {};
     var defs = [
       ['luz', 'Familia', 'Servicios', 'Luz', 'Luz (prueba)', 60, 'PEN', 'Yape'],
@@ -1586,11 +1559,11 @@ function generarDatosPrueba() {
       ['claude', 'Personal', 'Suscripciones', 'Claude', 'Claude (prueba)', 20, 'USD', 'Tarjeta de crédito'],
       ['netflix', 'Personal', 'Suscripciones', 'Netflix', 'Netflix (prueba)', 45, 'PEN', 'Tarjeta de crédito']
     ];
-    var ordenBase = Math.max(lastDataRow_(plSh) - 1, 0) + 1;
+    var ordenBase = plLeer_(plSh).length + 1;
     appendRows_(plSh, defs.map(function (d, i) {
-      var id = Utilities.getUuid();
+      var id = 'pl-' + Utilities.getUuid();
       pl[d[0]] = id; reg.plantillas.push(id);
-      return [id, d[1], d[2], d[3], d[4], now, now, d[5], d[6], d[7], ordenBase + i, true, 'Fijo', true];
+      return plGastoAFila_([id, d[1], d[2], d[3], d[4], now, now, d[5], d[6], d[7], ordenBase + i, true, 'Fijo', true]);
     }));
     // ---------- Gastos ----------
     var gastos = [], vinc = [];
@@ -1687,8 +1660,8 @@ function borrarDatosPrueba() {
     var pls = {};
     ((reg && reg.plantillas) || []).forEach(function (id) { pls[id] = true; });
     out.vinculos = vSh ? borrarFilasSi_(vSh, 3, function (r) { return ids[str_(r[0]).toLowerCase()] || pls[str_(r[1])]; }) : 0;
-    var plSh = ss.getSheetByName('PLANTILLAS_MENSUALES');
-    out.compromisos = plSh ? borrarFilasSi_(plSh, 1, function (r) { return pls[str_(r[0])]; }) : 0;
+    var plSh = ss.getSheetByName(PF_HOJA);
+    out.compromisos = plSh ? borrarFilasSi_(plSh, PF_COLS_.length, function (r) { return str_(r[1]) === 'gasto' && pls[str_(r[0])]; }) : 0;
     var claves = {};
     ((reg && reg.catalogo) || []).forEach(function (k) { claves[k] = true; });
     out.catalogo = borrarFilasSi_(ss.getSheetByName('CATALOGO'), 3, function (r) { return claves[catKey_(r[0], r[1], r[2])]; });
@@ -2256,7 +2229,6 @@ function renameCatalogo_(p) {
 // 11 Es compromiso (la decides tú: solo las marcadas cuentan como compromisos mensuales).
 
 var PL_ID = /^pl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-var PL_COLS = 14;
 
 function plantillaRow_(r) {
   var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
@@ -2272,22 +2244,75 @@ function plantillasOrdenadas_(rows) {
     .sort(function (a, b) { return (a.o - b.o) || (a.i - b.i); });
 }
 
-function listPlantillas_() {
-  var ss = openSpreadsheet_(false);
-  if (!ss.getSheetByName('PLANTILLAS_MENSUALES')) return []; // se crea con la primera plantilla
-  return plantillasOrdenadas_(readRows_(ss, 'PLANTILLAS_MENSUALES')).map(function (x) { return plantillaRow_(x.r); });
+/* v1.19.2: las plantillas de gastos mensuales viven en PLANTILLAS_FINANCIERAS con Tipo = 'gasto'. Columnas usadas:
+ * ID, Tipo, Nombre (= subcategoría), Monto, Moneda, Medios (= medio de pago), Descripción, Activo, Orden, Creado en,
+ * Actualizado en y Datos (JSON: {ambito, categoria, subcategoria, tipoGasto, esCompromiso, esRecurrente}).
+ * Internamente el resto del código sigue trabajando con la "forma de 14" de la antigua hoja PLANTILLAS_MENSUALES. */
+function plGastoDesdeFila_(v) {
+  var d = pfEstados_(v[18]);
+  return [v[0], str_(d.ambito), str_(d.categoria), str_(d.subcategoria), v[8], v[16], v[17], v[3], v[4], v[5], v[13],
+    d.esCompromiso === true, str_(d.tipoGasto), d.esRecurrente === true];
 }
 
-// Hoja de plantillas lista para escribir: si viene de una versión anterior, se migra antes (ver migrarPlantillasHoja_).
-function plantillasSheet_(opts) {
+function plGastoAFila_(r) {   // forma de 14 → fila de la hoja (18 + Datos)
+  var datos = JSON.stringify({ ambito: str_(r[1]), categoria: str_(r[2]), subcategoria: str_(r[3]),
+    tipoGasto: TIPOS_GASTO.indexOf(str_(r[12])) >= 0 ? str_(r[12]) : 'Variable', esCompromiso: bool_(r[11]), esRecurrente: bool_(r[13]) });
+  return [r[0], 'gasto', r[3], r[7], str_(r[8]) || 'PEN', r[9], '', '', r[4], '', '', '', true, r[10], '', '', r[5], r[6], datos];
+}
+
+// Copia, una sola vez, las plantillas de la hoja anterior PLANTILLAS_MENSUALES. La hoja anterior no se modifica ni se borra.
+function plMigrarLegacy_(ss, old, sh) {
+  var props = PropertiesService.getScriptProperties();
+  var header = old.getRange(1, 1, 1, Math.max(old.getLastColumn(), 1)).getValues()[0];
+  if (!PL_COLS_LEGACY.every(function (e, i) { return str_(header[i]) === e; })) migrarPlantillasHoja_(ss, old);   // esquema muy antiguo: se normaliza con respaldo
+  else backup_();
+  var n = Math.max(lastDataRow_(old) - 1, 0);
+  var vals = n ? old.getRange(2, 1, n, PL_COLS_LEGACY.length).getValues() : [];
+  var have = {};
+  pfRows_(sh).forEach(function (r) { have[str_(r[0])] = true; });
+  var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
+  var nuevas = [];
+  vals.forEach(function (r) {
+    var id = str_(r[0]);
+    if (!id || have[id]) return;
+    have[id] = true;
+    var f = plGastoAFila_(r);
+    f[16] = ts(r[5]); f[17] = ts(r[6]);
+    nuevas.push(f);
+  });
+  if (nuevas.length) appendRows_(sh, nuevas);
+  props.setProperty('PL_MIGRADO', '1');
+}
+
+// Hoja con las plantillas de gastos. crear=false: null si aún no hay nada. Migra PLANTILLAS_MENSUALES una sola vez.
+function plHoja_(crear) {
   var ss = openSpreadsheet_(false);
-  var sh = ss.getSheetByName('PLANTILLAS_MENSUALES');
-  if (!sh) return ensureSheet_(ss, 'PLANTILLAS_MENSUALES', SHEETS.PLANTILLAS_MENSUALES); // primera plantilla: hoja nueva
-  migrarPlantillasHoja_(ss, sh, opts);
+  var sh = ss.getSheetByName(PF_HOJA), old = ss.getSheetByName('PLANTILLAS_MENSUALES');
+  var pendiente = !!old && old.getLastRow() > 1 && !PropertiesService.getScriptProperties().getProperty('PL_MIGRADO');
+  if (!sh && !crear && !pendiente) return null;
+  sh = plantillasFinSheet_();
+  if (pendiente) plMigrarLegacy_(ss, old, sh);
   return sh;
 }
 
-/* ---------- Migración segura de PLANTILLAS_MENSUALES ----------
+// Plantillas de gasto: [{ fila, r }] con r en la forma de 14 (la misma que usaba PLANTILLAS_MENSUALES).
+function plLeer_(sh) {
+  var out = [];
+  if (!sh) return out;
+  pfRows_(sh).forEach(function (v, i) { if (str_(v[0]) && str_(v[1]) === 'gasto') out.push({ fila: i + 2, r: plGastoDesdeFila_(v) }); });
+  return out;
+}
+
+function plTodasLectura_(ss) {   // para validaciones de solo lectura (dependencias, limpieza): forma de 14, sin crear hojas
+  var sh = plHoja_(false);
+  return plLeer_(sh).map(function (x) { return x.r; });
+}
+
+function listPlantillas_() {
+  return plantillasOrdenadas_(plTodasLectura_()).map(function (x) { return plantillaRow_(x.r); });
+}
+
+/* ---------- Migración segura de la hoja anterior PLANTILLAS_MENSUALES ----------
  * Causa del error "encabezados distintos": una versión anterior escribía la columna Orden (K) sin agregar su
  * encabezado, y la validación exigía que la fila 1 coincidiera exactamente. Ahora:
  *  - Cada columna esperada se reconoce por su encabezado (o variantes conocidas: "Monto predeterminado", etc.).
@@ -2330,7 +2355,7 @@ function colLetra_(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s
 
 // Devuelve { cambios: n, detalle: [...] }. Lanza SCHEMA si no puede migrar con seguridad.
 function migrarPlantillasHoja_(ss, sh, opts) {
-  var esperado = SHEETS.PLANTILLAS_MENSUALES;
+  var esperado = PL_COLS_LEGACY;
   var lastCol = Math.max(sh.getLastColumn(), 1);
   var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
   // Camino rápido (cada escritura): si los encabezados ya son exactamente los esperados, no se lee nada más.
@@ -2390,27 +2415,27 @@ function migrarPlantillasHoja_(ss, sh, opts) {
   return { cambios: cambios, detalle: detalle };
 }
 
-/** Ejecútala desde el editor para revisar y migrar la hoja de plantillas a mano (crea respaldo si hay cambios). */
+/** Ejecútala desde el editor: copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada). */
 function migrarPlantillas() {
   var ss = openSpreadsheet_(false);
-  var sh = ss.getSheetByName('PLANTILLAS_MENSUALES');
-  if (!sh) { Logger.log('No existe la hoja PLANTILLAS_MENSUALES: se creará con la primera plantilla.'); return; }
-  var res = withLock_(function () { return migrarPlantillasHoja_(ss, sh); });
-  Logger.log(res.cambios ? 'Migración aplicada:\n' + res.detalle.join('\n') : 'La hoja ya tenía el esquema esperado. No se cambió nada.');
+  if (!ss.getSheetByName('PLANTILLAS_MENSUALES')) { Logger.log('No existe la hoja PLANTILLAS_MENSUALES: las plantillas de gastos ya viven en PLANTILLAS_FINANCIERAS.'); return; }
+  var res = withLock_(function () {
+    PropertiesService.getScriptProperties().deleteProperty('PL_MIGRADO');   // fuerza la copia; los IDs ya copiados se omiten
+    var sh = plantillasFinSheet_();
+    plMigrarLegacy_(ss, ss.getSheetByName('PLANTILLAS_MENSUALES'), sh);
+    return { plantillas: plLeer_(sh).length };
+  });
+  Logger.log('Plantillas de gastos en PLANTILLAS_FINANCIERAS: ' + res.plantillas + '. La hoja PLANTILLAS_MENSUALES quedó intacta (ya puedes borrarla).');
   return res;
 }
 
-function leerPlantillas_(sh) {
+// Reescribe la columna Orden (1..n) de las plantillas de gasto, según la lista de posiciones ya ordenada.
+function escribirOrdenPlantillas_(sh, items, indicesOrdenados) {
   var n = Math.max(lastDataRow_(sh) - 1, 0);
-  return n ? sh.getRange(2, 1, n, PL_COLS).getValues() : [];
-}
-
-// Reescribe la columna Orden (1..n) en una sola escritura, según la lista de índices de fila ya ordenada.
-function escribirOrdenPlantillas_(sh, rows, indicesOrdenados) {
-  if (!rows.length) return;
-  var orden = rows.map(function (r) { return [r[10]]; });
-  indicesOrdenados.forEach(function (idx, pos) { orden[idx] = [pos + 1]; });
-  sh.getRange(2, 11, rows.length, 1).setValues(orden);
+  if (!n) return;
+  var col = sh.getRange(2, 14, n, 1).getValues();
+  indicesOrdenados.forEach(function (idx, pos) { col[items[idx].fila - 2] = [pos + 1]; });
+  sh.getRange(2, 14, n, 1).setValues(col);
 }
 
 function savePlantilla_(p) {
@@ -2428,8 +2453,8 @@ function savePlantilla_(p) {
   var tipoNuevo = p.tipoGasto === undefined ? undefined : str_(p.tipoGasto);
   if (tipoNuevo !== undefined && TIPOS_GASTO.indexOf(tipoNuevo) < 0) throw appError_('VALIDATION', 'Tipo de gasto inválido.');
   if (p.esRecurrente !== undefined && typeof p.esRecurrente !== 'boolean') throw appError_('VALIDATION', 'Es recurrente debe ser verdadero o falso.');
-  var sh = plantillasSheet_();
-  var rows = leerPlantillas_(sh);
+  var sh = plHoja_(true);
+  var items = plLeer_(sh), rows = items.map(function (x) { return x.r; });
   var plain = function (v) { return norm_(str_(v).replace(/^'/, '')); }; // ignora el apóstrofo anti-fórmulas
   var montoKey = function (v) { return str_(v) === '' ? '' : String(Math.round(num_(v) * 100)); };
   var key = [plain(ambito), plain(categoria), plain(sub), plain(desc), montoKey(monto), plain(moneda), plain(medio)].join('|');
@@ -2449,20 +2474,21 @@ function savePlantilla_(p) {
     var tipoF = tipoNuevo === undefined ? plantillaRow_(prev)[12] : tipoNuevo;
     var recF = p.esRecurrente === undefined ? bool_(prev[13]) : p.esRecurrente;
     var upd = [id, ambito, categoria, sub, desc, plantillaRow_(prev)[5], now, monto, moneda, medio, prev[10], comp, tipoF, recF];
-    sh.getRange(idx + 2, 1, 1, PL_COLS).setValues([upd]);
+    sh.getRange(items[idx].fila, 1, 1, PF_COLS_.length).setValues([plGastoAFila_(upd)]);
     return plantillaRow_(upd);
   }
   if (p.mode === 'update') throw appError_('NOT_FOUND', 'La plantilla ya no existe.');
   var row = [id, ambito, categoria, sub, desc, now, now, monto, moneda, medio, '', p.esCompromiso === true, tipoNuevo || 'Variable', p.esRecurrente === true];
-  appendRows_(sh, [row]);
+  var filaNueva = lastDataRow_(sh) + 1;
+  appendRows_(sh, [plGastoAFila_(row)]);
   // Nueva al final; una copia (afterId), justo después de la original. Se renumera en una sola escritura.
-  rows.push(row);
+  rows.push(row); items.push({ fila: filaNueva, r: row });
   var orden = plantillasOrdenadas_(rows).map(function (x) { return x.i; }).filter(function (i) { return i !== rows.length - 1 && str_(rows[i][0]); });
   var after = str_(p.afterId);
   var pos = orden.length;
   if (after) { for (var j = 0; j < orden.length; j++) if (str_(rows[orden[j]][0]) === after) pos = j + 1; }
   orden.splice(pos, 0, rows.length - 1);
-  escribirOrdenPlantillas_(sh, rows, orden);
+  escribirOrdenPlantillas_(sh, items, orden);
   row[10] = pos + 1;
   return plantillaRow_(row);
 }
@@ -2471,15 +2497,15 @@ function savePlantilla_(p) {
 function reorderPlantillas_(p) {
   var ids = Array.isArray(p.ids) ? p.ids.map(str_) : [];
   if (!ids.length || ids.some(function (x) { return !PL_ID.test(x); })) throw appError_('VALIDATION', 'Orden de plantillas inválido.');
-  if (!openSpreadsheet_(false).getSheetByName('PLANTILLAS_MENSUALES')) throw appError_('NOT_FOUND', 'No hay plantillas.');
-  var sh = plantillasSheet_(); // asegura el encabezado de Orden antes de escribir esa columna
-  var rows = leerPlantillas_(sh);
+  var sh = plHoja_(false);
+  if (!sh) throw appError_('NOT_FOUND', 'No hay plantillas.');
+  var items = plLeer_(sh), rows = items.map(function (x) { return x.r; });
   var pos = {};
   rows.forEach(function (r, i) { pos[str_(r[0])] = i; });
   var orden = [];
   ids.forEach(function (x) { if (pos[x] !== undefined && orden.indexOf(pos[x]) < 0) orden.push(pos[x]); });
   plantillasOrdenadas_(rows).forEach(function (x) { if (str_(x.r[0]) && orden.indexOf(x.i) < 0) orden.push(x.i); }); // las no enviadas, al final
-  escribirOrdenPlantillas_(sh, rows, orden);
+  escribirOrdenPlantillas_(sh, items, orden);
   return { ok: true, total: orden.length };
 }
 
@@ -2488,10 +2514,10 @@ function deletePlantilla_(p) {
   var id = str_(p.id);
   if (!PL_ID.test(id)) throw appError_('VALIDATION', 'ID de plantilla inválido.');
   // Sin revisar IDs repetidos: eliminar es justamente cómo se corrige un duplicado.
-  var sh = openSpreadsheet_(false).getSheetByName('PLANTILLAS_MENSUALES') ? plantillasSheet_({ omitirIds: true }) : null;
-  var row = sh ? findRowByValue_(sh, 1, id) : 0;
-  if (!row) return { id: id, eliminada: false }; // ya no estaba: el resultado es el mismo
-  sh.deleteRow(row);
+  var sh = plHoja_(false);
+  var it = plLeer_(sh).filter(function (x) { return str_(x.r[0]) === id; })[0];
+  if (!it) return { id: id, eliminada: false }; // ya no estaba: el resultado es el mismo
+  sh.deleteRow(it.fila);
   return { id: id, eliminada: true };
 }
 
