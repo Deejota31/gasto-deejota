@@ -118,7 +118,11 @@ export default function Categorias({ store }: { store: AppStore }) {
         </div>
       </section>
 
-      {!store.data ? <Skeleton className="h-64" /> : !tree.length ? <Empty icon={<FolderTree className="size-5" />} title="El catálogo está vacío">Usa “Agregar” para crear tu primer ámbito.</Empty> : term ? (
+      {!store.data ? <Skeleton className="h-64" /> : !tree.length ? (
+        (store.data.medios ?? []).some(m => m.nombre.trim())
+          ? <Empty icon={<FolderTree className="size-5" />} title="Aún no tienes ámbitos">Usa “Agregar” para crear tu primer ámbito.</Empty>
+          : <Empty icon={<FolderTree className="size-5" />} title="Aún no tienes elementos en tu catálogo">Añade ámbitos, categorías, subcategorías o medios de pago para organizarlos.</Empty>
+      ) : term ? (
         <section className="space-y-3" aria-label="Resultados de búsqueda">
           {!results.length && <Empty icon={<Search className="size-5" />} title="Sin coincidencias">Prueba con otra palabra.</Empty>}
           {results.map(a => (
@@ -384,7 +388,7 @@ function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store:
   const uso = deps ? [
     deps.gastos && `${deps.gastos} gasto(s)`,
     deps.plantillas && `${deps.plantillas} plantilla(s)${deps.compromisos ? ` (${deps.compromisos} compromiso(s))` : ''}`,
-    deps.cajas && `${deps.cajas} subcaja(s)`,
+    deps.cajas && `${deps.cajas} caja(s)`,
   ].filter(Boolean) as string[] : []
   const bloqueada = uso.length > 0
   const key = `cat-del:${ambito}|${cat.name}`
@@ -408,7 +412,7 @@ function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store:
           </p>
         ) : (
           <>
-            <p className="text-muted">Nada la usa: ningún gasto, plantilla, compromiso ni subcaja. Se quitará del catálogo; ningún gasto se borra.</p>
+            <p className="text-muted">Nada la usa: ningún gasto, plantilla, compromiso ni caja. Se quitará del catálogo; ningún gasto se borra.</p>
             {cat.subs.length > 0 && (
               <label className="flex items-start gap-2 rounded-xl bg-bg px-3 py-2 text-xs">
                 <Checkbox checked={cascada} onChange={setCascada} label={`Confirmo eliminar también sus ${cat.subs.length} subcategoría(s)`} />

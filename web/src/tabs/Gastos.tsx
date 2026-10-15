@@ -266,7 +266,9 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
         <AvisoOrden texto={dnd.aviso} />
 
         {!store.data ? <Skeleton className="h-64" /> : !rows.length ? (
-          <Empty icon={<Receipt className="size-5" />} title="No hay gastos con estos filtros">Prueba otro período, quita filtros o registra un nuevo gasto.</Empty>
+          store.data.gastos.length === 0
+            ? <Empty icon={<Receipt className="size-5" />} title="Aún no has registrado gastos">Cuando registres uno aparecerá aquí.</Empty>
+            : <Empty icon={<Receipt className="size-5" />} title="No hay gastos con estos filtros">Prueba otro período, quita filtros o registra un nuevo gasto.</Empty>
         ) : (
           <>
             {/* Escritorio / tablet: tabla con scroll horizontal propio */}

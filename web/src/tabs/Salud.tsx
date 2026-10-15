@@ -5,7 +5,7 @@ import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import SaludFinanciera from '../components/SaludFinanciera'
 import { FilterBar } from '../components/shared'
-import { ErrorBox, InfoTooltip, Skeleton } from '../components/ui'
+import { Empty, ErrorBox, InfoTooltip, Skeleton } from '../components/ui'
 
 /**
  * Pestaña Salud financiera. Usa los mismos datos en memoria y el mismo filtro global que Dashboard y Gastos
@@ -52,7 +52,11 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
       </div>
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={gastos} />
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
-      {!a ? <Skeleton className="h-96" /> : (
+      {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 ? (
+        <div className="rounded-2xl border border-line bg-card" data-testid="salud-sin-datos">
+          <Empty icon={<HeartPulse className="size-5" />} title="Todavía no hay información disponible">Registra gastos para que se calcule tu salud financiera.</Empty>
+        </div>
+      ) : (
         <SaludFinanciera store={store} a={a} filters={filters} today={today} onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales} />
       )}
     </div>

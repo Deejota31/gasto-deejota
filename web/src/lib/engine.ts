@@ -41,11 +41,11 @@ export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number;
 export interface CajasResumen {
   general: Caja | null
   presupuesto: number        // P
-  reservado: number          // R = Σ asignaciones de subcajas
+  reservado: number          // R = Σ asignaciones de cajas
   libreInicial: number       // P − R
   gastadoSubcajas: number    // Gs
   gastadoLibre: number       // Gl
-  excesoSubcajas: number     // gasto de subcajas por encima de lo asignado: sale del saldo libre
+  excesoSubcajas: number     // gasto de cajas por encima de lo asignado: sale del saldo libre
   saldoLibre: number         // P − R − Gl − exceso
   disponible: number         // P − Gs − Gl
   /** Gs + Gl: todo lo gastado del período (sin filtros de dimensión), cada movimiento una vez. */

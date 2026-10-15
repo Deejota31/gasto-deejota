@@ -126,7 +126,7 @@ test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) 
 
 test('presupuesto consolidado: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin usar', async ({ page }) => {
   const c = (id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
-  const P = await c('presupuesto-consolidado'), R = await c('reservado-en-subcajas')
+  const P = await c('presupuesto-consolidado'), R = await c('reservado-en-cajas')
   expect(await c('libre-inicial')).toBeCloseTo(P - R, 2)
   const disp = money(await page.getByTestId('disponible-consolidado').innerText())
   expect(disp).toBeCloseTo(P - (await total(page)), 2)                    // sin filtros, gastado del período = Total gastado
@@ -1049,8 +1049,8 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     const total0 = await total(page)
     await go(page, 'Cajas')
     await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
-    const res0 = await resumen(page, 'Reservado en subcajas'), libre0 = await resumen(page, 'Libre inicial')
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    const res0 = await resumen(page, 'Reservado en cajas'), libre0 = await resumen(page, 'Libre inicial')
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     await d.getByLabel('Nombre').fill('Caja Línea Celular')
     await d.getByRole('radio', { name: 'Subcategoría' }).click()
@@ -1059,10 +1059,10 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await d.getByRole('button', { name: 'Crear caja' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular creada correctamente.' })).toBeVisible()
     await expect(tarjeta(page, 'Caja Línea Celular')).toContainText('Subcategoría · Servicios › Línea Celular')
-    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 + 40, 2)
+    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 + 40, 2)
     expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 - 40, 2)            // la general no duplica la reserva
     // mismo alcance y valor: rechazado en el formulario
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     await d.getByLabel('Nombre').fill('Otra línea')
     await d.getByRole('radio', { name: 'Subcategoría' }).click()
     await pick(page, '#caja-valor', 'Línea Celular')
@@ -1074,11 +1074,11 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Editar Caja Línea Celular' }).click()
     await d.getByLabel('Monto asignado por mes').fill('60')
     await d.getByRole('button', { name: 'Guardar cambios' }).click()
-    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 + 60, 2)
+    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 + 60, 2)
     // desactivar: deja de reservar
     await tarjeta(page, 'Caja Línea Celular').getByRole('switch', { name: /Desactivar Caja Línea Celular/ }).click()
     await expect(tarjeta(page, 'Caja Línea Celular').getByTestId('estado-caja')).toHaveText('Inactiva')
-    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)
+    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)
     // eliminar con confirmación
     await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
@@ -1120,12 +1120,12 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await expect(tarjeta(page, 'Caja Bebé').getByTestId('solape')).toContainText('Caja Familia')
     // el Dashboard las resume en un acordeón cerrado y enlaza a Cajas
     await go(page, 'Dashboard')
-    const acc = page.getByRole('button', { name: /Subcajas \/ reservas/ })
+    const acc = page.getByRole('button', { name: /Cajas \/ reservas/ })
     await expect(acc).toHaveAttribute('aria-expanded', 'false')
     await expect(acc).toContainText('13 activas')
     await acc.click()
-    await expect(page.getByRole('list', { name: 'Subcajas del período' }).getByRole('listitem')).toHaveCount(13)
-    await page.getByRole('region', { name: 'Subcajas / reservas' }).getByRole('button', { name: 'Administrar en Cajas' }).click()
+    await expect(page.getByRole('list', { name: 'Cajas del período' }).getByRole('listitem')).toHaveCount(13)
+    await page.getByRole('region', { name: 'Cajas / reservas' }).getByRole('button', { name: 'Administrar en Cajas' }).click()
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Cajas' })).toHaveAttribute('aria-current', 'page')
   })
 
@@ -1235,8 +1235,9 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await page.goto('/?demo=60#cajas')
     await expect(page.getByTestId('sin-fuentes')).toBeVisible()
     // estado vacío igual al de subcajas, con acción para crear la primera fuente
-    await expect(page.getByTestId('vacio-fuentes')).toContainText('Aún no tienes fuentes')
-    await page.getByRole('button', { name: 'Crear mi primera fuente' }).click()
+    await expect(page.getByTestId('vacio-fuentes')).toContainText('Aún no tienes fuentes registradas. Registra una fuente para empezar')
+    await expect(page.getByRole('button', { name: 'Crear mi primera fuente' })).toHaveCount(0)   // v1.21: sin botón en el estado vacío
+    await page.getByRole('button', { name: 'Nueva fuente' }).first().click()                     // el control habitual sigue funcionando
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.keyboard.press('Escape')
     const p0 = await cons(page, 'presupuesto-consolidado')
@@ -1326,7 +1327,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     const chartY = await y(page.getByText(/^Gasto acumulado/).first())
     expect(consY).toBeLessThan(accY); expect(accY).toBeLessThan(kpiY); expect(kpiY).toBeLessThan(chartY)
     await expect(page.getByTestId('consolidado-subtitulo')).toContainText(/3 fuentes activas · \w+ \d{4}/)
-    const fuentes = page.getByRole('button', { name: /^Fuentes de dinero/ }), subcajas = page.getByRole('button', { name: /^Subcajas \/ reservas/ })
+    const fuentes = page.getByRole('button', { name: /^Fuentes de dinero/ }), subcajas = page.getByRole('button', { name: /^Cajas \/ reservas/ })
     await expect(fuentes).toHaveAttribute('aria-expanded', 'false')
     await expect(subcajas).toHaveAttribute('aria-expanded', 'false')
     await expect(fuentes).toContainText('3 activas · S/ 4,780.00')
@@ -1342,7 +1343,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     await expect(page.getByRole('button', { name: /^Ajustar Caja/ })).toHaveCount(0)
     await expect(page.getByText('Top 10 subcategorías')).toHaveCount(0)
     await go(page, 'Gastos'); await go(page, 'Dashboard')
-    await expect(page.getByRole('button', { name: /^Subcajas \/ reservas/ })).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByRole('button', { name: /^Cajas \/ reservas/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
   for (const q of ['?demo=60&fuentes=3', '?demo=60', '?demo=60&fuentes=20&cajas=10']) {
@@ -1354,7 +1355,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
       await expect(page.getByTestId('consolidado')).toHaveCount(0)
       const res = (l: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
       expect(await res('Presupuesto consolidado')).toBe(money(dash['cons-presupuesto-consolidado']))
-      expect(await res('Reservado en subcajas')).toBe(money(dash['cons-reservado-en-subcajas']))
+      expect(await res('Reservado en cajas')).toBe(money(dash['cons-reservado-en-cajas']))
       await go(page, 'Dashboard')
       await go(page, 'Salud financiera')
       await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
@@ -1398,7 +1399,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
       await page.setViewportSize(vp)
       await page.goto('/?demo=60&fuentes=20&cajas=10')
       await page.getByRole('button', { name: /^Fuentes de dinero/ }).click()
-      await page.getByRole('button', { name: /^Subcajas \/ reservas/ }).click()
+      await page.getByRole('button', { name: /^Cajas \/ reservas/ }).click()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })
@@ -1506,7 +1507,7 @@ test.describe('v1.10: cascada de fuentes, iconos y colores unificados, plantilla
   test('Nueva caja: sin selector de icono/color; toma el aspecto de su alcance (medio de pago)', async ({ page }) => {
     await page.goto('/?demo=60#cajas')
     await expect(page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: 'Caja Auto' }).locator('svg.lucide-car')).toHaveCount(1)
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
     await d.getByLabel('Nombre', { exact: true }).fill('Caja vales')
@@ -1588,7 +1589,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
 
   test('caja: el alcance (ámbito, categoría, subcategoría, medio) fija su icono y color automáticos', async ({ page }) => {
     await page.goto('/?demo=60#cajas')
-    await page.getByRole('button', { name: 'Nueva subcaja' }).click()
+    await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     const tile = d.locator('span.size-11').first()
     await d.getByRole('radio', { name: 'Ámbito', exact: true }).click()
@@ -1965,20 +1966,20 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
 
   test('subcajas: interruptor ON/OFF persiste, no crea ni quita dinero y recalcula reservado y libre', async ({ page }) => {
     await expect(caja(page, 'Caja Auto')).toBeVisible()
-    const res0 = await resumen(page, 'Reservado en subcajas'), libre0 = await resumen(page, 'Libre inicial'), cons0 = await cons(page, 'presupuesto-consolidado')
+    const res0 = await resumen(page, 'Reservado en cajas'), libre0 = await resumen(page, 'Libre inicial'), cons0 = await cons(page, 'presupuesto-consolidado')
     const sw = page.getByRole('switch', { name: 'Desactivar Caja Auto' })
     await expect(sw).toHaveAttribute('aria-checked', 'true')
     await sw.click()
     await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
     await expect(caja(page, 'Caja Auto').getByTestId('estado-caja')).toHaveText(/Inactiva/)
-    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0 - 600, 2)
+    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 - 600, 2)
     expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 + 600, 2)        // lo reservado vuelve al libre: ni se crea ni se pierde
     expect(await cons(page, 'presupuesto-consolidado')).toBe(cons0)                  // el consolidado no cambia
     await actualizar(page)                                                           // persistencia tras releer
     await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
     await page.getByRole('switch', { name: 'Activar Caja Auto' }).click()
     await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toHaveAttribute('aria-checked', 'true')
-    await expect.poll(() => resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)
+    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)
   })
 
   test('subcajas: menú ⋯ con Subir, Bajar, Clonar y Eliminar; clonar no copia monto ni gastos; filtros bloquean el orden; vista lista', async ({ page }) => {
@@ -1998,7 +1999,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await actualizar(page)
     expect((await nombres()).indexOf('Caja Auto')).toBe(i + 1)
     // clonar
-    const res0 = await resumen(page, 'Reservado en subcajas')
+    const res0 = await resumen(page, 'Reservado en cajas')
     await menuC(page, 'Caja Auto').click()
     await page.getByRole('menuitem', { name: 'Clonar' }).click()
     const d = dialog(page)
@@ -2011,7 +2012,7 @@ test.describe('v1.12: administración de fuentes y subcajas (Subir, Bajar, Clona
     await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) creada inactiva' })).toBeVisible({ timeout: 15_000 })
     await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(1)
     await expect(caja(page, 'Caja Auto (Copia)').getByTestId('estado-caja')).toHaveText(/Inactiva/)
-    expect(await resumen(page, 'Reservado en subcajas')).toBeCloseTo(res0, 2)        // la copia no reserva dinero adicional
+    expect(await resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)        // la copia no reserva dinero adicional
     // con búsqueda activa no se puede reordenar
     await page.getByLabel('Buscar caja').fill('Auto')
     await abrirMenu(menuC(page, 'Caja Auto'))

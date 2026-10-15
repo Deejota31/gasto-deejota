@@ -58,7 +58,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     // Regresa solo al asistente, con la etapa completada y la guía para continuar.
     await expect(page.getByTestId('asistente-plan')).toBeVisible()
     await expect(estado(page, 'fuentes')).toHaveText('Completada')
-    await expect(page.getByTestId('continuar-fuentes')).toContainText('Continuar con Subcajas')
+    await expect(page.getByTestId('continuar-fuentes')).toContainText('Continuar con Cajas')
     await expect(page.getByTestId('ok-fuentes')).toContainText('Fuentes configuradas correctamente')
     await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
     await page.getByTestId('continuar-fuentes').click()
@@ -74,9 +74,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await expect(page.getByTestId('resumen-gastos')).toContainText('Completada')
     await expect(r.getByTestId('plan-indicadores')).toContainText('Etapas omitidas')
     await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')   // permanece en el Resumen, ya finalizada
-    await page.getByTestId('cerrar-plan').click()
-    await asistenteOculto(page)
+    await asistenteOculto(page)                                                                      // v1.21: el asistente se cierra al instante con tu clic
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
     expect(await nFuentes(page)).toBeGreaterThan(antes)
     expect(await escriturasGastos(page)).toBe(0)
@@ -309,10 +307,10 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
     // Sigue en Subcajas (no lo devolvió a Fuentes), con su propio contenido.
     await expect(page.getByTestId('etapa-subcajas')).toHaveAttribute('aria-current', 'step')
     await expect(page.getByTestId('etapa-fuentes')).not.toHaveAttribute('aria-current', 'step')
-    await expect(page.getByText('¿Cuánto reservas en cada subcaja')).toBeVisible()
+    await expect(page.getByText('¿Cuánto reservas en cada caja')).toBeVisible()
   })
 
-  test('Finalizar en segundo plano: no cierra ni redirige; al terminar queda «Finalizada» con aviso verde y botón Cerrar', async ({ page }) => {
+  test('Finalizar: el asistente se cierra al instante, la vista muestra «Guardando planificación…» y al terminar avisa «Planificación guardada» sin reabrir nada', async ({ page }) => {
     await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=1200#cajas')
     await abrirAsistente(page)
     await page.getByRole('button', { name: 'Omitir', exact: true }).click()
@@ -320,11 +318,12 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
     await page.getByRole('button', { name: 'Omitir', exact: true }).click()
     await page.getByTestId('etapa-resumen').click()
     await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    await expect(page.getByRole('button', { name: 'Finalizar planificación' })).toBeVisible()      // sigue en el Resumen
-    await expect(toastOk(page, /Planificación de .* guardada/)).toBeVisible({ timeout: 10000 })
-    await expect(page.getByTestId('asistente-plan')).toBeVisible()                                  // no se cerró solo
-    await expect(page.getByTestId('cerrar-plan')).toBeVisible()
-    await expect(page.getByTestId('etapa-resumen')).toHaveAttribute('data-estado', 'completada')
+    await expect(page.getByTestId('asistente-plan')).toHaveCount(0)                                 // se cerró con mi clic
+    await expect(page.getByTestId('plan-guardando')).toBeVisible()                                  // la vista de planificación muestra el guardado en curso
+    await expect(toastOk(page, /Planificación guardada/)).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('plan-guardando')).toHaveCount(0)
+    await expect(page.getByTestId('asistente-plan')).toHaveCount(0)                                 // no se reabrió ni redirigió
+    await expect(page).toHaveURL(/#cajas$/)
   })
 
   test('el asistente se puede cerrar mientras guarda y la operación termina igual (estado guardado)', async ({ page }) => {

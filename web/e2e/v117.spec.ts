@@ -238,13 +238,13 @@ test.describe('v1.17: Fuentes mensuales', () => {
   })
 })
 
-test.describe('v1.17: Subcajas mensuales', () => {
+test.describe('v1.17: Cajas mensuales', () => {
   test('crear desde existente (selector con búsqueda), aplicar reserva, no cambia el presupuesto consolidado', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
-    await page.getByRole('button', { name: 'Subcajas mensuales' }).first().click()
+    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     const d = dialog(page)
     await d.getByRole('button', { name: /Nueva plantilla/ }).click()
-    await page.getByRole('menuitem', { name: /desde una subcaja existente/ }).click()
+    await page.getByRole('menuitem', { name: /desde una caja existente/ }).click()
     await dialog(page).locator('#pf-origen').click()
     const op = page.getByRole('listbox').getByRole('option').first()
     await op.click()
@@ -276,7 +276,7 @@ test.describe('v1.17: móvil, formularios y modales de plantillas', () => {
     test(`${w}×${h}: modales de plantillas sin desborde, pie visible y encima de la barra inferior`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fuentes=3#cajas')
-      for (const t of ['Fuentes mensuales', 'Subcajas mensuales']) {
+      for (const t of ['Fuentes mensuales', 'Cajas mensuales']) {
         await page.getByRole('button', { name: t }).first().click()
         const d = dialog(page)
         await expect(d).toBeVisible()

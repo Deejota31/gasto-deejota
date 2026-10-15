@@ -28,6 +28,15 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.21.0 — sin conexión ≠ sin datos, «Caja» y «Finalizar» en segundo plano
+
+- **Sin conexión** (sin Apps Script conectado y sin `?demo`): ninguna pestaña muestra datos de ejemplo. Dashboard, Cajas, Gastos, Salud y Catálogo muestran un estado vacío con «Conectar mi hoja»; Configuración conserva la conexión y muestra «Conéctate para acceder a estas funciones» en Preferencias, Planificación mensual, Administración de datos y Funciones del backend. La app ya no hace ninguna lectura sin conexión. El modo demostración solo existe con `?demo=…`.
+- **Conectado pero sin registros**: cada sección tiene su propio vacío (Fuentes: «Aún no tienes fuentes registradas. Registra una fuente para empezar»; Cajas: «Aún no tienes cajas registradas. Añade una caja para empezar»; Gastos; Catálogo, que solo oculta lo que realmente no existe; Dashboard y Salud sin gráficos ni conclusiones). Se quitaron los botones «Crear mi primera fuente/caja»; el control habitual (+ / «Nueva …») sigue.
+- **Error de carga ≠ vacío**: si falla la lectura estando conectado, se muestra «No se pudieron cargar tus datos» con Reintentar.
+- **Terminología**: la interfaz dice «Caja/Cajas». Los identificadores internos, la API y los datos guardados (`tipo: 'subcaja'`, etapa `subcajas`, claves de CONFIG) **no cambian**.
+- **Finalizar planificación**: el asistente se cierra al instante con tu clic, la vista de planificación muestra «Guardando planificación…» y al terminar aparece «Planificación guardada» sin reabrir nada; si falla, error con Reintentar y no se marca como guardada.
+- Pruebas: `?demo=1&vacio=1` simula una hoja conectada sin ningún registro.
+
 ## Corrección v1.20.3 — las operaciones en segundo plano ya no mueven al usuario
 
 Solo frontend (Code.gs sigue en 1.20.1).

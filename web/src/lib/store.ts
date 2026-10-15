@@ -56,7 +56,7 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fuentes')) || 0, 25))
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fuentes')) || 0, 25), q.get('vacio') === '1')
   // ?falla=aplicar: solo fallan las acciones «aplicar…» (permite crear plantillas y probar el error del guardado en segundo plano).
   const falla = q.get('falla') === '1' || q.get('falla') === 'timeout' || q.get('falla') === 'aplicar'
   const soloAplicar = q.get('falla') === 'aplicar'
@@ -70,7 +70,12 @@ export function buildApi(conn: Connection | null): Api {
 }
 
 /** Estado global: una lectura completa al abrir y al pulsar "Actualizar"; las escrituras actualizan el estado local. */
+/** El modo demostración (datos de ejemplo) solo se activa a propósito con ?demo=… (desarrollo y pruebas). Sin conexión NO se inventan datos. */
+const hayDemoParam = () => { try { return new URLSearchParams(location.search).has('demo') } catch { return false } }
+
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
+  const demoActivo = hayDemoParam()
+  const desconectado = !conn && !apiOverride && !demoActivo
   const api = useMemo(() => apiOverride ?? buildApi(conn), [conn, apiOverride])
   const [data, setData] = useState<AppData | null>(() => { const s = readSnapshot(conn); return s && normalize(s) })
   const dataRef = useRef(data)
@@ -125,7 +130,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   // fresh=true salta la caché del servidor: "Actualizar" siempre trae lo último, incluidas ediciones hechas a mano en la hoja.
   /** Devuelve true si la lectura terminó bien (false: error u otra lectura en curso). */
   const refresh = useCallback(async (fresh = true): Promise<boolean> => {
-    if (loadingRef.current) return false // evita peticiones duplicadas por clics repetidos
+    if (desconectado || loadingRef.current) return false // sin conexión no hay nada que leer; evita peticiones duplicadas por clics repetidos
     loadingRef.current = true
     journal.current = []
     plantillasLoaded.current = false // la próxima apertura de "Gastos mensuales" relee la hoja
@@ -152,17 +157,18 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       loadingRef.current = false
       setLoading(false)
     }
-  }, [api, conn])
+  }, [api, conn, desconectado])
 
   useEffect(() => {
     const s = readSnapshot(conn)
     setData(s && normalize(s))
     setOrdenGastos(ordenMap(s))
     setConfirmado(false)
+    if (desconectado) { setError(null); return }   // sin conexión no se lee nada ni se muestran datos de ejemplo
     // Siempre lectura fresca al abrir/recargar: la caché del servidor (10 min) no ve las ediciones hechas a mano en la
     // hoja y mostraba registros ya eliminados. El respaldo del navegador solo sirve para pintar mientras llega la lectura.
     void refresh(true)
-  }, [refresh, conn])
+  }, [refresh, conn, desconectado])
 
   const patch = useCallback((fn: (d: AppData) => AppData) => {
     if (loadingRef.current) journal.current.push(fn)
@@ -235,7 +241,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       const s = await api.saveCaja(c)
       patch(d => ({ ...d, cajas: d.cajas.some(x => x.id === s.id) ? d.cajas.map(x => x.id === s.id ? s : x) : [...d.cajas, s] }))
     },
-    /** Elimina una subcaja. Sus gastos pasan a "fuera de subcajas" (u otra caja que coincida); no se borra ningún gasto. */
+    /** Elimina una caja. Sus gastos pasan a "fuera de cajas" (u otra caja que coincida); no se borra ningún gasto. */
     async deleteCaja(id: string) {
       await api.deleteCaja(id)
       patch(d => ({ ...d, cajas: d.cajas.filter(c => c.id !== id) }))
@@ -490,7 +496,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
 
   return {
     data, loading, error, lastSync, confirmado, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions,
-    lote, setLote, nuevoLote, registrarLote, ordenGastos, reorderGastos, isDemo: !conn && !apiOverride,
+    lote, setLote, nuevoLote, registrarLote, ordenGastos, reorderGastos, isDemo: !conn && !apiOverride && demoActivo, desconectado,
   }
 }
 

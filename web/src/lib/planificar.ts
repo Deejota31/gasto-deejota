@@ -122,7 +122,7 @@ export function verificarPlantillasAplicadas(data: AppData, pedidas: { plantilla
   const problemas: string[] = []
   for (const { plantilla: p, monto } of pedidas) {
     const ap = aplicacionEnMes(p, data, mes)
-    if (!ap) problemas.push(`“${p.nombre}”: no se encontró ${p.tipo === 'fuente' ? 'la fuente' : 'la subcaja'} en la hoja.`)
+    if (!ap) problemas.push(`“${p.nombre}”: no se encontró ${p.tipo === 'fuente' ? 'la fuente' : 'la caja'} en la hoja.`)
     else if (!ap.aplicada) problemas.push(`“${p.nombre}”: no quedó aplicada a ${mes}.`)
     else if (ap.centavos !== toCents(monto)) problemas.push(`“${p.nombre}”: el importe guardado no coincide con el pedido.`)
   }
@@ -134,7 +134,7 @@ export function verificarEntidadesAplicadas(data: AppData, tipo: TipoEntidad, me
   const cands = candidatos(data, tipo, mes), problemas: string[] = []
   for (const it of items) {
     const c = cands.find(x => x.id === it.id)
-    if (!c) problemas.push(`No se encontró ${tipo === 'fuente' ? 'la fuente' : 'la subcaja'} ${it.id} en la hoja.`)
+    if (!c) problemas.push(`No se encontró ${tipo === 'fuente' ? 'la fuente' : 'la caja'} ${it.id} en la hoja.`)
     else if (!c.aplicada) problemas.push(`“${c.nombre}” no quedó aplicada a ${mes}.`)
     else if (toCents(c.monto) !== toCents(it.monto)) problemas.push(`“${c.nombre}”: el importe guardado no coincide con el pedido.`)
   }
