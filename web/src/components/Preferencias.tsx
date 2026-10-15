@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Banknote, Bell, CalendarDays, Clock, Coins, Globe2, Moon, Palette, Plus, RefreshCw, Sun, X } from 'lucide-react'
+import { Banknote, Bell, CalendarDays, Clock, Coins, Globe2, Moon, Palette, Plus, RefreshCw, Sun, Type, X } from 'lucide-react'
 import { formatDate } from '../lib/dates'
 import { REFRESCO_OPCIONES, refrescoSegundos } from '../lib/refresco'
 import { Combobox, type Opcion } from './Combobox'
@@ -118,6 +118,10 @@ export function Preferencias({ cfg, saveCfg, setError }: { cfg: Record<string, s
               { value: 'claro', label: 'Claro', desc: 'Fondo blanco, ideal de día', Icon: Sun, color: 'var(--warning)' },
               { value: 'oscuro', label: 'Oscuro', desc: 'Fondo oscuro, descansa la vista', Icon: Moon, color: '#4F46E5' },
             ]} />
+        </Field>
+        <Field label={<Label icon={<Type />}>Excepciones de escritura en descripciones</Label>} htmlFor="cfg-desc-exc" hint="Marcas o expresiones con su propia escritura, separadas por coma (ej. ChatGPT, papa a la Huancaina). Aplican a descripciones nuevas o editadas.">
+          <input id="cfg-desc-exc" key={cfg.desc_excepciones ?? ''} className={inputCls} maxLength={190} defaultValue={cfg.desc_excepciones ?? ''} autoComplete="off" placeholder="Ej. iPhone, API, papa a la Huancaina"
+            onBlur={e => { const v = e.target.value.trim(); if (v !== (cfg.desc_excepciones ?? '')) void saveCfg('desc_excepciones', v) }} />
         </Field>
         <Field label={<Label icon={<RefreshCw />}>Actualizar datos automáticamente</Label>} htmlFor="cfg-refresco" hint="Relee tu hoja cada cierto tiempo y avisa en verde. No actualiza con la pestaña oculta.">
           <Combobox id="cfg-refresco" label="Actualizar datos automáticamente" value={String(segundos)} onChange={v => v !== String(segundos) && saveCfg('refresco_segundos', v)}

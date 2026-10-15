@@ -28,6 +28,26 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.19.0
+
+- **Aislamiento por mes:** desde **noviembre de 2026** (CONFIG `aislamiento_desde`, `9999-12` lo apaga) cada mes tiene sus propias fuentes y subcajas *aplicadas*: nada se arrastra solo. Una fuente cuenta en un mes solo si tiene su fila `solo` en `FUENTES_MESES` (o es de un único mes); una subcaja, solo si tiene su fila en `PRESUPUESTOS`. Los meses anteriores conservan exactamente su comportamiento histórico (no se inventa historial ni hay migración). Editar noviembre no cambia octubre ni diciembre.
+- **Estados vacíos por mes** en Cajas y Dashboard con acciones: *Configurar fuentes/subcajas del mes*, *Usar plantillas mensuales* y *Copiar configuración del mes anterior* (vista previa editable, sin duplicar ni sobrescribir). Los gastos reales se conservan y no se muestran porcentajes engañosos.
+- **Nueva fuente / subcaja** se aplica al mes seleccionado; el formulario muestra **Mes de aplicación**.
+- **Planificación mensual:** asistente *Prepara tu mes* (Fuentes → Subcajas → Gastos → Resumen). Nada se guarda hasta **Aplicar planificación**; avanzar nunca registra gastos. Estados pendiente / en progreso / completada / descartada (+ pospuesta) y por etapa (hecha / omitida).
+- **Campana** en la barra superior (antes de Actualizar) con badge y panel: *Preparar ahora*, *Recordar después* (mañana), *Descartar aviso del mes*. Solo avisos dentro de la app, sin notificaciones del sistema; se calculan al abrir, solo del mes actual y hasta 2 anteriores (sin avalancha) y nunca de meses previos al corte.
+- **Configuración → Planificación mensual y recordatorios:** activar/desactivar, día predeterminado, día y ON/OFF por mes y año (valida días reales, bisiestos incluidos), mismo día a todos, copiar del año anterior, restablecer, próximas fechas. Zona horaria `America/Lima` (fechas como texto, sin conversión UTC).
+- **Descripciones normalizadas** (`normalizarDescripcion`, idéntica en la web y en Apps Script): primera palabra en mayúscula, conectores en minúscula (lista cerrada), el resto con inicial mayúscula; excepciones de marca/frase (ChatGPT, iPhone, YouTube, Netflix, USD, API, *papa a la Huancaina*…) editables en CONFIG `desc_excepciones`. Se aplica al salir del campo y antes de guardar (cajas, plantillas, gastos, clones, lotes y aplicación de plantillas); no reescribe registros históricos y es idempotente.
+
+### Despliegue de v1.19.0
+
+1. Copia `apps-script/Code.gs` y publica una **nueva versión** de la implementación (la URL no cambia).
+2. Claves nuevas en CONFIG (se crean al primer uso, sin tocar tus datos): `desc_excepciones`, `aislamiento_desde`, `plan_activo`, `plan_dia`, `plan_dias_AAAA`, `plan_est_AAAA-MM`.
+3. **Noviembre 2026 empieza sin fuentes ni subcajas aplicadas** (es lo esperado): usa la campana o *Copiar configuración del mes anterior*.
+
+## Novedades v1.18.0
+
+- **Design System estandarizado:** tokens semánticos de color en claro/oscuro, un único Switch, botones Nuevo / Mensual / Editar compartidos, orden canónico de los menús de acciones (⋯) y menús que no quedan tapados por los diálogos. Sin cambios de datos.
+
 ## Novedades v1.17.0
 
 - **Fuentes mensuales y Subcajas mensuales**: plantillas reutilizables (crear desde cero o desde una existente, editar, clonar, eliminar, activar/desactivar, reordenar, selección múltiple). Cada una se aplica a un mes concreto con importe temporal, vista previa y confirmación; estados *Pendiente / Aplicada / No aplica este mes*. Reaplicar no duplica; el importe predeterminado se conserva para los demás meses. Una subcaja solo reserva: nunca crea dinero.

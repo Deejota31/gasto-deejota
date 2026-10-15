@@ -1,10 +1,11 @@
+import { formatearDescripcion } from '../lib/texto'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Copy, Layers, LayoutGrid, List, Pencil, Plus, Power, Search,
   Shapes, SlidersHorizontal, Tag, Trash2, Wallet, CreditCard, Info, FilePlus2,
 } from 'lucide-react'
-import { cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
+import { aislaDesde, cajaActiva, cajaMatches, ESPECIFICIDAD, prioridadCajas, type CajasResumen, type SubcajaResumen } from '../lib/engine'
 import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
@@ -16,6 +17,8 @@ import { Combobox, type Opcion } from '../components/Combobox'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { FuentesSeccion, Toggle } from '../components/fuentes'
+import { MonthPicker } from '../components/DatePicker'
+import { BarraPlan, VacioMes, type PlanificacionApi } from '../components/Planificacion'
 import { MenuAcciones, type AccionMenu } from '../components/MenuAcciones'
 import { usePlantillasFin } from '../components/PlantillasFin'
 import { SwipeFila, useEsMovil } from '../components/swipe'
@@ -45,7 +48,7 @@ interface Item { caja: Caja; r: SubcajaResumen | null }
  * Pestaña Cajas y presupuestos. La caja general manda: las subcajas son reservas dentro de ella (no suman), cada gasto
  * cae en UNA sola subcaja (la más específica) o en "fuera de subcajas". Reutiliza el mismo motor que el Dashboard.
  */
-export default function Cajas({ store, filters, setFilters, today }: { store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string }) {
+export default function Cajas({ store, filters, setFilters, today, plan }: { plan: PlanificacionApi; store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string }) {
   const data = store.data
   const base = data?.config.moneda || 'PEN'
   const money = useCallback((c: number) => formatMoney(c, base), [base])
@@ -71,9 +74,11 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
   if (!data || !a) return <Skeleton className="h-96" />
   const c = a.cajas
   const items: Item[] = [
-    ...c.subcajas.map(r => ({ caja: r.caja, r })),
+    ...c.subcajas.filter(r => r.aplicada).map(r => ({ caja: r.caja, r })),
     ...c.inactivas.map(caja => ({ caja, r: null })),
   ]
+  const ocultas = c.subcajas.filter(r => !r.aplicada).length
+  const mesVacio = !!mes && mes >= aislaDesde(data.config) && !c.subcajas.some(r => r.aplicada)
   const term = normName(q)
   const filtrando = !!term || alcance !== 'todos' || estado !== 'todas'
   const visibles = items
@@ -91,8 +96,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
         default: return x.caja.orden - y.caja.orden
       }
     })
-  const manual = [...items].sort((x, y) => x.caja.orden - y.caja.orden).map(i => i.caja.id)
-  const puedeOrdenar = orden === 'manual' && !filtrando
+  const manual = [...items, ...c.subcajas.filter(r => !r.aplicada).map(r => ({ caja: r.caja, r }))].sort((x, y) => x.caja.orden - y.caja.orden).map(i => i.caja.id)
+  const puedeOrdenar = orden === 'manual' && !filtrando && ocultas === 0
 
   const mover = (id: string, delta: number) => {
     const ids = [...manual]
@@ -112,7 +117,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
     <div className="space-y-4">
       <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length}
         onAjustar={c.general && c.origen !== 'fuentes' ? () => setAjustar({ caja: c.general!, asignado: c.presupuesto }) : undefined} />
-      <FuentesSeccion plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
+      {mes && <BarraPlan store={store} hoy={today} mes={mes} plan={plan} />}
+      <FuentesSeccion plan={plan} plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
 
       <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y subcajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -157,7 +163,8 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
         </div>
         {!puedeOrdenar && items.length > 1 && <p className="-mt-2 mb-3 text-[11px] text-muted">Para reordenar, usa “Orden manual” y quita la búsqueda y los filtros.</p>}
 
-        {!items.length ? (
+        {mesVacio && <div className="mb-4"><VacioMes tipo="subcaja" mes={mes!} nOcultas={ocultas} onConfigurar={() => setForm({ caja: null })} onPlantillas={() => plantillas.abrir('subcaja')} onAnterior={() => plan.usarAnterior('subcaja', mes!)} /></div>}
+        {mesVacio && !items.length ? null : !items.length ? (
           <Vacio icon={Wallet} titulo="Aún no tienes subcajas" accion={<Button onClick={() => setForm({ caja: null })}><Plus className="size-4" /> Crear mi primera caja</Button>}>
             Aparta dinero de tu presupuesto para Auto, Salud, Streaming o lo que quieras: cada caja junta sola los gastos de su alcance.
           </Vacio>
@@ -175,7 +182,7 @@ export default function Cajas({ store, filters, setFilters, today }: { store: Ap
         )}
       </section>
 
-      {form && <CajaForm store={store} caja={form.caja} clonDe={form.clonDe ?? null} cajas={data.cajas} catalogo={catalogo} medios={sortMedios(data.medios.map(m => m.nombre))} onClose={() => setForm(null)} />}
+      {form && <CajaForm mesSel={mes ?? today.slice(0, 7)} store={store} caja={form.caja} clonDe={form.clonDe ?? null} cajas={data.cajas} catalogo={catalogo} medios={sortMedios(data.medios.map(m => m.nombre))} onClose={() => setForm(null)} />}
       {borrar && <BorrarCaja store={store} caja={data.cajas.find(x => x.id === borrar.id) ?? borrar} data={data} onClose={() => setBorrar(null)} onDesactivar={() => { const x = borrar; setBorrar(null); if (cajaActiva(x)) activar(x) }} />}
       {plantillas.nodo}
       {ajustar && <CajaModal store={store} target={ajustar} cajas={c} mes={mes} money={money} onClose={() => setAjustar(null)} />}
@@ -435,8 +442,8 @@ export function calcularSolapes(cajas: Caja[], catalogo: CatalogoItem[], medios:
 
 /* ============================== Crear / editar ============================== */
 
-function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose }: {
-  store: AppStore; caja: Caja | null; clonDe?: Caja | null; cajas: Caja[]; catalogo: CatalogoItem[]; medios: string[]; onClose: () => void
+function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose, mesSel }: {
+  mesSel: string; store: AppStore; caja: Caja | null; clonDe?: Caja | null; cajas: Caja[]; catalogo: CatalogoItem[]; medios: string[]; onClose: () => void
 }) {
   const editar = !!caja
   const [id] = useState(() => caja?.id ?? `caja-${crypto.randomUUID().slice(0, 8)}`)
@@ -450,6 +457,7 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
   const [valor, setValor] = useState(origen?.filtroValor ?? '')
   const [descripcion, setDescripcion] = useState(origen?.descripcion ?? '')
   const [activo, setActivo] = useState(caja ? cajaActiva(caja) : clonDe ? false : true)
+  const [mesAplic, setMesAplic] = useState(mesSel)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const opciones = useMemo(() => {
     const xs = opcionesValor(campo, catalogo, medios)
@@ -481,11 +489,15 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
     setErrors(errs)
     if (Object.keys(errs).length) return
     const orden = caja?.orden ?? Math.max(1, ...cajas.map(x => x.orden)) + 1
-    const data: Caja = { ...borrador, nombre: nombre.trim(), presupuesto: Math.round(Number(m.replace(',', '.')) * 100) / 100, orden, descripcion: descripcion.trim() }
+    const data: Caja = { ...borrador, nombre: nombre.trim(), presupuesto: Math.round(Number(m.replace(',', '.')) * 100) / 100, orden, descripcion: formatearDescripcion(descripcion) }
     const ok = store.track(`caja:${id}`, editar
       ? { pending: `Guardando ${data.nombre}…`, ok: `${data.nombre} actualizada correctamente.`, error: `No se pudo actualizar ${data.nombre}.` }
       : { pending: `Creando ${data.nombre}…`, ok: clonDe ? `${data.nombre} creada${activo ? '' : ' inactiva: no reserva dinero hasta que la actives'}.` : `${data.nombre} creada correctamente.`, error: `No se pudo crear ${data.nombre}.` },
-    () => store.actions.saveCaja(data))
+    async () => {
+      await store.actions.saveCaja(data)
+      // v1.19: la subcaja nueva reserva dinero en el mes elegido (cada mes tiene sus propias subcajas aplicadas).
+      if (!editar && activo && mesAplic >= aislaDesde(store.data?.config)) await store.actions.aplicarEntidadesMes('subcaja', mesAplic, [{ id, monto: data.presupuesto }])
+    })
     if (ok) onClose()
   }
 
@@ -506,6 +518,11 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
         <Field label="Nombre" error={errors.nombre} htmlFor="caja-nombre">
           <input id="caja-nombre" className={inputCls} maxLength={40} placeholder="Ej. Caja Salud" value={nombre} onChange={e => setNombre(e.target.value)} />
         </Field>
+        {!editar && (
+          <Field label="Mes de aplicación" htmlFor="caja-mes" hint="Esta subcaja reserva su monto en el mes elegido; los demás meses se preparan aparte.">
+            <MonthPicker id="caja-mes" label="Mes de aplicación" value={mesAplic} onChange={setMesAplic} />
+          </Field>
+        )}
         <Field label="Monto asignado por mes" error={errors.monto} htmlFor="caja-asignado" hint="Se descuenta del libre de la caja general. Para cambiar solo un mes usa “Ajustar monto”.">
           <span className="relative block">
             <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted">S/</span>
@@ -534,7 +551,7 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
           </div>
         )}
         <Field label="Descripción (opcional)" htmlFor="caja-desc">
-          <input id="caja-desc" className={inputCls} maxLength={200} placeholder="Ej. Médico, farmacia y exámenes" value={descripcion} onChange={e => setDescripcion(e.target.value)} />
+          <input id="caja-desc" className={inputCls} maxLength={200} placeholder="Ej. Médico, farmacia y exámenes" value={descripcion} onChange={e => setDescripcion(e.target.value)} onBlur={() => setDescripcion(formatearDescripcion(descripcion))} />
         </Field>
         <div className="rounded-xl border border-line p-3">
           <Switch checked={activo} onChange={setActivo} label="Caja activa" />

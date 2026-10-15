@@ -4,7 +4,8 @@ import {
   Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
   Percent, PieChart as PieIcon, PiggyBank, Shapes, TrendingUp, Trophy, Wallet,
 } from 'lucide-react'
-import { subKey } from '../lib/engine'
+import { aislaDesde, subKey } from '../lib/engine'
+import type { PlanificacionApi } from '../components/Planificacion'
 import { formatMoney } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
@@ -20,8 +21,8 @@ import { ResumenCajas } from '../components/ResumenCajas'
 
 const toggle = (xs: string[], v: string) => (xs.includes(v) ? xs.filter(x => x !== v) : [...xs, v])
 
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onIrCajas }: {
-  store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onIrCajas, plan }: {
+  plan?: PlanificacionApi; store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
   onIrCajas?: () => void
 }) {
   const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
@@ -65,6 +66,19 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           {a.excluidosSinTipoCambio > 0 && (
             <ErrorBox tone="warning" message={`${a.excluidosSinTipoCambio} movimiento(s) en otra moneda no se suman porque falta su tipo de cambio en Configuración.`} />
           )}
+
+          {/* v1.19: mes sin fuentes/subcajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
+          {mes && data && mes >= aislaDesde(data.config) && plan && (() => {
+            const sinF = a.cajas.origen === 'fuentes' && !a.cajas.fuentes.lista.some(r => r.aplicada)
+            const sinS = a.cajas.subcajas.length > 0 && !a.cajas.subcajas.some(r => r.aplicada)
+            if (!sinF && !sinS) return null
+            return (
+              <div className="space-y-2" data-testid="aviso-mes-sin-config">
+                {sinF && <ErrorBox tone="warning" message="Todavía no has configurado fuentes de dinero para este mes." action={{ label: 'Preparar fuentes mensuales', onClick: () => plan.abrir(mes, 'fuentes') }} />}
+                {sinS && <ErrorBox tone="warning" message="Todavía no has reservado presupuesto para este mes." action={{ label: 'Preparar subcajas mensuales', onClick: () => plan.abrir(mes, 'subcajas') }} />}
+              </div>
+            )
+          })()}
 
           {/* Primero el presupuesto consolidado y sus acordeones, luego los KPIs */}
           <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}

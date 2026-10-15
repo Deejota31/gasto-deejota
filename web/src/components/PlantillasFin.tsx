@@ -1,6 +1,7 @@
 // "Fuentes mensuales" y "Subcajas mensuales" (v1.17): plantillas reutilizables de fuentes de dinero y de subcajas.
 // Una plantilla es SOLO configuración: guardarla, editarla o clonarla no crea dinero, fuentes, subcajas ni gastos.
 // Aplicarla a un mes escribe únicamente ese mes (FUENTES_MESES / PRESUPUESTOS) y es idempotente; ver el backend.
+import { formatearDescripcion } from '../lib/texto'
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowLeft, Ban, Boxes, CalendarDays, Check, ChevronDown, ChevronUp, CircleDollarSign, Copy, Info, ListChecks, Loader2, Pencil,
@@ -9,7 +10,7 @@ import {
 import type { AppStore } from '../lib/store'
 import type { PlantillaFinInput } from '../lib/api'
 import type { AppData, Caja, PlantillaFin, TipoPlantillaFin } from '../lib/types'
-import { budgetCents, fuenteMontoMes } from '../lib/engine'
+import { aislaDesde, budgetCents, fuenteMontoMes } from '../lib/engine'
 import { formatMoney, toCents } from '../lib/money'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
@@ -76,14 +77,14 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
     const f = (data.fuentes ?? []).find(x => x.id === p.origenId)
     const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
     if (!f) return { txt: `Se creará la fuente “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))}. No se duplica si ya existe.`, cambia: true }
-    const ef = fuenteMontoMes(f, mes, data.fuentesMeses ?? []).monto
+    const ef = fuenteMontoMes(f, mes, data.fuentesMeses ?? [], aislaDesde(data.config)).monto
     return toCents(ef) === toCents(monto) ? { txt: `Sin cambios: ${f.nombre} ya aporta ${m(toCents(ef))} en ${ml}.`, cambia: false }
       : { txt: `Ajuste solo de ${ml}: ${m(toCents(ef))} → ${m(toCents(monto))}. Otros meses no cambian.`, cambia: true }
   }
   const c = data.cajas.find(x => x.id === p.origenId)
   const mon = data.config.moneda || 'PEN'
   if (!c) return { txt: `Se creará la subcaja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)}. Reserva dinero ya existente; no lo crea.`, cambia: true }
-  const ef = budgetCents(c, mes, data.presupuestos)
+  const ef = budgetCents(c, mes, data.presupuestos, aislaDesde(data.config))
   return ef === toCents(monto) ? { txt: `Sin cambios: ${c.nombre} ya reserva ${formatMoney(ef, mon)} en ${ml}.`, cambia: false }
     : { txt: `Reserva de ${ml}: ${formatMoney(ef, mon)} → ${formatMoney(toCents(monto), mon)}. Otros meses no cambian.`, cambia: true }
 }
@@ -421,7 +422,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
     if (Object.keys(errs).length) return
     const input: PlantillaFinInput = {
       id, tipo, nombre: nombre.trim(), monto: n, moneda: tipo === 'fuente' ? moneda : '', medios: tipo === 'fuente' ? unirMedios(elegidos) : '',
-      campo: tipo === 'subcaja' ? campo : '', valor: tipo === 'subcaja' ? valor : '', descripcion: descripcion.trim(),
+      campo: tipo === 'subcaja' ? campo : '', valor: tipo === 'subcaja' ? valor : '', descripcion: formatearDescripcion(descripcion),
       color: base?.color ?? (origen ? (tipo === 'fuente' ? fuentes.find(f => f.id === origen)?.color : data.cajas.find(c => c.id === origen)?.color) : undefined) ?? '#1e3a8a',
       icono: base?.icono ?? (origen ? (tipo === 'fuente' ? fuentes.find(f => f.id === origen)?.icono : data.cajas.find(c => c.id === origen)?.icono) : undefined) ?? '',
       recurrencia: tipo === 'fuente' ? recurrencia : 'mensual', activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
@@ -491,7 +492,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
         </>
       )}
       <Field label="Descripción (opcional)" htmlFor="pf-desc">
-        <input id="pf-desc" className={inputCls} maxLength={200} value={descripcion} onChange={e => setDescripcion(e.target.value)} autoComplete="off" />
+        <input id="pf-desc" className={inputCls} maxLength={200} value={descripcion} onChange={e => setDescripcion(e.target.value)} onBlur={() => setDescripcion(formatearDescripcion(descripcion))} autoComplete="off" />
       </Field>
       <Switch checked={activo} onChange={setActivo} label="Plantilla activa" />
       {clonDe && <p className="text-[11px] text-muted">Se creará una plantilla nueva (ID nuevo, sin vínculo). La original no cambia y no se copia ningún movimiento.</p>}

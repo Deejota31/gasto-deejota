@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
-  Activity, FolderOpen, Pencil, CheckCircle2, CircleAlert, Database, Download, ExternalLink, FileSpreadsheet, 
+  Activity, CalendarCheck2, FolderOpen, Pencil, CheckCircle2, CircleAlert, Database, Download, ExternalLink, FileSpreadsheet, 
   Eye, EyeOff, Info, KeyRound, Link2, Loader2, Palette, RefreshCw, Settings, ShieldCheck, Tags, Unplug,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
@@ -10,11 +10,13 @@ import { FuncionesBackend } from '../components/FuncionesBackend'
 import { toCsv } from './Gastos'
 import { showToast } from '../lib/toast'
 import { Preferencias } from '../components/Preferencias'
+import { ResumenPlan, type PlanificacionApi } from '../components/Planificacion'
+import { RecordatoriosPlan } from '../components/RecordatoriosPlan'
 
-export const APP_VERSION = '1.18.0'
+export const APP_VERSION = '1.19.0'
 
-export default function Configuracion({ store, conn, onConnect, notify, goCatalogo }: {
-  store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
+export default function Configuracion({ store, conn, onConnect, notify, goCatalogo, plan, hoy }: {
+  plan: PlanificacionApi; hoy: string; store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void
 }) {
   const cfg = store.data?.config ?? {}
   const [url, setUrl] = useState(conn?.url ?? '')
@@ -94,6 +96,14 @@ export default function Configuracion({ store, conn, onConnect, notify, goCatalo
         {/* B. Preferencias: tres grupos lógicos en una cuadrícula adaptable */}
         <Card title="Preferencias" icon={<Palette className="size-4 text-morado" />}>
           <Preferencias cfg={cfg} saveCfg={saveCfg} setError={setError} />
+        </Card>
+
+        {/* C. Planificación mensual y recordatorios (v1.19) */}
+        <Card title="Planificación mensual y recordatorios" icon={<CalendarCheck2 className="size-4 text-navy" />}>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+            <ResumenPlan store={store} hoy={hoy} compacto onPreparar={() => plan.abrir()} />
+            <RecordatoriosPlan cfg={cfg} saveCfg={saveCfg} hoy={hoy} />
+          </div>
         </Card>
 
         {/* D. Administración de datos */}

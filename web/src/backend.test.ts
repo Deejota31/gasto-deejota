@@ -6,8 +6,9 @@ import vm from 'node:vm'
 import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CATALOGO_INICIAL } from './lib/catalogo'
+import { configurarExcepciones, formatearDescripcion } from './lib/texto'
 import { createApi } from './lib/api'
-import { aggregate } from './lib/engine'
+import { aggregate, aislaDesde, budgetCents, fuenteMontoMes } from './lib/engine'
 import { ratesFromConfig } from './lib/money'
 import { calcularCompromisos, compararPeriodos, estadoCompromiso, evaluarCalidad } from './lib/salud'
 
@@ -606,7 +607,7 @@ describe('backend Apps Script', () => {
     expect(r.ok).toBe(true)
     expect(sh.rows[0]).toHaveLength(10)
     expect(sh.rows.slice(1, antes.length + 1).map(x => x.slice(0, 7))).toEqual(antes)   // cajas existentes intactas
-    expect(r.data.slice(7)).toEqual([true, 'Médico y farmacia', ''])
+    expect(r.data.slice(7)).toEqual([true, 'Médico y Farmacia', ''])
     // mismo alcance y valor (otra capitalización) → rechazado; desactivada sí se permite
     expect(caja({ id: 'caja-salud2', filtroValor: ' salud ' }).error.message).toMatch(/ya usa Categoría = /)
     expect(caja({ id: 'caja-salud2', filtroValor: 'salud', activo: false }).ok).toBe(true)
@@ -1137,8 +1138,8 @@ describe('backend Apps Script', () => {
 
   it('neutraliza textos que Sheets interpretaría como fórmula', () => {
     b.post('saveGasto', gasto({ descripcion: '=IMPORTXML("http://x")' }))
-    expect(b.ss.getSheetByName('GASTOS')!.rows[1][5]).toBe('\'=IMPORTXML("http://x")')
-    expect(b.post('data').data.gastos[0][5]).toBe('=IMPORTXML("http://x")')
+    expect(b.ss.getSheetByName('GASTOS')!.rows[1][5]).toBe("'=Importxml(\"http://X\")")
+    expect(b.post('data').data.gastos[0][5]).toBe('=Importxml("http://X")')
   })
 
   it('usa caché en lecturas y la invalida tras escribir', () => {
@@ -1548,7 +1549,9 @@ describe('plantillas de fuentes y de subcajas (v1.17)', () => {
   it('aplicar con el mismo importe habitual no escribe PRESUPUESTOS; cambiar el importe actualiza sin duplicar', () => {
     caja(); plS({ origenId: 'c-hogar' })
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 400 }] })
-    expect(datos().presupuestos).toEqual([])
+    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 400]])    // v1.19: desde el corte, aplicar SIEMPRE deja constancia del mes
+    b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-1', accion: 'aplicar', monto: 400 }] })
+    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 400]])    // antes del corte (comportamiento histórico): mismo importe, sin escribir
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 500 }] })
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 520 }] })
     expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 520]])
@@ -1579,7 +1582,7 @@ describe('plantillas de fuentes y de subcajas (v1.17)', () => {
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-1', accion: 'aplicar', monto: 1200 }] })
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'pf-1', accion: 'aplicar', monto: 1000 }] })
     expect(total()).toBe(2)
-    expect(datos().fuentesMeses).toEqual([['f-pf-1', '2026-11', 1200, 'solo']])        // diciembre usa el habitual, sin fila nueva
+    expect(datos().fuentesMeses).toEqual([['f-pf-1', '2026-11', 1200, 'solo'], ['f-pf-1', '2026-12', 1000, 'solo']])   // v1.19: cada mes aplicado deja su propia fila
     expect(datos().plantillasFin.find((p: unknown[]) => p[0] === 'pf-1')[14]).toBe('f-pf-1')
   })
 
@@ -1621,5 +1624,155 @@ describe('plantillas de fuentes y de subcajas (v1.17)', () => {
     expect(datos().plantillasFin).toHaveLength(0)
     expect(datos().cajas.some((c: unknown[]) => c[0] === 'c-hogar')).toBe(true)
     expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
+  })
+})
+
+describe('normalización de descripciones en el backend (v1.19)', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup(); configurarExcepciones('') })
+  const CASOS = ['arroz con pollo', 'ARROZ CON POLLO', 'tallarines al horno con papa a la huancaina', 'PAGO DE INTERNET PARA LA CASA', 'seguro de mi papa',
+    'compra para mi hija', 'luz y agua de la casa', 'suscripcion de netflix', 'gastos de viaje a ica', 'papa rellena', 'pago de chatgpt plus', 'FUNDA PARA IPHONE',
+    '  bebé   y   mamá 🎉 ', 'recarga 4g (30 días), plan "max"', 'menú del día: s/ 12.50', 'de compras con el equipo', 'regalo para ella', 'llamada api', 'año nuevo', '', '   ']
+  const gs = (t: string) => (b.g as unknown as Record<string, (x: string) => string>).normalizarDescripcion_(t)
+
+  it('el backend y el frontend producen exactamente el mismo resultado (y es idempotente)', () => {
+    for (const t of CASOS) {
+      expect(gs(t), JSON.stringify(t)).toBe(formatearDescripcion(t))
+      expect(gs(gs(t))).toBe(gs(t))
+    }
+  })
+
+  it('crear, editar y clonar un gasto guardan la descripción normalizada en la hoja, sin tocar lo demás', () => {
+    const id = 'bbbbbbbb-0000-4000-8000-000000000001', id2 = 'bbbbbbbb-0000-4000-8000-000000000002'
+    const r = b.post('saveGasto', gasto({ id, descripcion: 'ARROZ CON POLLO' }))
+    expect(r.ok).toBe(true)
+    const fila = () => b.ss.getSheetByName('GASTOS')!.rows[1]
+    expect(fila()[5]).toBe('Arroz con Pollo')
+    const antes = [...fila()]
+    b.post('saveGasto', gasto({ id, mode: 'update', descripcion: 'pago de internet para la casa' }))
+    expect(fila()[5]).toBe('Pago de Internet para la Casa')
+    expect(fila().filter((_, i) => i !== 5 && i !== 14 && i !== 15)).toEqual(antes.filter((_, i) => i !== 5 && i !== 14 && i !== 15))   // monto, fecha, moneda, categoría, medio, ID: iguales
+    b.post('saveGasto', gasto({ id: id2, descripcion: 'tallarines al horno con papa a la huancaina' }))   // clonar = crear con otro ID
+    expect(b.ss.getSheetByName('GASTOS')!.rows[2][5]).toBe('Tallarines al Horno con papa a la Huancaina')
+    expect(b.ss.getSheetByName('GASTOS')!.rows).toHaveLength(3)
+  })
+
+  it('gastos por lote, plantilla de gasto, subcaja y plantilla financiera normalizan igual', () => {
+    const g = (n: number, d: string) => ({ ...gasto({ id: `bbbbbbbb-0000-4000-8000-00000000010${n}`, descripcion: d }), mode: undefined })
+    const lb = b.post('saveGastosBatch', { loteId: 'lote-00000000-0000-4000-8000-000000000009', gastos: [g(1, 'LUZ Y AGUA'), g(2, 'seguro de mi papa')] }); expect(lb.error).toBeUndefined()
+    const rows = b.ss.getSheetByName('GASTOS')!.rows
+    expect([rows[1][5], rows[2][5]]).toEqual(['Luz y Agua', 'Seguro de mi Papa'])
+    const pl = b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-555555555555', mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Internet', descripcion: 'PAGO DE INTERNET' })
+    expect(pl.data[4]).toBe('Pago de Internet')
+    const caja = b.post('saveCaja', { id: 'c-salud', nombre: 'Salud', presupuesto: 100, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9, descripcion: 'médico, farmacia y exámenes' })
+    expect(caja.error).toBeUndefined()
+    expect(b.ss.getSheetByName('CAJAS')!.rows.at(-1)![8]).toBe('Médico, Farmacia y Exámenes')
+    const pf = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'subcaja', nombre: 'Auto', monto: 250, campo: 'Categoría', valor: 'Auto', descripcion: 'MANTENIMIENTO DEL AUTO' })
+    expect(pf.ok).toBe(true)
+    expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows.at(-1)![8]).toBe('Mantenimiento del Auto')
+  })
+
+  it('las excepciones configuradas en CONFIG aplican en el backend y no reescriben registros antiguos', () => {
+    const id = 'bbbbbbbb-0000-4000-8000-000000000001'
+    b.post('saveGasto', gasto({ id, descripcion: 'Cena' }))
+    b.post('saveConfig', { clave: 'desc_excepciones', valor: 'Pollo a la Brasa' })
+    expect(gs('cena de pollo a la brasa')).toBe('Cena de Pollo a la Brasa')
+    b.post('saveGasto', gasto({ id: 'bbbbbbbb-0000-4000-8000-000000000002', descripcion: 'cena de POLLO A LA BRASA' }))
+    expect(b.ss.getSheetByName('GASTOS')!.rows[2][5]).toBe('Cena de Pollo a la Brasa')
+    expect(b.ss.getSheetByName('GASTOS')!.rows[1][5]).toBe('Cena')   // el histórico no se toca
+  })
+})
+
+
+describe('aislamiento mensual de fuentes y subcajas (v1.19)', () => {
+  let b: ReturnType<typeof load>
+  const datos = () => b.post('data').data
+  beforeEach(() => {
+    b = load(); b.g.setup()
+    b.post('saveFuente', { id: 'f-general', nombre: 'General', monto: 3000, moneda: 'PEN', color: '#1e3a8a', icono: 'auto', recurrencia: 'mensual', mes: '2026-10', activo: true, medioPago: '', orden: 1 })
+    b.post('saveCaja', { id: 'c-hogar', nombre: 'Servicios del Hogar', presupuesto: 400, filtroCampo: 'Categoría', filtroValor: 'Servicios', color: '#16A085', orden: 2 })
+  })
+  const efectivo = (mes: string) => {
+    const d = datos()
+    const f = d.fuentes.map((r: unknown[]) => ({ id: r[0], mes: r[9], monto: r[2], recurrencia: r[8], nombre: r[1], moneda: r[3] }))
+    return f.map((x: { id: string; mes: string; monto: number; recurrencia: string }) =>
+      fuenteMontoMes({ ...x, activo: true, orden: 0, color: '', icono: '', medioPago: '', creadoEn: '', actualizadoEn: '' } as never, mes,
+        d.fuentesMeses.map((m: unknown[]) => ({ fuenteId: m[0], mes: m[1], monto: m[2], modo: m[3] })), aislaDesde({})).monto)
+  }
+
+  it('A. una fuente de octubre sigue en octubre (histórico intacto) y NO aparece en noviembre ni diciembre', () => {
+    expect(efectivo('2026-10')).toEqual([3000])
+    expect(efectivo('2026-09')).toEqual([0])           // antes de su mes de aplicación
+    expect(efectivo('2026-11')).toEqual([0])
+    expect(efectivo('2026-12')).toEqual([0])
+  })
+
+  it('B. aplicar a noviembre no cambia octubre ni diciembre; reaplicar no duplica; "desde" ya no arrastra', () => {
+    b.post('aplicarEntidadesMes', { tipo: 'fuente', mes: '2026-11', items: [{ id: 'f-general', monto: 3500 }] })
+    b.post('aplicarEntidadesMes', { tipo: 'fuente', mes: '2026-11', items: [{ id: 'f-general', monto: 3500 }] })
+    expect(datos().fuentesMeses).toEqual([['f-general', '2026-11', 3500, 'solo']])
+    expect(efectivo('2026-10')).toEqual([3000]); expect(efectivo('2026-11')).toEqual([3500]); expect(efectivo('2026-12')).toEqual([0])
+  })
+
+  it('subcajas: la reserva de noviembre no existe en octubre/diciembre; aplicar con 0 también deja constancia', () => {
+    const cajas = () => datos().cajas.find((c: unknown[]) => c[0] === 'c-hogar')
+    const caja = { id: 'c-hogar', nombre: 'x', presupuesto: cajas()[2], filtroCampo: 'Categoría' } as never
+    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-11', items: [{ id: 'c-hogar', monto: 450 }] })
+    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-11', items: [{ id: 'c-hogar', monto: 450 }] })
+    const pres = datos().presupuestos.map((p: unknown[]) => ({ periodo: p[0], cajaId: p[1], monto: p[2] }))
+    expect(pres).toEqual([{ periodo: '2026-11', cajaId: 'c-hogar', monto: 450 }])
+    expect(budgetCents(caja, '2026-10', pres, aislaDesde({}))).toBe(40000)      // antes del corte: la reserva habitual de siempre
+    expect(budgetCents(caja, '2026-11', pres, aislaDesde({}))).toBe(45000)
+    expect(budgetCents(caja, '2026-12', pres, aislaDesde({}))).toBe(0)
+    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-12', items: [{ id: 'c-hogar', monto: 0 }] })
+    expect(datos().presupuestos).toHaveLength(2)
+  })
+
+  it('todo o nada: un ID inexistente o un monto inválido no escribe nada; el consolidado no cambia', () => {
+    const antes = JSON.stringify([datos().fuentes, datos().fuentesMeses, datos().cajas, datos().presupuestos])
+    expect(b.post('aplicarEntidadesMes', { tipo: 'fuente', mes: '2026-11', items: [{ id: 'f-general', monto: 10 }, { id: 'nope', monto: 5 }] }).error.code).toBe('NOT_FOUND')
+    expect(b.post('aplicarEntidadesMes', { tipo: 'fuente', mes: '2026-11', items: [{ id: 'f-general', monto: -1 }] }).error.code).toBe('VALIDATION')
+    expect(b.post('aplicarEntidadesMes', { tipo: 'fuente', mes: '2026-13', items: [{ id: 'f-general', monto: 1 }] }).error.code).toBe('VALIDATION')
+    expect(JSON.stringify([datos().fuentes, datos().fuentesMeses, datos().cajas, datos().presupuestos])).toBe(antes)
+  })
+
+  it('un mes con gastos y sin configuración conserva los gastos y muestra presupuesto 0 (sin dividir entre cero)', () => {
+    b.post('saveGasto', gasto({ id: 'bbbbbbbb-0000-4000-8000-000000000001', fecha: '2026-11-05', categoria: 'Servicios', monto: 80 }))
+    const d = datos()
+    const gastos = d.gastos.length
+    expect(gastos).toBe(1)
+    expect(efectivo('2026-11')).toEqual([0])
+  })
+})
+
+describe('planificación mensual y recordatorios en CONFIG (v1.19)', () => {
+  let b: ReturnType<typeof load>
+  const cfg = () => b.post('data').data.config as Record<string, string>
+  beforeEach(() => { b = load(); b.g.setup() })
+  it('guarda y recupera día por mes, estado de planificación y activación (persistencia entre dispositivos = releer la hoja)', () => {
+    const anio = Array.from({ length: 12 }, (_, i) => `${i === 10 ? 2 : 1}:1`).join(',')
+    expect(b.post('saveConfig', { clave: 'plan_dias_2026', valor: anio }).ok).toBe(true)
+    expect(b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'e|100|' }).ok).toBe(true)
+    expect(b.post('saveConfig', { clave: 'plan_activo', valor: 'true' }).ok).toBe(true)
+    expect(b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'c|111|' }).ok).toBe(true)     // actualiza, no duplica
+    expect(cfg().plan_dias_2026).toBe(anio); expect(cfg().plan_est_2026_11 ?? cfg()['plan_est_2026-11']).toBe('c|111|')
+    const filas = b.ss.getSheetByName('CONFIG')!.rows.filter(r => r[0] === 'plan_est_2026-11')
+    expect(filas).toHaveLength(1)
+  })
+  it('rechaza días inexistentes (febrero no bisiesto, 31 de abril), formatos raros y claves ajenas', () => {
+    const base = (f: (i: number) => string) => Array.from({ length: 12 }, (_, i) => f(i)).join(',')
+    expect(b.post('saveConfig', { clave: 'plan_dias_2027', valor: base(i => i === 1 ? '29:1' : '1:1') }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'plan_dias_2028', valor: base(i => i === 1 ? '29:1' : '1:1') }).ok).toBe(true)   // bisiesto
+    expect(b.post('saveConfig', { clave: 'plan_dias_2026', valor: base(i => i === 3 ? '31:1' : '1:1') }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'plan_dias_2026', valor: '1:1,2:1' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'plan_est_2026-13', valor: 'p|000|' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'x|000|' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'plan_dia', valor: '32' }).error.code).toBe('VALIDATION')
+    expect(b.post('saveConfig', { clave: 'cualquier_cosa', valor: '1' }).error.code).toBe('VALIDATION')
+  })
+  it('cambiar la planificación no escribe nada financiero', () => {
+    const antes = JSON.stringify(['FUENTES', 'FUENTES_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))
+    b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'd|000|' })
+    expect(JSON.stringify(['FUENTES', 'FUENTES_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))).toBe(antes)
   })
 })

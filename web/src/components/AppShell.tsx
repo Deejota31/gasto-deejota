@@ -24,6 +24,8 @@ function useMedia(query: string): boolean {
 }
 
 export interface AccionesGlobales {
+  /** Campana de planificación mensual (v1.19): va antes de Actualizar. */
+  campana?: ReactNode
   loading: boolean
   lastSync: Date | null
   onRefresh: () => void
@@ -239,7 +241,7 @@ function Topbar({ headerRef, actual, acciones, movil, conMenu, botonMenu, onMenu
   headerRef: React.RefObject<HTMLElement | null>; actual: (typeof TABS)[number]; acciones: AccionesGlobales; movil: boolean; conMenu: boolean
   botonMenu: React.RefObject<HTMLButtonElement | null>; onMenu: () => void; menuAbierto: boolean
 }) {
-  const { loading, lastSync, onRefresh, conectado, onConexion, sheetUrl, isDemo } = acciones
+  const { loading, lastSync, onRefresh, conectado, onConexion, sheetUrl, isDemo, campana } = acciones
   const Icon = actual.icon
   const btn = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border text-sm font-medium whitespace-nowrap outline-none transition hover:bg-bg focus-visible:ring-2 focus-visible:ring-navy/60'
   const sinHoja = !sheetUrl || isDemo
@@ -256,6 +258,7 @@ function Topbar({ headerRef, actual, acciones, movil, conMenu, botonMenu, onMenu
           {(actual.subtitulo as string) !== (actual.label as string) && <p className="hidden truncate text-[11px] text-muted sm:block">{actual.subtitulo}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {campana}
           <button type="button" onClick={onRefresh} disabled={loading} aria-label="Actualizar datos" title={lastSync ? `Última sincronización ${lastSync.toLocaleTimeString('es-PE')}` : 'Actualizar'}
             className={`${btn} w-9 border-transparent text-muted disabled:opacity-60`}>
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />

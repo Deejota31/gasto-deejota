@@ -276,6 +276,12 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       }))
       return pl
     },
+    /** Aplica fuentes o subcajas existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
+    async aplicarEntidadesMes(tipo: 'fuente' | 'subcaja', mes: string, items: { id: string; monto: number }[]) {
+      await api.aplicarEntidadesMes(tipo, mes, items)
+      const raw = await api.getData(true)
+      patch(d => ({ ...d, fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos }))
+    },
     /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
     async saveFuente(f: FuenteInput) {
       const s = await api.saveFuente(f)
