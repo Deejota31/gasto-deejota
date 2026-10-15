@@ -13,7 +13,7 @@ export interface ContextoPlan {
   /** El módulo hijo lanzó el guardado en segundo plano y se cierra: el asistente recupera el control y muestra la etapa «En progreso». */
   onIniciado?: () => void
   /** El guardado en segundo plano falló (nada quedó aplicado): el asistente muestra la etapa en Error con «Reintentar». */
-  onFallo?: (mensaje: string) => void
+  onFallo?: (mensaje: string, reintentar?: () => void) => void
 }
 export interface Candidato {
   id: string; nombre: string; moneda: string

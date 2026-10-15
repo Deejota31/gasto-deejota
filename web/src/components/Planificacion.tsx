@@ -249,6 +249,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const [paso, setPaso] = useState<number>(ETAPAS.indexOf(primera))   // 0..2 etapas · 3 resumen
   const [selF, setSelF] = useState(() => aSel(cf))
   const [selS, setSelS] = useState(() => aSel(cs))
+  const [finOk, setFinOk] = useState(false)                         // «Finalizar» ya confirmado en esta sesión del asistente
   const [bg, setBg] = useState<Partial<Record<Etapa, boolean>>>({})   // guardado en segundo plano lanzado desde un módulo hijo
   const [hijo, setHijo] = useState<Etapa | null>(null)              // módulo hijo abierto: el asistente queda oculto pero montado
   const [fallo, setFallo] = useState<Partial<Record<Etapa | 'final', { msg: string; reintentar: () => void }>>>({})
@@ -259,8 +260,10 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const invalidoS = cs.some(c => selS[c.id]?.on && !MONTO_RE.test(selS[c.id].monto.trim()))
   const keyFinal = `plan:${mes}`
   const ocupado = (e: Etapa | 'final') => store.pending.has(e === 'final' ? keyFinal : `plan:${mes}:${e}`)
-  const hayOcupado = ETAPAS.some(e => ocupado(e)) || ocupado('final')
-  const hayBg = ETAPAS.some(e => bg[e])
+  /** Operación de esta etapa en curso: la lanzada desde un módulo hijo (aunque el asistente se haya cerrado y reabierto) o la del propio asistente. */
+  const claveBg: Record<Etapa, string> = { fuentes: `pf:aplicar:fuente:${mes}:aplicar`, subcajas: `pf:aplicar:subcaja:${mes}:aplicar`, gastos: 'lote:' }
+  const enCurso = (e: Etapa) => !!bg[e] || [...store.pending].some(k => k.startsWith(claveBg[e]))
+  const hayBg = ETAPAS.some(e => enCurso(e))
   const real = useMemo(() => resumenReal(data, mes), [data, mes])
   const monedaBase = data.config.moneda || 'PEN'
 
@@ -268,7 +271,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const visual = (e: Etapa): EstadoVisual => {
     if (fallo[e]) return 'error'
     const pend = e === 'fuentes' ? itF.length : e === 'subcajas' ? itS.length : 0
-    if (ocupado(e) || bg[e] || pend > 0) return 'en_progreso'
+    if (ocupado(e) || enCurso(e) || pend > 0) return 'en_progreso'
     return plan.etapas[e] === 1 ? 'completada' : plan.etapas[e] === 2 ? 'omitida' : 'pendiente'
   }
   const siguientePaso = (desde: number): number => {
@@ -278,12 +281,12 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const bloqueado = etapa === 'fuentes' ? invalidoF : etapa === 'subcajas' ? invalidoS : false
 
   /** Guarda el estado de UNA etapa en CONFIG (solo configuración del asistente: no toca dinero ni gastos). */
-  const persistir = (e: Etapa, valor: EstadoEtapa, textos: { pending: string; ok: string }, despues?: () => void) => {
+  const persistir = (e: Etapa, valor: EstadoEtapa, textos: { pending: string; ok: string }, despues?: () => void, silencioso = false) => {
     const ejecutar = () => store.track(`plan:${mes}:${e}`, { pending: textos.pending, ok: textos.ok, error: 'No se pudo guardar el avance de la planificación.' },
       () => {
         const et = etapasConLocal(e, valor)
         return store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
-      }, { retry: false, onDone: (ok, err) => {
+      }, { retry: false, silencioso, onDone: (ok, err) => {
         if (!ok) sinLocal(e)
         setFallo(f => { const x = { ...f }; if (ok) delete x[e]; else x[e] = { msg: err ?? 'No se pudo guardar el avance.', reintentar: ejecutar }; return x })
         if (ok) despues?.()
@@ -293,8 +296,9 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
 
   /** Vuelve del módulo hijo: el hijo ya verificó contra Sheets; aquí se guarda la etapa como completada. */
   const confirmarEtapa = (e: Etapa) => {
-    setHijo(null)
-    persistir(e, 1, { pending: 'Guardando el avance de la planificación…', ok: `${ETAPA_OK[e]} en ${nombreMes(mes)}.` })
+    // Nunca toca la navegación (ni `hijo` ni `paso`): el usuario puede estar ya en otra etapa o con otro módulo abierto.
+    // El aviso verde de éxito lo da la propia operación; este guardado del avance es silencioso (solo avisa si falla).
+    persistir(e, 1, { pending: '', ok: '' }, undefined, true)
   }
   const finBg = (e: Etapa) => setBg(b => { const x = { ...b }; delete x[e]; return x })
   const ctxPara = (e: Etapa): ContextoPlan => ({
@@ -302,7 +306,10 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
     onAplicado: () => { finBg(e); confirmarEtapa(e) },
     // Segundo plano: el módulo se cierra y el asistente sigue visible; la etapa queda «En progreso» hasta que Sheets confirme.
     onIniciado: () => { setFallo(f => { const x = { ...f }; delete x[e]; return x }); setBg(b => ({ ...b, [e]: true })); setHijo(null) },
-    onFallo: msg => { finBg(e); setFallo(f => ({ ...f, [e]: { msg, reintentar: () => abrirHijo(e) } })) },
+    onFallo: (msg, reintentar) => {
+      finBg(e)
+      setFallo(f => ({ ...f, [e]: { msg, reintentar: () => { setFallo(g => { const x = { ...g }; delete x[e]; return x }); if (reintentar) { setBg(b => ({ ...b, [e]: true })); reintentar() } else abrirHijo(e) } } }))
+    },
   })
   const abrirHijo = (e: Etapa) => {
     setHijo(e)
@@ -342,7 +349,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
         if (itF.length) { const fr = await store.actions.aplicarEntidadesMes('fuente', mes, itF); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'fuente', mes, itF); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.fuentes = 1 }
         if (itS.length) { const fr = await store.actions.aplicarEntidadesMes('subcaja', mes, itS); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'subcaja', mes, itS); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.subcajas = 1 }
         await store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
-      }, { retry: false, onDone: (ok, err) => { setFallo(f => { const x = { ...f }; if (ok) delete x.final; else x.final = { msg: err ?? 'No se pudo finalizar.', reintentar: ejecutar }; return x }); if (ok) onClose() } })
+      }, { retry: false, onDone: (ok, err) => { setFallo(f => { const x = { ...f }; if (ok) delete x.final; else x.final = { msg: err ?? 'No se pudo finalizar.', reintentar: ejecutar }; return x }); if (ok) setFinOk(true) } })
     ejecutar()
   }
 
@@ -354,9 +361,9 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const totalesTxt = (t: Record<string, number>) => { const k = Object.keys(t); return k.length ? k.map(m => money(t[m], m)).join(' + ') : '—' }
   const libre = (() => { const k = Object.keys(real.fuentes.totales); return k.length <= 1 && (k[0] ?? monedaBase) === monedaBase ? money((real.fuentes.totales[monedaBase] ?? 0) - real.subcajas.reservado, monedaBase) : '—' })()
 
-  const Guardando = ({ e }: { e: Etapa }) => bg[e] ? (
+  const Guardando = ({ e }: { e: Etapa }) => enCurso(e) ? (
     <div className="flex items-center gap-2 rounded-xl border border-navy/30 bg-primary-soft px-3 py-2 text-xs font-medium text-navy" role="status" data-testid={`bg-${e}`}>
-      <Loader2 className="size-3.5 animate-spin" /> Guardando {e === 'fuentes' ? 'las fuentes' : 'las subcajas'} en segundo plano… Puedes seguir con las demás etapas; esta pasará a «Completada» cuando Google Sheets lo confirme.
+      <Loader2 className="size-3.5 animate-spin" /> Guardando {e === 'fuentes' ? 'las fuentes' : e === 'subcajas' ? 'las subcajas' : 'los gastos'} en segundo plano… Puedes seguir navegando; esta pasará a «Completada» cuando Google Sheets lo confirme.
     </div>
   ) : null
   const Aviso = ({ e }: { e: Etapa | 'final' }) => fallo[e] ? (
@@ -382,13 +389,14 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   }
 
   return (
-    <Modal open onClose={onClose} bloqueado={hayOcupado} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fuentes, subcajas y gastos de este mes. Cada etapa se guarda cuando la confirmas." icon={<CalendarCheck2 className="size-5" />}
+    <Modal open onClose={onClose} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fuentes, subcajas y gastos de este mes. Cada etapa se guarda cuando la confirmas." icon={<CalendarCheck2 className="size-5" />}
       footer={<>
-        <Button variant="outline" onClick={() => setPaso(p => Math.max(0, p - 1))} disabled={paso === 0 || hayOcupado}><ChevronLeft className="size-4" /> Anterior</Button>
+        <Button variant="outline" onClick={() => setPaso(p => Math.max(0, p - 1))} disabled={paso === 0}><ChevronLeft className="size-4" /> Anterior</Button>
         {etapa && (plan.etapas[etapa] === 2
           ? <Button variant="ghost" onClick={() => retomar(etapa)} disabled={ocupado(etapa)}><RotateCcw className="size-4" /> Retomar etapa</Button>
           : <Button variant="ghost" onClick={omitir} disabled={ocupado(etapa)}><SkipForward className="size-4" /> Omitir</Button>)}
         {etapa ? <Button onClick={() => setPaso(siguientePaso(paso))} disabled={bloqueado}>{siguientePaso(paso) === 3 ? 'Revisar resumen' : 'Siguiente'} <ChevronRight className="size-4" /></Button>
+          : finOk && !itF.length && !itS.length ? <Button onClick={onClose} data-testid="cerrar-plan">Cerrar</Button>
           : <Button onClick={finalizar} disabled={ocupado('final') || hayBg || invalidoF || invalidoS} title={hayBg ? 'Espera a que termine el guardado en curso' : undefined}>{ocupado('final') && <Loader2 className="size-4 animate-spin" />} Finalizar planificación</Button>}
       </>}>
       <div className="space-y-4" data-testid="asistente-plan">
@@ -412,7 +420,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               <p className="text-sm font-semibold text-ink">¿Qué fuentes de dinero tendrás en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
                 <Button variant="outline" className="h-8 text-xs" onClick={() => setSelF(s => ({ ...s, ...Object.fromEntries(cf.filter(c => !c.aplicada && c.previo !== null).map(c => [c.id, { on: true, monto: String(c.previo) }])) }))}><Copy className="size-3.5" /> Usar mes anterior</Button>
-                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('fuentes')} disabled={!!bg.fuentes}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
+                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('fuentes')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
               </div>
             </div>
             <ListaSel cands={cf} sel={selF} setSel={setSelF} tipo="fuente" />
@@ -428,7 +436,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               <p className="text-sm font-semibold text-ink">¿Cuánto reservas en cada subcaja en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
                 <Button variant="outline" className="h-8 text-xs" onClick={() => setSelS(s => ({ ...s, ...Object.fromEntries(cs.filter(c => !c.aplicada && c.previo !== null).map(c => [c.id, { on: true, monto: String(c.previo) }])) }))}><Copy className="size-3.5" /> Usar mes anterior</Button>
-                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('subcajas')} disabled={!!bg.subcajas}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
+                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('subcajas')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
               </div>
             </div>
             <ListaSel cands={cs} sel={selS} setSel={setSelS} tipo="subcaja" />
@@ -439,6 +447,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
         {etapa === 'gastos' && (
           <div className="space-y-3">
             <Continuar e="gastos" />
+            <Guardando e="gastos" />
             <p className="text-sm font-semibold text-ink">Gastos de {nombreMes(mes)}</p>
             <p className="text-xs text-muted">Avanzar aquí <b>no registra ningún gasto</b>. Los compromisos mensuales se registran desde “Gastos mensuales”, donde ves cada uno antes de confirmar.</p>
             <div className="flex flex-wrap gap-2">

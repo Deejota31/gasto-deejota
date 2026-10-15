@@ -28,6 +28,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Corrección v1.20.3 — las operaciones en segundo plano ya no mueven al usuario
+
+Solo frontend (Code.gs sigue en 1.20.1).
+
+- **Causa:** al terminar una operación vieja, sus callbacks tocaban la navegación: cerraban el módulo abierto en ese momento (`setUi(null)` / `setPlantillasOpen(false)`), reponían el asistente (`setHijo(null)`) o lo cerraban (`onClose()` de Finalizar). Por eso, si ya estabas en otra etapa o en otro módulo, la pantalla de un paso anterior reaparecía.
+- **Ahora** los callbacks de fin de operación solo actualizan estado y notificaciones: nunca abren, cierran ni redirigen. Quien navega es siempre el usuario.
+- **Gastos mensuales** (desde el asistente) y **Finalizar** también guardan en segundo plano: el módulo se cierra al confirmar, la etapa muestra «En progreso» con indicador y, al terminar, pasa a «Completada»/«Finalizada» con aviso verde. Si falla, la etapa muestra «Error» con «Reintentar» (misma operación idempotente, sin duplicar).
+- Se puede cerrar el asistente mientras guarda y reabrirlo: el estado «En progreso» se deduce de las operaciones en curso del store. Se pueden lanzar varias operaciones a la vez.
+- Al finalizar, el asistente permanece en el Resumen («Finalizada») con un botón «Cerrar»; ya no se cierra solo. El guardado del avance tras confirmar es silencioso (un solo aviso verde, el de la operación).
+- Fuera del asistente (desde Cajas) Gastos mensuales conserva su registro en primer plano.
+
 ## Novedades v1.20.2 — aplicar en segundo plano desde «Prepara tu mes»
 
 Solo frontend (Code.gs sigue en 1.20.1).

@@ -57,7 +57,7 @@ export function usePlantillasFin(store: AppStore, hoyMes: string) {
     <>
       {ui && <PlantillasFinModal key={ui.key} store={store} tipo={ui.tipo} inicio={ui.inicio} hoyMes={ui.ctx?.mes ?? hoyMes} ctx={ui.ctx}
         onClose={() => { const c = ui.ctx; setUi(null); c?.onCerrar() }}
-        onAplicado={r => { const c = ui.ctx; setUi(null); c?.onAplicado(r) }}
+        onAplicado={r => { ui.ctx?.onAplicado(r) }}   // jamás cierra ni cambia el módulo abierto ahora: solo avisa al asistente
         onSegundoPlano={() => { const c = ui.ctx; setUi(null); c?.onIniciado?.() }} />}
       {yaExiste && (
         <Modal open onClose={() => setYaExiste(null)} size="sm" title="Ya existe una plantilla" icon={<Info className="size-5" />}
@@ -231,7 +231,8 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
   const lanzar = (ps: PlantillaFin[]) => {
     if (!enPlan) { aplicar(ps, 'aplicar'); return }
     onSegundoPlano?.()
-    aplicar(ps, 'aplicar', (ok, err) => { if (ok) onAplicado?.({ mes, n: ps.length }); else ctx?.onFallo?.(err ?? 'No se pudo confirmar la operación.') })
+    const ejecutar = (): void => { aplicar(ps, 'aplicar', (ok, err) => { if (ok) onAplicado?.({ mes, n: ps.length }); else ctx?.onFallo?.(err ?? 'No se pudo confirmar la operación.', ejecutar) }) }
+    ejecutar()
   }
   const aplicarFila = (ps: PlantillaFin[]) => lanzar(ps)
   // Mientras se guarda no se cierra el módulo (Escape, X o clic fuera): evita perder el resultado de un guardado crítico.

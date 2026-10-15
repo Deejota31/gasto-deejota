@@ -371,15 +371,15 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
    * (misma clave) ya está en curso, para evitar envíos duplicados.
    * Una operación en curso no sobrevive a recargar o cerrar la pestaña: no es una cola persistente.
    */
-  const track = useCallback((key: string, msg: OpMessages, fn: () => Promise<unknown>, extra?: { retry?: boolean; onErrorActions?: ToastAction[]; onDone?: (ok: boolean, error?: string) => void }): boolean => {
+  const track = useCallback((key: string, msg: OpMessages, fn: () => Promise<unknown>, extra?: { retry?: boolean; onErrorActions?: ToastAction[]; onDone?: (ok: boolean, error?: string) => void; silencioso?: boolean }): boolean => {
     if (inflight.current.has(key)) { showToast('info', 'Esa operación ya se está guardando.'); return false }
     inflight.current.add(key)
     setPending(new Set(inflight.current))
-    const id = showToast('pending', msg.pending)
+    const id = extra?.silencioso ? -1 : showToast('pending', msg.pending)   // silencioso: sin avisos de progreso/éxito (solo errores)
     const done = () => { inflight.current.delete(key); setPending(new Set(inflight.current)) }
     fn().then(() => {
       done()
-      if (quiet.current) dismiss(id); else updateToast(id, 'success', msg.ok)
+      if (extra?.silencioso) { /* sin aviso */ } else if (quiet.current) dismiss(id); else updateToast(id, 'success', msg.ok)
       extra?.onDone?.(true)
     }, (e: unknown) => {
       done()
