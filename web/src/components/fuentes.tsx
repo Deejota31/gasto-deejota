@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
-  Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Search, Star, Trash2, X,
+  Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Plus, Search, Star, Trash2, X,
 } from 'lucide-react'
 import { aislaDesde, fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel, todayIn } from '../lib/dates'
@@ -138,6 +138,15 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
           <AlertTriangle className="size-4 shrink-0" />
           <span className="min-w-0 flex-1">El presupuesto ya es la suma de fuentes: la caja general ({money(Math.round(general!.presupuesto * 100))}/mes) dejó de sumar. Si ese dinero sigue siendo tuyo, pásalo a una fuente.</span>
           <Button variant="outline" className="h-8 text-xs" disabled={store.pending.has('fuentes:migrar')} onClick={migrar}>Crear fuente General</Button>
+        </div>
+      )}
+
+      {!fuentes.length && !mesVacio && (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line px-4 py-10 text-center" data-testid="vacio-fuentes">
+          <span className="grid size-12 place-items-center rounded-2xl" style={{ background: TONO.info.bg, color: TONO.info.fg }}><CircleDollarSign className="size-6" /></span>
+          <p className="text-sm font-semibold text-ink">Aún no tienes fuentes</p>
+          <p className="max-w-md text-xs text-muted">Registra de dónde viene tu dinero (General, Sodexo, un extra…): cada fuente suma al presupuesto del mes en que la apliques.</p>
+          <div className="mt-1"><Button onClick={() => abrir(null)}><Plus className="size-4" /> Crear mi primera fuente</Button></div>
         </div>
       )}
 

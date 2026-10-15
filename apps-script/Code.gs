@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.19.2';
+var APP_VERSION = '1.19.3';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',

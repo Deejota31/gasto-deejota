@@ -1234,6 +1234,11 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
   test('sin fuentes: sigue la caja general; migrar crea General con el mismo importe (idempotente) y no convierte Sodexo', async ({ page }) => {
     await page.goto('/?demo=60#cajas')
     await expect(page.getByTestId('sin-fuentes')).toBeVisible()
+    // estado vacío igual al de subcajas, con acción para crear la primera fuente
+    await expect(page.getByTestId('vacio-fuentes')).toContainText('Aún no tienes fuentes')
+    await page.getByRole('button', { name: 'Crear mi primera fuente' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
     const p0 = await cons(page, 'presupuesto-consolidado')
     expect(p0).toBe(7000)
     await page.getByRole('button', { name: /Crear fuente General con/ }).click()
@@ -1241,6 +1246,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await expect(page.getByRole('list', { name: 'Lista de fuentes' }).getByTestId('fuente')).toHaveCount(1)
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(p0)                     // ningún mes cambia
     await expect(page.getByRole('button', { name: /Crear fuente General/ })).toHaveCount(0)
+    await expect(page.getByTestId('vacio-fuentes')).toHaveCount(0)            // con una fuente ya no se muestra
     expect((await calls(page)).migrarGeneralAFuente).toBe(1)
   })
 

@@ -42,6 +42,10 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 
 - **Error "ID de caja supera 40 caracteres"** al aplicar plantillas de subcajas (una o todas): el ID de la subcaja que nace de una plantilla (`c-` + `pf-`+UUID = 41) excedía el límite de 40. Ahora el ID siempre cabe (`c-`+UUID = 38) y es estable: aplicar de nuevo no duplica.
 
+### v1.19.3
+
+- **Fuentes de dinero:** cuando no hay fuentes se muestra un estado vacío igual al de Subcajas («Aún no tienes fuentes» + botón *Crear mi primera fuente*).
+
 ### Corrección v1.19.2 (una sola hoja de plantillas)
 
 - **Todas las plantillas viven en `PLANTILLAS_FINANCIERAS`**, distinguidas por la columna *Tipo*: `fuente`, `subcaja` y `gasto` (gastos mensuales). Se añadió la columna **`Datos`** (JSON propio de cada tipo; en `gasto`: `{ambito, categoria, subcategoria, tipoGasto, esCompromiso, esRecurrente}`). El estado Aplicada/Omitida por mes de fuentes y subcajas sigue en *Estados*.
