@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { aggregate, type Aggregates } from './engine'
+import { aggregate, aislaDesde, type Aggregates } from './engine'
 import { ratesFromConfig } from './money'
 import type { AppData, Filters } from './types'
 
@@ -12,6 +12,6 @@ export function useAgregado(data: AppData | null | undefined, filters: Filters, 
   const gastos = data?.gastos, config = data?.config, cajas = data?.cajas, presupuestos = data?.presupuestos
   const fuentes = data?.fuentes, fuentesMeses = data?.fuentesMeses
   return useMemo(() => gastos && config && cajas && presupuestos ? aggregate(gastos, filters, {
-    base: config.moneda || 'PEN', rates: ratesFromConfig(config), today, cajas, presupuestos, fuentes: fuentes ?? [], fuentesMeses: fuentesMeses ?? [],
+    base: config.moneda || 'PEN', rates: ratesFromConfig(config), today, cajas, presupuestos, fuentes: fuentes ?? [], fuentesMeses: fuentesMeses ?? [], aislarDesde: aislaDesde(config),
   }) : null, [gastos, config, cajas, presupuestos, fuentes, fuentesMeses, filters, today])
 }

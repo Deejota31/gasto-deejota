@@ -1174,10 +1174,17 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)
   })
 
-  test('por mes: Extra 1 no se arrastra; ajustar General solo en noviembre no cambia octubre', async ({ page }) => {
+  test('por mes: noviembre empieza vacío (v1.19), se copia de octubre sin Extra 1; ajustar General solo en noviembre no cambia octubre ni diciembre', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3#cajas')
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(0)                     // nada se arrastra solo
+    await expect(page.getByTestId('vacio-mes-fuente')).toContainText('No tienes fuentes configuradas para noviembre')
+    await page.getByTestId('vacio-mes-fuente').getByRole('button', { name: 'Copiar configuración del mes anterior' }).click()
+    const c = dialog(page)
+    await expect(c).toContainText('Usar fuentes del mes anterior')
+    await c.getByRole('button', { name: /^Aplicar \d+ a noviembre/i }).click()
+    await expect(c).toHaveCount(0)
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)                  // Extra 1 era solo de octubre
     await fuente(page, 'General').getByRole('button', { name: 'Editar fuente General' }).click()
     const d = dialog(page)
@@ -1190,7 +1197,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)                  // octubre intacto
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)                  // diciembre: importe habitual
+    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(0)                     // diciembre: aún sin preparar
   })
 
   test('nueva fuente: valida, suma sin tocar General, doble clic no duplica y no bloquea la navegación', async ({ page }) => {

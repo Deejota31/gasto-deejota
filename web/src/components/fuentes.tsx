@@ -3,7 +3,7 @@ import {
   AlertTriangle, ArrowDown, ArrowUp, Banknote, CalendarDays, CalendarRange, CircleDollarSign, CreditCard,
   Copy, FilePlus2, Info, LayoutGrid, List, Pencil, Search, Star, Trash2, X,
 } from 'lucide-react'
-import { fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
+import { aislaDesde, fuenteMontoMes, type CajasResumen, type FuenteResumen } from '../lib/engine'
 import { monthLabel, todayIn } from '../lib/dates'
 import { normName } from '../lib/orden'
 import { fuenteLook, medioLook } from '../lib/visual'
@@ -13,6 +13,7 @@ import { dependenciasFuente } from '../lib/dependencias'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
 import { BotonEditar, BotonMensual, BotonNuevo, Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
 import { Combobox } from './Combobox'
+import { VacioMes, type PlanificacionApi } from './Planificacion'
 import { MonthPicker } from './DatePicker'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
 import { guardarPref, leerPref } from '../lib/prefs'
@@ -37,12 +38,16 @@ const recurrenciaTxt = (f: Fuente) => f.recurrencia === 'unica' ? `Solo ${f.mes 
 
 export const FUENTE_GENERAL_ID = 'fuente-general'
 
-export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantillas }: {
-  plantillas: ReturnType<typeof usePlantillasFin>; store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
+export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantillas, plan }: {
+  plan: PlanificacionApi; plantillas: ReturnType<typeof usePlantillasFin>; store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
 }) {
   const data = store.data!
-  const fuentes = c.fuentes.lista
-  const todas = useMemo(() => fuentes.map(r => r.fuente), [fuentes])
+  // v1.19: en un mes con aislamiento solo se listan las fuentes aplicadas a ese mes; el resto sigue existiendo y se aplica desde la planificación.
+  const todasLasFuentes = c.fuentes.lista
+  const fuentes = useMemo(() => todasLasFuentes.filter(r => r.aplicada), [todasLasFuentes])
+  const ocultas = todasLasFuentes.length - fuentes.length
+  const mesVacio = !!mes && mes >= aislaDesde(data.config) && !fuentes.length
+  const todas = useMemo(() => todasLasFuentes.map(r => r.fuente), [todasLasFuentes])
   const [q, setQ] = useState('')
   const [estado, setEstado] = useState<'todas' | 'activas' | 'inactivas'>('todas')
   const [vista, setVistaState] = useState<'grid' | 'lista'>(() => leerPref('deejota.vista.fuentes', ['grid', 'lista'] as const, 'lista'))
@@ -52,8 +57,8 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
   const [borrar, setBorrar] = useState<FuenteResumen | null>(null)
   const [desactivar, setDesactivar] = useState<FuenteResumen | null>(null)
   const general = c.general
-  const migrada = fuentes.some(r => r.fuente.id === FUENTE_GENERAL_ID)
-  const puedeMigrar = !!general && general.presupuesto > 0 && !migrada && !fuentes.some(r => normName(r.fuente.nombre) === 'general')
+  const migrada = todasLasFuentes.some(r => r.fuente.id === FUENTE_GENERAL_ID)
+  const puedeMigrar = !!general && general.presupuesto > 0 && !migrada && !todasLasFuentes.some(r => normName(r.fuente.nombre) === 'general')
   const muchas = fuentes.length > 4
   const term = normName(q)
   const visibles = fuentes
@@ -63,7 +68,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
   // Con muchas fuentes se ven las primeras 6 (o todas al buscar/filtrar o al pedirlo): la página no se vuelve eterna en el móvil.
   const LIMITE = 6
   const mostradas = filtrando || verTodas ? visibles : visibles.slice(0, LIMITE)
-  const ids = fuentes.map(r => r.fuente.id)
+  const ids = todasLasFuentes.map(r => r.fuente.id)
 
   const abrir = (fuente: Fuente | null) => setForm({ fuente, key: Date.now() })
   const clonar = (fuente: Fuente) => setForm({ fuente: null, clonDe: fuente, key: Date.now() })
@@ -76,8 +81,8 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
       () => store.actions.reorderFuentes(xs), { retry: false })
   }
   // Arrastrar y soltar: solo con la lista completa (sin búsqueda, filtros ni "ver menos"); guarda UNA vez al soltar.
-  const puedeArrastrar = !filtrando && mostradas.length === fuentes.length && fuentes.length > 1
-  const motivoNoArrastrar = filtrando ? 'Quita la búsqueda y los filtros para reordenar' : mostradas.length < fuentes.length ? 'Muestra todas las fuentes para reordenar' : 'Se necesitan al menos dos fuentes'
+  const puedeArrastrar = !filtrando && ocultas === 0 && mostradas.length === fuentes.length && fuentes.length > 1
+  const motivoNoArrastrar = ocultas > 0 ? 'Hay fuentes sin aplicar a este mes' : filtrando ? 'Quita la búsqueda y los filtros para reordenar' : mostradas.length < fuentes.length ? 'Muestra todas las fuentes para reordenar' : 'Se necesitan al menos dos fuentes'
   const dnd = useReorden({ ids, habilitado: puedeArrastrar, nombre: id => fuentes.find(r => r.fuente.id === id)?.fuente.nombre ?? 'Fuente',
     onCommit: xs => store.track('fuentes:orden', { pending: 'Guardando el orden…', ok: 'Orden de fuentes guardado.', error: 'No se pudo guardar el orden de las fuentes. Se restauró el anterior.' },
       () => store.actions.reorderFuentes(xs), { retry: false }) })
@@ -116,6 +121,9 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
         </div>
       </div>
 
+      {mesVacio && c.origen === 'fuentes' && (
+        <div className="mb-4"><VacioMes tipo="fuente" mes={mes!} nOcultas={ocultas} onConfigurar={() => abrir(null)} onPlantillas={() => plantillas.abrir('fuente')} onAnterior={() => plan.usarAnterior('fuente', mes!)} /></div>
+      )}
       {c.origen === 'caja-general' && (
         <div className="mb-4 rounded-2xl px-4 py-3 text-sm" style={{ background: TONO.info.bg, color: TONO.info.fg }} data-testid="sin-fuentes">
           <p className="flex items-start gap-2"><Info className="mt-0.5 size-4 shrink-0" />
@@ -196,7 +204,7 @@ export function FuentesSeccion({ store, c, mes, money, periodo, hoyMes, plantill
         </div>
       )}
 
-      {form && <FuenteForm key={form.key} store={store} fuente={form.fuente} clonDe={form.clonDe ?? null} fuentes={fuentes.map(r => r.fuente)} meses={data.fuentesMeses ?? []} mes={mes} hoyMes={hoyMes}
+      {form && <FuenteForm key={form.key} store={store} fuente={form.fuente} clonDe={form.clonDe ?? null} fuentes={todasLasFuentes.map(r => r.fuente)} meses={data.fuentesMeses ?? []} mes={mes} hoyMes={hoyMes}
         monedas={monedasDe(data.config)} medios={data.medios.map(m => m.nombre)} primera={c.origen === 'caja-general'} general={general ? Math.round(general.presupuesto * 100) : 0} money={money} onClose={() => setForm(null)} />}
       {borrar && <BorrarFuente store={store} r={borrar} data={data} money={money} onClose={() => setBorrar(null)} onDesactivar={() => { const x = borrar; setBorrar(null); if (x.fuente.activo) alternar(x) }} />}
       {desactivar && <DesactivarFuente r={desactivar} c={c} money={money} periodo={periodo} onClose={() => setDesactivar(null)}
@@ -421,6 +429,7 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
     const cambiaImporteMes = editar && !!mes && !esMesBase && actualMes !== null && n !== actualMes.monto
     const orden = fuente?.orden ?? Math.max(0, ...fuentes.map(f => f.orden)) + 1
     const base = { id, nombre: nombre.trim(), monto: editar && !esMesBase ? fuente!.monto : n, moneda, color, icono: '', activo, orden, recurrencia, mes: mesAplic, medioPago: medio }
+    const mesAplicacion = MES_RE.test(mesAplic) ? mesAplic : mesRef
     const cambiaConfig = !editar || JSON.stringify({ ...fuente, creadoEn: undefined, actualizadoEn: undefined }) !== JSON.stringify({ ...fuente, ...base, creadoEn: undefined, actualizadoEn: undefined })
     const msgMes = cambiaImporteMes ? (modo === 'desde' ? ` Importe desde ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.` : ` Importe de ${monthLabel(mes!, true)}: ${money(Math.round(n * 100))}.`) : ''
     const ok = store.track(`fuente:${id}`, editar
@@ -428,6 +437,8 @@ function FuenteForm({ store, fuente, clonDe = null, fuentes, meses, mes, hoyMes,
       : { pending: `Creando ${base.nombre}…`, ok: activo ? `${base.nombre} creada: suma ${money(Math.round(n * 100))} ${recurrencia === 'unica' ? `en ${monthLabel(mesAplic, true)}` : 'al mes'}.` : `${base.nombre} creada inactiva: no suma al presupuesto hasta que la actives.`, error: `No se pudo crear ${base.nombre}.` },
     async () => {
       if (cambiaConfig) await store.actions.saveFuente(base)
+      // v1.19: una fuente nueva se aplica de forma explícita al mes elegido (cada mes tiene sus propias fuentes aplicadas).
+      if (!editar && recurrencia === 'mensual' && activo && mesAplicacion >= aislaDesde(store.data?.config)) await store.actions.aplicarEntidadesMes('fuente', mesAplicacion, [{ id, monto: n }])
       if (cambiaImporteMes) await store.actions.saveFuenteMes({ fuenteId: id, mes: mes!, monto: n, modo: recurrencia === 'unica' ? 'solo' : modo })
     })
     if (ok) onClose()

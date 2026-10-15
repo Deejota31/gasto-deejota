@@ -260,7 +260,7 @@ export function Modal({ open, onClose, title, subtitle, icon, children, footer, 
   )
 }
 
-export function ErrorBox({ message, onRetry, tone = 'error' }: { message: ReactNode; onRetry?: () => void; tone?: 'error' | 'warning' }) {
+export function ErrorBox({ message, onRetry, tone = 'error', action }: { message: ReactNode; onRetry?: () => void; tone?: 'error' | 'warning'; action?: { label: string; onClick: () => void } }) {
   const cls = tone === 'error'
     ? 'border-danger/30 bg-danger-soft text-danger'
     : 'border-warning/30 bg-warning-soft text-warning'
@@ -269,6 +269,7 @@ export function ErrorBox({ message, onRetry, tone = 'error' }: { message: ReactN
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
       <span className="flex-1">{message}</span>
       {onRetry && <button className="font-semibold underline" onClick={() => onRetry()}>Reintentar</button>}
+      {action && <button type="button" className="font-semibold underline" onClick={action.onClick}>{action.label}</button>}
     </div>
   )
 }

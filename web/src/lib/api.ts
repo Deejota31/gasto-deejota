@@ -310,6 +310,10 @@ export function createApi(t: Transport) {
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]): Promise<PlantillaFin[]> {
       return parse(z.object({ plantillas: z.array(plantillaFinRow) }), await t('aplicarPlantillasFin', { mes, items })).plantillas.map(toPlantillaFin)
     },
+    /** Aplica fuentes o subcajas existentes a UN mes (copiar mes anterior, nueva fuente/subcaja del mes). Idempotente. */
+    async aplicarEntidadesMes(tipo: 'fuente' | 'subcaja', mes: string, items: { id: string; monto: number }[]): Promise<void> {
+      await t('aplicarEntidadesMes', { tipo, mes, items })
+    },
     async deleteFuente(id: string): Promise<void> {
       await t('deleteFuente', { id })
     },

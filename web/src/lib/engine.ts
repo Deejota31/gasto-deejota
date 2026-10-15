@@ -28,6 +28,8 @@ export interface Ctx {
   presupuestos: Presupuesto[]
   fuentes?: Fuente[]
   fuentesMeses?: FuenteMes[]
+  /** Mes de corte del aislamiento mensual (ver aislaDesde). Sin valor = comportamiento histórico. */
+  aislarDesde?: string
 }
 
 export interface Item { name: string; cents: number; count: number }
@@ -35,7 +37,7 @@ export interface SubItem extends Item { categoria: string; subcategoria: string;
 /** Subcategoría identificada por ámbito + categoría + subcategoría: "Otros" de dos categorías o ámbitos nunca se mezclan. */
 export interface RankSub extends SubItem { ambito: string }
 export interface DayPoint { date: string; label: string; diario: number; acumulado: number | null; ideal: number | null; proyeccion: number | null }
-export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; count: number; disponible: number; pct: number | null; excedido: boolean }
+export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; count: number; disponible: number; pct: number | null; excedido: boolean; /** ¿Aplicada explícitamente en el período? (false = solo plantilla/definición: no reserva dinero) */ aplicada: boolean }
 export interface CajasResumen {
   general: Caja | null
   presupuesto: number        // P
@@ -74,6 +76,8 @@ export interface FuenteResumen {
   sinTipoCambio: boolean
   /** Algún mes del período tiene un importe propio (FUENTES_MESES). */
   ajustado: boolean
+  /** ¿Aplicada al período (importe del mes o fuente de ese mes)? false = solo definición: no suma dinero */
+  aplicada: boolean
 }
 export interface FuentesResumen {
   lista: FuenteResumen[]
@@ -175,31 +179,51 @@ export function cajaMatches(c: Caja, g: Pick<Gasto, 'ambito' | 'categoria' | 'su
 
 
 /** Presupuesto de una caja para un mes: el de PRESUPUESTOS si existe; si no, el de la caja. */
-export function budgetCents(caja: Caja, periodo: string, presupuestos: Presupuesto[]): number {
+export function budgetCents(caja: Caja, periodo: string, presupuestos: Presupuesto[], aislar?: string): number {
   const override = presupuestos.find(p => p.periodo === periodo && p.cajaId === caja.id)
+  // Aislamiento mensual (v1.19): desde el mes de corte, una subcaja solo reserva en los meses donde se aplicó explícitamente.
+  if (!override && aislar && periodo >= aislar && caja.filtroCampo !== 'Todos') return 0
   return Math.round((override ? override.monto : caja.presupuesto) * 100)
 }
 
+/**
+ * Mes desde el cual fuentes y subcajas NO se trasladan solas de un mes a otro (v1.19). Antes de ese mes se conserva el
+ * comportamiento histórico (así los meses ya vividos no cambian ni un centavo); desde ese mes cuenta solo lo aplicado
+ * explícitamente (FUENTES_MESES modo 'solo' / PRESUPUESTOS). Configurable en CONFIG → aislamiento_desde ('9999-12' = apagado).
+ */
+export const AISLAMIENTO_DEFECTO = '2026-11'
+export const aislaDesde = (config?: Record<string, string>): string => /^\d{4}-\d{2}$/.test(config?.aislamiento_desde ?? '') ? config!.aislamiento_desde : AISLAMIENTO_DEFECTO
+/** ¿Esta subcaja tiene una aplicación explícita en el mes? (en meses anteriores al corte, siempre cuenta como aplicada) */
+export const cajaAplicada = (caja: Caja, periodo: string, presupuestos: Presupuesto[], aislar?: string) =>
+  !aislar || periodo < aislar || caja.filtroCampo === 'Todos' || presupuestos.some(p => p.periodo === periodo && p.cajaId === caja.id)
+
 /** Presupuesto de una caja para un rango: suma de los meses que toca (meses completos). */
-export function budgetForRange(caja: Caja, desde: string, hasta: string, presupuestos: Presupuesto[]): number {
-  return monthsInRange(desde, hasta).reduce((s, p) => s + budgetCents(caja, p, presupuestos), 0)
+export function budgetForRange(caja: Caja, desde: string, hasta: string, presupuestos: Presupuesto[], aislar?: string): number {
+  return monthsInRange(desde, hasta).reduce((s, p) => s + budgetCents(caja, p, presupuestos, aislar), 0)
 }
 
 /**
  * Importe de una fuente para un mes, en su moneda: un importe "solo ese mes" manda; si no, el último "desde" vigente
  * (solo fuentes mensuales); si no, el importe habitual (mensual: desde su mes de aplicación; única: solo en su mes).
  */
-export function fuenteMontoMes(f: Fuente, mes: string, meses: FuenteMes[]): { monto: number; ajustado: boolean } {
+export function fuenteMontoMes(f: Fuente, mes: string, meses: FuenteMes[], aislar?: string): { monto: number; ajustado: boolean; aplicada: boolean } {
   let solo: FuenteMes | undefined, desde: FuenteMes | undefined
+  if (aislar && mes >= aislar) {
+    // Aislamiento mensual: solo cuenta lo aplicado a ESE mes (importe "solo ese mes") o una fuente de un único mes.
+    const s = meses.find(m => m.fuenteId === f.id && m.modo === 'solo' && m.mes === mes)
+    if (s) return { monto: s.monto, ajustado: true, aplicada: true }
+    const propia = f.recurrencia === 'unica' && mes === f.mes
+    return { monto: propia ? f.monto : 0, ajustado: false, aplicada: propia }
+  }
   for (const m of meses) {
     if (m.fuenteId !== f.id) continue
     if (m.modo === 'solo' && m.mes === mes) solo = m
     else if (m.modo === 'desde' && m.mes <= mes && (!desde || m.mes > desde.mes)) desde = m
   }
-  if (solo) return { monto: solo.monto, ajustado: true }
-  if (f.recurrencia === 'unica') return { monto: mes === f.mes ? f.monto : 0, ajustado: false }
-  if (desde) return { monto: desde.monto, ajustado: true }
-  return { monto: !f.mes || mes >= f.mes ? f.monto : 0, ajustado: false }
+  if (solo) return { monto: solo.monto, ajustado: true, aplicada: true }
+  if (f.recurrencia === 'unica') return { monto: mes === f.mes ? f.monto : 0, ajustado: false, aplicada: true }
+  if (desde) return { monto: desde.monto, ajustado: true, aplicada: true }
+  return { monto: !f.mes || mes >= f.mes ? f.monto : 0, ajustado: false, aplicada: true }
 }
 
 export const ordenFuentes = (fs: Fuente[]) => [...fs].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
@@ -237,11 +261,11 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const meses = monthsInRange(f.desde, f.hasta)
   const fMeses = ctx.fuentesMeses ?? []
   const fResumen: FuenteResumen[] = fuentes.map(fu => {
-    let monto = 0, ajustado = false
-    for (const m of meses) { const x = fuenteMontoMes(fu, m, fMeses); monto += x.monto; ajustado ||= x.ajustado }
+    let monto = 0, ajustado = false, aplicada = false
+    for (const m of meses) { const x = fuenteMontoMes(fu, m, fMeses, ctx.aislarDesde); monto += x.monto; ajustado ||= x.ajustado; aplicada ||= x.aplicada }
     const cents = toBaseCents(monto, fu.moneda, ctx.base, ctx.rates)
     const asignado = cents ?? 0
-    return { fuente: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado }
+    return { fuente: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado, aplicada }
   })
   // Una fuente puede tener 0, 1 o varios medios y varias fuentes pueden compartir un medio: el grupo de un medio son
   // sus fuentes en el orden definido por el usuario (el medio no es una clave).
@@ -343,11 +367,11 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const origen = fResumen.length ? 'fuentes' as const : 'caja-general' as const
   for (const r of fResumen) { r.disponible = r.aporta - r.gastado; r.pct = percent(r.gastado, r.aporta) }
   const totalFuentes = fResumen.reduce((s, r) => s + r.aporta, 0)
-  const P = origen === 'fuentes' ? totalFuentes : general ? budgetForRange(general, f.desde, f.hasta, ctx.presupuestos) : 0
+  const P = origen === 'fuentes' ? totalFuentes : general ? budgetForRange(general, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde) : 0
   const subResumen: SubcajaResumen[] = subcajas.map((caja, i) => {
-    const asignado = budgetForRange(caja, f.desde, f.hasta, ctx.presupuestos)
+    const asignado = budgetForRange(caja, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde)
     const gastado = subGastado[i]
-    return { caja, asignado, gastado, count: subCount[i], disponible: asignado - gastado, pct: percent(gastado, asignado), excedido: gastado > asignado }
+    return { caja, asignado, gastado, count: subCount[i], disponible: asignado - gastado, pct: percent(gastado, asignado), excedido: gastado > asignado, aplicada: meses.some(m => cajaAplicada(caja, m, ctx.presupuestos, ctx.aislarDesde)) }
   })
   const R = subResumen.reduce((s, x) => s + x.asignado, 0)
   const Gs = subResumen.reduce((s, x) => s + x.gastado, 0)

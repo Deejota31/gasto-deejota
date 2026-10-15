@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { configurarExcepciones } from './lib/texto'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { useAppData } from './lib/store'
 import { Skeleton } from './components/ui'
@@ -17,6 +18,8 @@ import { todayIn } from './lib/dates'
 import type { Filters } from './lib/types'
 import Gastos from './tabs/Gastos'
 import Catalogo from './tabs/Categorias'
+import { usePlanificacion } from './components/Planificacion'
+import { usePlantillasFin } from './components/PlantillasFin'
 import Configuracion, { APP_VERSION } from './tabs/Configuracion'
 
 // Recharts es la dependencia más pesada: el Dashboard se carga aparte para que Gastos abra rápido.
@@ -38,6 +41,9 @@ export default function App({ api }: { api?: Api }) {
   const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number }>(false)
   const tz = store.data?.config.zona_horaria || 'America/Lima'
   const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
+  // Planificación mensual (v1.19): campana, asistente y resumen globales. Las plantillas se abren desde el asistente.
+  const plantillasApp = usePlantillasFin(store, today.slice(0, 7))
+  const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: () => setPlantillasOpen({ key: Date.now() }), onPlantillas: t => plantillasApp.abrir(t), onConfigurar: () => irATab('config') })
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
   const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
 
@@ -59,6 +65,7 @@ export default function App({ api }: { api?: Api }) {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+  useEffect(() => { configurarExcepciones(store.data?.config.desc_excepciones) }, [store.data?.config.desc_excepciones])
   useEffect(() => { document.documentElement.dataset.theme = store.data?.config.tema === 'oscuro' ? 'dark' : 'light' }, [store.data?.config.tema])
   const notify = (m: string) => { if (store.data?.config.notificaciones !== 'false') showToast('success', m) }
 
@@ -123,22 +130,22 @@ export default function App({ api }: { api?: Api }) {
 
   const contenido = (
     <>
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
-        {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} /></Suspense>}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard plan={plan} store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
+        {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} plan={plan} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
           foco={foco} onVolverFoco={foco ? () => irATab(foco.desde) : undefined} />}
         {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}
           onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
           onRevisarGasto={g => { setFoco({ id: g.id, desde: 'salud' }); setTab('gastos'); if (!g.problemaId) openGasto('edit', g) }} /></Suspense>}
         {tab === 'catalogo' && <Catalogo store={store} />}
-        {tab === 'config' && <Configuracion store={store} conn={conn} onConnect={setConn} notify={notify} goCatalogo={() => setTab('catalogo')} />}
+        {tab === 'config' && <Configuracion plan={plan} hoy={today} store={store} conn={conn} onConnect={setConn} notify={notify} goCatalogo={() => setTab('catalogo')} />}
     </>
   )
 
   return (
     <div className="min-h-dvh">
       <AppShell tab={tab} onTab={irATab} headerRef={headerRef} avisos={avisos}
-        acciones={{ loading: store.loading, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo }}>
+        acciones={{ loading: store.loading, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo, campana: plan.campana }}>
         {contenido}
       </AppShell>
 
@@ -147,6 +154,8 @@ export default function App({ api }: { api?: Api }) {
       {plantillasOpen && <PlantillasModal key={plantillasOpen.key} store={store} draft={plantillasOpen.draft} onClose={() => setPlantillasOpen(false)}
         onUse={p => { setPlantillasOpen(false); openGasto('create', null, undefined, p) }}
         onReopen={draft => { setModal(null); setPlantillasOpen({ draft, key: Date.now() }) }} />}
+      {plan.nodo}
+      {plantillasApp.nodo}
       {conexionAbierta && <ConexionModal conn={conn} onConnect={setConn} onClose={() => setConexionAbierta(false)} />}
       <Toaster />
     </div>

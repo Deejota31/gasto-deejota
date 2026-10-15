@@ -1,4 +1,4 @@
-import { aggregate, cajaMatches } from './engine'
+import { aggregate, aislaDesde, cajaMatches } from './engine'
 import { ratesFromConfig } from './money'
 import type { AppData, Caja, Filters, Fuente, Plantilla } from './types'
 
@@ -20,7 +20,7 @@ export function dependenciasFuente(f: Fuente, data: AppData, today: string): Dep
   const fechas = vivos.map(g => g.fecha).sort()
   const a = aggregate(data.gastos, filtroTotal(fechas[0], fechas.at(-1)! > today ? fechas.at(-1)! : today), {
     base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today, cajas: data.cajas, presupuestos: data.presupuestos,
-    fuentes: data.fuentes ?? [], fuentesMeses: data.fuentesMeses ?? [],
+    fuentes: data.fuentes ?? [], fuentesMeses: data.fuentesMeses ?? [], aislarDesde: aislaDesde(data.config),
   })
   const r = a.cajas.fuentes.lista.find(x => x.fuente.id === f.id)
   // En la cascada un gasto se cuenta en la primera fuente que toma parte; las siguientes solo reciben el excedente (gastado > 0).

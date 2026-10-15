@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.17.0';
+var APP_VERSION = '1.19.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var SHEETS = {
@@ -374,7 +374,8 @@ var CONFIG_INICIAL = [
   ['formato_fecha', 'dd/MM/yyyy'],
   ['tema', 'claro'],
   ['notificaciones', 'true'],
-  ['refresco_segundos', '300']   // actualización automática de la web (0 = desactivada)
+  ['refresco_segundos', '300'],  // actualización automática de la web (0 = desactivada)
+  ['desc_excepciones', '']       // marcas/expresiones con escritura propia para las descripciones, separadas por coma
 ];
 
 var TIPOS_GASTO = ['Fijo', 'Variable', 'Extraordinario'];
@@ -825,6 +826,7 @@ var ACTIONS = {
   deletePlantillaFin: deletePlantillaFin_,
   reorderPlantillasFin: reorderPlantillasFin_,
   aplicarPlantillasFin: aplicarPlantillasFin_,
+  aplicarEntidadesMes: aplicarEntidadesMes_,
   deleteFuente: deleteFuente_,
   migrarGeneralAFuente: migrarGeneralAFuente_,
   completarVacios: completarVacios_,
@@ -1117,7 +1119,7 @@ function saveCaja_(p) {
   var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
   if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
   var row = [id, text_(p.nombre, 'Nombre', 40, true), amount_(p.presupuesto, true), campo, campo === 'Todos' ? 'Todos' : valor,
-    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden), activo, text_(p.descripcion, 'Descripción', 200, false), icono || 'auto'];
+    /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', num_(p.orden), activo, descText_(p.descripcion, false), icono || 'auto'];
   var sh = cajasSheet_();
   var n = Math.max(lastDataRow_(sh) - 1, 0);
   var rows = n ? sh.getRange(2, 1, n, SHEETS.CAJAS.length).getValues() : [];
@@ -1263,7 +1265,7 @@ function savePlantillaFin_(p) {
   }
   var now = new Date().toISOString(), prev = idx >= 0 ? rows[idx] : null;
   if (prev && str_(prev[1]) !== tipo) throw appError_('VALIDATION', 'No se puede cambiar el tipo de una plantilla.');
-  var row = [id, tipo, nombre, monto, moneda, medios || 'Libre', campo, valor, text_(p.descripcion, 'Descripción', 200, false),
+  var row = [id, tipo, nombre, monto, moneda, medios || 'Libre', campo, valor, descText_(p.descripcion, false),
     /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', icono || 'auto', recurrencia, activo,
     prev ? num_(prev[13]) : (p.orden === undefined ? maxOrden + 1 : num_(p.orden)), prev && origen === '' ? str_(prev[14]) : origen,
     prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now];
@@ -1301,17 +1303,34 @@ function reorderPlantillasFin_(p) {
 }
 
 // Importe efectivo de una fuente en un mes (misma regla que la web: "solo" manda; luego "desde"; luego el habitual).
-function fuenteMontoMesGs_(f, mes, meses) {
+// Mes de corte del aislamiento mensual (CONFIG → aislamiento_desde; por defecto 2026-11). Igual que aislaDesde() en engine.ts.
+var AISLAMIENTO_DEFECTO_ = '2026-11';
+function aislarDesde_() {
+  try {
+    var sh = openSpreadsheet_(false).getSheetByName('CONFIG');
+    var idx = sh ? findRowByValue_(sh, 1, 'aislamiento_desde') : 0;
+    var v = idx ? String(sh.getRange(idx, 2).getValue() || '').trim() : '';
+    return /^\d{4}-\d{2}$/.test(v) ? v : AISLAMIENTO_DEFECTO_;
+  } catch (e) { return AISLAMIENTO_DEFECTO_; }
+}
+
+function fuenteMontoMesGs_(f, mes, meses, aislar) {
   var solo = null, desde = null;
   meses.forEach(function (m) {
     if (m[0] !== f[0]) return;
     if (m[3] === 'solo' && m[1] === mes) solo = m;
     else if (m[3] === 'desde' && m[1] <= mes && (!desde || m[1] > desde[1])) desde = m;
   });
-  if (solo) return { monto: solo[2], solo: solo[2] };
-  if (f[8] === 'unica') return { monto: mes === f[9] ? f[2] : 0, solo: null };
-  if (desde) return { monto: desde[2], solo: null };
-  return { monto: !f[9] || mes >= f[9] ? f[2] : 0, solo: null };
+  if (aislar && mes >= aislar) {
+    // Desde el corte solo cuenta lo aplicado a ESE mes (importe "solo") o una fuente de un único mes.
+    if (solo) return { monto: solo[2], solo: solo[2], aplicada: true };
+    var propia = f[8] === 'unica' && mes === f[9];
+    return { monto: propia ? f[2] : 0, solo: null, aplicada: propia };
+  }
+  if (solo) return { monto: solo[2], solo: solo[2], aplicada: true };
+  if (f[8] === 'unica') return { monto: mes === f[9] ? f[2] : 0, solo: null, aplicada: true };
+  if (desde) return { monto: desde[2], solo: null, aplicada: true };
+  return { monto: !f[9] || mes >= f[9] ? f[2] : 0, solo: null, aplicada: true };
 }
 
 function pfIdSeguro_(prefijo, id) { return (prefijo + String(id).replace(/[^A-Za-z0-9_-]/g, '')).slice(0, 60); }
@@ -1333,6 +1352,7 @@ function aplicarPlantillasFin_(p) {
   var sh = plantillasFinSheet_();
   var rows = pfRows_(sh), porId = {};
   rows.forEach(function (r, i) { if (str_(r[0])) porId[str_(r[0])] = i; });
+  var aislar = aislarDesde_();
   var vistos = {};
   var plan = items.map(function (it) {
     var id = text_(it.id, 'ID de plantilla', 64, true);
@@ -1400,9 +1420,9 @@ function aplicarPlantillasFin_(p) {
           fRows = fuentesRows_(fSh);
         }
         var f = fuenteOut_(fRows.filter(function (x) { return str_(x[0]) === origen; })[0]);
-        var ms = mesesRows(), ef = fuenteMontoMesGs_(f, mes, ms);
+        var ms = mesesRows(), ef = fuenteMontoMesGs_(f, mes, ms, aislar);
         prev = ef.solo;
-        if (Math.round(it.monto * 100) !== Math.round(ef.monto * 100)) { saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: it.monto }); w = true; }
+        if (Math.round(it.monto * 100) !== Math.round(ef.monto * 100) || !ef.aplicada) { saveFuenteMes_({ fuenteId: origen, mes: mes, modo: 'solo', monto: it.monto }); w = true; }
       } else {
         if (!origen || !cRows.some(function (x) { return str_(x[0]) === origen; })) {
           origen = pfIdSeguro_('c-', r[0]);
@@ -1412,9 +1432,9 @@ function aplicarPlantillasFin_(p) {
           cRows = cSh.getRange(2, 1, Math.max(lastDataRow_(cSh) - 1, 0) || 1, SHEETS.CAJAS.length).getValues();
         }
         var caja = cRows.filter(function (x) { return str_(x[0]) === origen; })[0];
-        var previo = pres(origen), efc = previo === null ? num_(caja[2]) : previo;
+        var previo = pres(origen), aisl = mes >= aislar, efc = previo === null ? (aisl ? 0 : num_(caja[2])) : previo;
         prev = previo;
-        if (Math.round(it.monto * 100) !== Math.round(efc * 100)) { savePresupuesto_({ periodo: mes, cajaId: origen, monto: it.monto }); w = true; }
+        if (Math.round(it.monto * 100) !== Math.round(efc * 100) || (aisl && previo === null)) { savePresupuesto_({ periodo: mes, cajaId: origen, monto: it.monto }); w = true; }
       }
       est[mes] = { e: 'aplicada', m: it.monto, w: w, p: prev };
       r[14] = origen;
@@ -1427,6 +1447,47 @@ function aplicarPlantillasFin_(p) {
     salida.push(pfOut_(r));
   });
   return { mes: mes, plantillas: salida };
+}
+
+/**
+ * Aplica fuentes o subcajas EXISTENTES a un mes (Usar mes anterior, Nueva fuente/subcaja del mes, asistente). Sin plantilla.
+ * Items: [{ id, monto }] (id = ID de la fuente o subcaja). Idempotente: si el mes ya tiene ese importe no escribe nada.
+ * Todo o nada en la validación. No toca otros meses, gastos ni la definición de la entidad.
+ */
+function aplicarEntidadesMes_(p) {
+  var tipo = str_(p.tipo) === 'subcaja' ? 'subcaja' : str_(p.tipo) === 'fuente' ? 'fuente' : '';
+  if (!tipo) throw appError_('VALIDATION', 'Tipo inválido.');
+  var mes = str_(p.mes);
+  if (!MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes inválido (AAAA-MM).');
+  var items = Array.isArray(p.items) ? p.items : [];
+  if (!items.length || items.length > 60) throw appError_('VALIDATION', 'Selecciona entre 1 y 60 elementos.');
+  var ss = openSpreadsheet_(false), aislar = aislarDesde_();
+  var fRows = tipo === 'fuente' ? fuentesRows_(fuentesSheets_().fuentes) : [];
+  var cSh = ss.getSheetByName('CAJAS');
+  var cRows = tipo === 'subcaja' && cSh ? cSh.getRange(2, 1, Math.max(lastDataRow_(cSh) - 1, 0) || 1, SHEETS.CAJAS.length).getValues() : [];
+  var vistos = {};
+  var plan = items.map(function (it) {
+    var id = text_(it.id, 'ID', 64, true);
+    if (vistos[id]) throw appError_('VALIDATION', 'Elemento repetido en la solicitud.');
+    vistos[id] = true;
+    var fila = (tipo === 'fuente' ? fRows : cRows).filter(function (x) { return str_(x[0]) === id; })[0];
+    if (!fila) throw appError_('NOT_FOUND', 'Una ' + tipo + ' ya no existe. Actualiza los datos.');
+    return { id: id, fila: fila, monto: amount_(it.monto, true) };
+  });
+  var escritas = 0;
+  var ms = tipo === 'fuente' ? readRows_(ss, 'FUENTES_MESES').map(function (x) { return [str_(x[0]), periodo_(x[1], tz_()), num_(x[2]), str_(x[3]) === 'desde' ? 'desde' : 'solo']; }) : [];
+  var presRows = tipo === 'subcaja' ? readRows_(ss, 'PRESUPUESTOS').filter(function (x) { return periodo_(x[0], tz_()) === mes; }) : [];
+  plan.forEach(function (it) {
+    if (tipo === 'fuente') {
+      var f = fuenteOut_(it.fila), ef = fuenteMontoMesGs_(f, mes, ms, aislar);
+      if (Math.round(it.monto * 100) !== Math.round(ef.monto * 100) || !ef.aplicada) { saveFuenteMes_({ fuenteId: it.id, mes: mes, modo: 'solo', monto: it.monto }); escritas++; }
+    } else {
+      var previo = presRows.filter(function (x) { return str_(x[1]) === it.id; })[0];
+      var aisl = mes >= aislar, efc = previo ? num_(previo[2]) : (aisl ? 0 : num_(it.fila[2]));
+      if (Math.round(it.monto * 100) !== Math.round(efc * 100) || (aisl && !previo)) { savePresupuesto_({ periodo: mes, cajaId: it.id, monto: it.monto }); escritas++; }
+    }
+  });
+  return { tipo: tipo, mes: mes, aplicadas: plan.length, escritas: escritas };
 }
 
 /* ===================== Datos de prueba (julio–septiembre 2026) ===================== */
@@ -1986,14 +2047,33 @@ function completarVacios_(p) {
   return res;
 }
 
+// Claves de planificación mensual y recordatorios (v1.19): se guardan en CONFIG, sin hojas nuevas. Formato validado aquí.
+function validarClavePlan_(clave, valor) {
+  var ok = false, m;
+  if (clave === 'plan_activo') ok = valor === 'true' || valor === 'false';
+  else if (clave === 'plan_dia') ok = /^([1-9]|[12]\d|3[01])$/.test(valor);
+  else if (clave === 'aislamiento_desde') ok = /^\d{4}-(0[1-9]|1[0-2])$/.test(valor);
+  else if ((m = clave.match(/^plan_dias_(\d{4})$/))) {
+    ok = /^([1-9]|[12]\d|3[01]):[01](,([1-9]|[12]\d|3[01]):[01]){11}$/.test(valor);
+    if (ok) valor.split(',').forEach(function (x, i) {
+      var largo = new Date(Date.UTC(Number(m[1]), i + 1, 0)).getUTCDate();
+      if (Number(x.split(':')[0]) > largo) ok = false;
+    });
+  } else if (/^plan_est_\d{4}-(0[1-9]|1[0-2])$/.test(clave)) ok = /^[pecd]\|[012]{3}\|(\d{4}-\d{2}-\d{2})?$/.test(valor);
+  else throw appError_('VALIDATION', 'Clave de configuración no permitida.');
+  if (!ok) throw appError_('VALIDATION', 'Valor inválido para ' + clave + '.');
+}
+
 function saveConfig_(p) {
   var allowed = CONFIG_INICIAL.map(function (r) { return r[0]; });
-  if (allowed.indexOf(p.clave) < 0) throw appError_('VALIDATION', 'Clave de configuración no permitida.');
   var valor = text_(p.valor, 'Valor', 200, false);
+  if (allowed.indexOf(p.clave) < 0) validarClavePlan_(String(p.clave), valor);
+
   if (p.clave === 'zona_horaria') {
     try { Utilities.formatDate(new Date(), valor, 'yyyy'); } catch (e) { throw appError_('VALIDATION', 'Zona horaria inválida (ej. America/Lima).'); }
     TZ_ = null;
   }
+  if (p.clave === 'desc_excepciones') DESC_EXC_CACHE_ = null;
   var sh = openSpreadsheet_(false).getSheetByName('CONFIG');
   var idx = findRowByValue_(sh, 1, p.clave);
   if (idx) sh.getRange(idx, 2).setValue(valor); else appendRows_(sh, [[p.clave, valor]]);
@@ -2296,7 +2376,7 @@ function savePlantilla_(p) {
   var ambito = text_(p.ambito, 'Ámbito', 40, true);
   var categoria = text_(p.categoria, 'Categoría', 60, true);
   var sub = text_(p.subcategoria, 'Subcategoría', 60, true);
-  var desc = text_(p.descripcion, 'Descripción', 200, true);
+  var desc = descText_(p.descripcion, true);
   var monto = (p.monto === '' || p.monto === null || p.monto === undefined) ? '' : amount_(p.monto, true); // vacío o >= 0
   var moneda = str_(p.moneda) || 'PEN';
   if (!/^[A-Z]{3}$/.test(moneda)) throw appError_('VALIDATION', 'Moneda inválida.');
@@ -2695,7 +2775,7 @@ function validateGasto_(p) {
     moneda: moneda,
     categoria: text_(p.categoria, 'Categoría', 60, true),
     subcategoria: text_(p.subcategoria, 'Subcategoría', 60, false),
-    descripcion: text_(p.descripcion, 'Descripción', 200, false),
+    descripcion: descText_(p.descripcion, false),
     medio: text_(p.medioPago, 'Medio de pago', 40, true),
     tipo: tipo,
     ambito: text_(p.ambito, 'Ámbito', 40, true),
@@ -2721,6 +2801,73 @@ function text_(v, label, max, required) {
   if (s.length > max) throw appError_('VALIDATION', label + ' supera ' + max + ' caracteres.');
   return safeCell_(s);
 }
+
+
+/* ===================== Normalización de descripciones (v1.19) =====================
+ * Misma regla que web/src/lib/texto.ts (formatearDescripcion). Prioridad: 1) excepciones de marca/expresión,
+ * 2) primera palabra, 3) palabras secundarias en minúscula, 4) mayúscula inicial. Idempotente. Solo se aplica a lo que se
+ * escribe ahora (creaciones y ediciones); nunca reescribe registros históricos. */
+var DESC_MINUSCULAS_ = ['de', 'la', 'que', 'el', 'en', 'y', 'a', 'los', 'se', 'del', 'las', 'un', 'por', 'con', 'no', 'una', 'su', 'para', 'al', 'lo', 'como', 'más', 'o', 'pero', 'sus', 'le', 'me', 'si', 'sin', 'sobre', 'este', 'ya', 'entre', 'cuando', 'todo', 'esta', 'son', 'también', 'hasta', 'desde', 'mi', 'porque', 'qué', 'nos', 'ni', 'uno', 'donde', 'cada', 'e', 'otro', 'te', 'otros', 'aunque', 'esa', 'eso', 'otra', 'tan', 'durante', 'tanto', 'ella', 'él', 'yo', 'tú', 'tu', 'tus', 'mis', 'nuestro', 'nuestra', 'nuestros', 'nuestras', 'suyo', 'suya', 'suyos', 'suyas', 'aquel', 'aquella', 'aquellos', 'aquellas', 'estos', 'estas', 'ese', 'esos', 'esas', 'aquello', 'unas', 'unos', 'algo', 'alguien', 'nadie', 'nada', 'cual', 'cuáles', 'quien', 'quienes', 'cuyo', 'cuya', 'cuyos', 'cuyas', 'hacia', 'según'];
+var DESC_EXCEPCIONES_BASE_ = ['ChatGPT', 'Google', 'YouTube', 'HBO', 'SOAT', 'Netflix', 'Spotify', 'Yape', 'Plin', 'USD', 'PEN', 'API', 'WiFi',   'iPhone', 'iPad', 'Claude', 'Cluely', 'Crunchyroll', 'Sodexo', 'KFC', 'BCP', 'BBVA', 'Interbank', 'Uber', 'Cabify', 'Rappi',   'PedidosYa', 'Amazon', 'Disney+', 'WhatsApp', 'iCloud', 'IGV', 'SUNAT', 'papa a la Huancaina'];
+var DESC_EXC_CACHE_ = null;
+
+function descExcepciones_() {
+  if (DESC_EXC_CACHE_ !== null) return DESC_EXC_CACHE_;
+  var extra = [];
+  try {
+    var sh = openSpreadsheet_(false).getSheetByName('CONFIG');
+    var idx = sh ? findRowByValue_(sh, 1, 'desc_excepciones') : 0;
+    if (idx) extra = String(sh.getRange(idx, 2).getValue() || '').split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+  } catch (e) { extra = []; }
+  DESC_EXC_CACHE_ = DESC_EXCEPCIONES_BASE_.concat(extra);
+  return DESC_EXC_CACHE_;
+}
+
+function descPartir_(palabra) {
+  var m = palabra.match(/^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}+]*)$/u);
+  return m ? { pre: m[1], core: m[2], post: m[3] } : { pre: '', core: '', post: palabra };
+}
+
+function descCapitalizar_(core, inicio) {
+  if (/\p{N}/u.test(core)) return core;
+  return core.split(/([-/])/).map(function (seg, i) {
+    if (seg === '-' || seg === '/' || !seg) return seg;
+    var lower = seg.toLowerCase();
+    if (!(inicio && i === 0) && DESC_MINUSCULAS_.indexOf(lower) >= 0) return lower;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }).join('');
+}
+
+function normalizarDescripcion_(texto) {
+  var limpio = String(texto === null || texto === undefined ? '' : texto).trim().replace(/\s+/g, ' ');
+  if (!limpio) return '';
+  var toks = limpio.split(' ').map(descPartir_);
+  var fijo = toks.map(function () { return undefined; });
+  var ex = descExcepciones_().map(function (e) { return e.trim().split(/\s+/); }).filter(function (w) { return w[0]; })
+    .sort(function (a, b) { return b.length - a.length; });
+  for (var i = 0; i < toks.length; i++) {
+    if (fijo[i] !== undefined || !toks[i].core) continue;
+    for (var j = 0; j < ex.length; j++) {
+      var e = ex[j];
+      if (i + e.length > toks.length) continue;
+      var ok = true;
+      for (var k = 0; k < e.length; k++) {
+        if (fijo[i + k] !== undefined || toks[i + k].core.toLowerCase() !== e[k].toLowerCase()) { ok = false; break; }
+      }
+      if (ok) { for (var k2 = 0; k2 < e.length; k2++) fijo[i + k2] = e[k2]; break; }
+    }
+  }
+  var primera = true;
+  return toks.map(function (t, i) {
+    if (!t.core) return t.pre + t.post;
+    var out = fijo[i] !== undefined ? fijo[i] : descCapitalizar_(t.core, primera);
+    primera = false;
+    return t.pre + out + t.post;
+  }).join(' ');
+}
+
+// Descripción lista para guardar: normalizada y validada como cualquier texto.
+function descText_(v, required) { return text_(normalizarDescripcion_(str_(v)), 'Descripción', 200, required); }
 
 // Evita que un texto se interprete como fórmula en Sheets (inyección de fórmulas).
 function safeCell_(s) { return /^[=+\-@]/.test(s) ? "'" + s : s; }
