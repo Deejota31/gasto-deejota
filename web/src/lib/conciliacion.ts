@@ -208,6 +208,47 @@ export const ESTADO_VISUAL_TXT: Record<EstadoVisual, string> = {
   positiva: 'Diferencia positiva', negativa: 'Diferencia negativa', pendiente: 'Pendiente de verificación', desactualizada: 'Datos desactualizados',
 }
 
+/* ---------------- Resumen de un período (panel y tarjeta de Salud financiera) ---------------- */
+
+export interface FilaResumen { g: GrupoFondos; v: Verificacion | undefined; calc: number | null; stale: boolean; dif: number | null; estado: EstadoVisual }
+
+/** Única fuente de verdad del estado de la conciliación: la usan el panel completo y la tarjeta resumen. Solo lee, nunca escribe. */
+export function resumenConciliacion(data: AppData, periodo: string, corte: string, today: string) {
+  const tz = data.config.zona_horaria || 'America/Lima'
+  const conc = data.conciliaciones
+  const grupos = gruposDeTrabajo(conc)
+  const vs = verificaciones(conc)
+  const saldo = calcularSaldos(data, periodo, corte, today, grupos)
+  // Saldo calculado HOY para el corte de cada verificación vigente: si difiere de su foto, la verificación está desactualizada.
+  const cache = new Map<string, SaldoCalculado>()
+  const actualDe = (v: Verificacion): number | null => {
+    const fecha = fechaEnTz(v.corte, tz), k = `${v.periodo}|${fecha}`
+    let s = cache.get(k)
+    if (!s) { s = calcularSaldos(data, v.periodo, fecha, today, grupos); cache.set(k, s) }
+    return s.porGrupo[v.grupoId] ?? null
+  }
+  const filas: FilaResumen[] = grupos.map(g => {
+    const v = vigentePorGrupo(vs, periodo, g.id)
+    const calc = saldo.porGrupo[g.id] ?? null
+    const stale = v ? estaDesactualizada(v, actualDe(v)) : false
+    const dif = v?.diferencia ?? null
+    const estado: EstadoVisual = !saldo.calculable || (calc === null && !v) ? 'insuficiente' : !v ? 'sin_verificar' : stale ? 'desactualizada' : visualDe(dif ?? 0)
+    return { g, v, calc, stale, dif, estado }
+  })
+  const verificadas = filas.filter(f => f.v)
+  const sumaReal = verificadas.reduce((s, f) => s + (f.v!.real ?? 0), 0)
+  const sumaDif = verificadas.reduce((s, f) => s + (f.v!.diferencia ?? 0), 0)
+  const sumaCalcSnap = verificadas.reduce((s, f) => s + (f.v!.calculado ?? 0), 0)
+  const pendientes = verificadas.filter(f => signoDe(f.v!.diferencia ?? 0) !== 'cero' && f.v!.estadoEfectivo !== 'cerrada_justificada')
+  const sumaPendiente = pendientes.reduce((s, f) => s + (f.v!.diferencia ?? 0), 0)
+  const algunaStale = verificadas.some(f => f.stale)
+  const ultima = vs.find(v => !v.corregidaPor)
+  const ultimaDelPeriodo = verificadas.map(f => f.v!).sort((a, b) => b.corte.localeCompare(a.corte))[0]
+  const estadoGlobal: EstadoVisual = !saldo.calculable ? 'insuficiente' : !verificadas.length ? 'sin_verificar' : algunaStale ? 'desactualizada' : pendientes.length ? 'pendiente' : 'conciliado'
+  const estadoDif: EstadoVisual = !verificadas.length ? 'sin_verificar' : algunaStale ? 'desactualizada' : visualDe(sumaDif)
+  return { grupos, vs, saldo, actualDe, filas, verificadas, sumaReal, sumaDif, sumaCalcSnap, sumaPendiente, algunaStale, ultima, ultimaDelPeriodo, estadoGlobal, estadoDif }
+}
+
 /* ---------------- Exportación ---------------- */
 
 export function historialCsv(vs: Verificacion[], tz: string, formato: string): string {

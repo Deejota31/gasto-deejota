@@ -13,6 +13,8 @@ async function abrir(page: Page, ruta = '/?demo=60&fuentes=3&cajas=3&latencia=0#
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
   await page.clock.setFixedTime(new Date(OCT))
   await page.goto(ruta)
+  // v1.22.1: la conciliación es la quinta tarjeta de Salud financiera; su panel solo aparece al seleccionarla.
+  await page.getByRole('tab', { name: /Conciliación de saldos/ }).click({ timeout: 8000 })
   await expect(page.getByTestId('conciliacion')).toBeVisible()
 }
 const abrirNueva = async (page: Page) => { await page.getByTestId('conc-nueva').click(); await expect(page.getByTestId('conc-modal')).toBeVisible() }
@@ -26,6 +28,56 @@ async function verificar(page: Page, delta: number, obs = '') {
   await expect(page.getByTestId('conc-modal')).toHaveCount(0)
   return calc
 }
+
+test.describe('v1.22.1 conciliación como quinta tarjeta', () => {
+  const tabs = ['Calidad de datos', 'Mi presupuesto', 'Evolución', 'Compromisos', 'Conciliación de saldos']
+  test('cinco tarjetas; un solo panel de detalle; conciliación solo al seleccionarla', async ({ page }) => {
+    await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
+    await page.clock.setFixedTime(new Date(OCT))
+    await page.goto('/?demo=60&fuentes=3&cajas=3&latencia=0#salud')
+    const lista = page.getByRole('tablist', { name: 'Vistas de salud financiera' })
+    await expect(lista.getByRole('tab')).toHaveCount(5)
+    for (const t of tabs) await expect(lista.getByRole('tab', { name: new RegExp(t) })).toBeVisible()
+    await expect(page.getByTestId('conciliacion')).toHaveCount(0)
+    for (const t of [...tabs, ...tabs.slice(0, 4).reverse()]) {
+      await lista.getByRole('tab', { name: new RegExp(t) }).click()
+      await expect(lista.getByRole('tab', { name: new RegExp(t) })).toHaveAttribute('aria-selected', 'true')
+      await expect(lista.locator('[aria-selected="true"]')).toHaveCount(1)
+      await expect(page.getByRole('tabpanel')).toHaveCount(1)
+      await expect(page.getByTestId('conciliacion')).toHaveCount(t === 'Conciliación de saldos' ? 1 : 0)
+    }
+  })
+  test('la tarjeta resume el estado real: sin verificar → pendiente con diferencia → conciliado', async ({ page }) => {
+    await abrir(page)
+    const valor = page.getByTestId('salud-valor-conciliacion')
+    await expect(valor).toHaveText('Sin verificar')
+    await verificar(page, 12.5)
+    await expect(valor).toContainText('+')
+    await expect(valor).toContainText('12.50')
+    await verificar(page, 0)
+    await expect(valor).toContainText('0.00')
+    await expect(page.getByRole('tab', { name: /Conciliación de saldos/ })).toContainText('Saldos conciliados')
+  })
+  test('persiste al cambiar de módulo y volver; los filtros globales se conservan y el alcance se explica', async ({ page }) => {
+    await abrir(page)
+    await expect(page.getByTestId('conc-alcance')).toBeVisible()
+    await page.evaluate(() => { location.hash = '#gastos' })
+    await expect(page.getByRole('heading', { name: 'Movimientos' })).toBeVisible()
+    await page.evaluate(() => { location.hash = '#salud' })
+    await expect(page.getByTestId('conciliacion')).toHaveCount(1)
+  })
+  for (const [w, h] of [[1920, 1080], [1366, 768], [820, 1180], [390, 844], [360, 800]] as const) {
+    test(`responsive ${w}x${h}: cinco tarjetas sin scroll horizontal`, async ({ page }) => {
+      await page.setViewportSize({ width: w, height: h })
+      await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
+      await page.goto('/?demo=60&fuentes=3&cajas=3&latencia=0#salud')
+      await expect(page.getByRole('tab')).toHaveCount(5)
+      await page.getByRole('tab', { name: /Conciliación de saldos/ }).click()
+      await expect(page.getByTestId('conciliacion')).toBeVisible()
+      expect(await sinScrollH(page)).toBe(true)
+    })
+  }
+})
 
 test.describe('v1.22 conciliación de saldos', () => {
   test('la sección aparece en Salud financiera con tres indicadores y sin saldo verificado todavía', async ({ page }) => {

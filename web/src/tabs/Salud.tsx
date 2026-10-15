@@ -6,7 +6,6 @@ import type { Filters, Gasto } from '../lib/types'
 import SaludFinanciera from '../components/SaludFinanciera'
 import { FilterBar } from '../components/shared'
 import { Empty, ErrorBox, InfoTooltip, Skeleton } from '../components/ui'
-import { Conciliacion } from '../components/conciliacion/Conciliacion'
 
 /**
  * Pestaña Salud financiera. Usa los mismos datos en memoria y el mismo filtro global que Dashboard y Gastos
@@ -53,17 +52,15 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
           </div>
         )}
       </div>
-      {data && (data.gastos.length > 0 || (data.fuentes?.length ?? 0) > 0 || (data.conciliaciones?.length ?? 0) > 0) && (
-        <Conciliacion store={store} today={today} onRevisarGastos={onConcRevisarGastos} onNuevoGasto={onConcNuevoGasto} onIrFuentes={onConcIrFuentes} />
-      )}
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={gastos} />
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
-      {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 ? (
+      {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 && !(data?.fuentes?.length) && !(data?.conciliaciones?.length) ? (
         <div className="rounded-2xl border border-line bg-card" data-testid="salud-sin-datos">
           <Empty icon={<HeartPulse className="size-5" />} title="Todavía no hay información disponible">Registra gastos para que se calcule tu salud financiera.</Empty>
         </div>
       ) : (
-        <SaludFinanciera store={store} a={a} filters={filters} today={today} onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales} />
+        <SaludFinanciera store={store} a={a} filters={filters} today={today} onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales}
+          onConcRevisarGastos={onConcRevisarGastos} onConcNuevoGasto={onConcNuevoGasto} onConcIrFuentes={onConcIrFuentes} />
       )}
     </div>
   )

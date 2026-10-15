@@ -28,6 +28,10 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.22.1 — Conciliación de saldos como quinta tarjeta
+
+Salud financiera ahora tiene cinco tarjetas de navegación (Calidad de datos · Mi presupuesto · Evolución · Compromisos · **Conciliación de saldos**). El panel de conciliación ya no aparece encima: solo se muestra al seleccionar su tarjeta, usando el mismo mecanismo de pestañas. La tarjeta resume el estado real (Sin verificar / diferencia pendiente / conciliado / desactualizada) con la misma función que el panel (`resumenConciliacion`). La conciliación usa su propio período y fecha de corte; los filtros globales se conservan pero no se aplican a saldos (se explica en el panel). Solo frontend: `Code.gs` sigue en 1.22.0.
+
 ## Novedades v1.22.0 — Salud financiera → Conciliación de saldos
 
 Compara **lo que Deejota calcula que deberías tener** con **lo que realmente tienes** y te ayuda a investigar la diferencia. **Nunca crea ingresos, gastos ni ajustes** para cuadrar saldos.
