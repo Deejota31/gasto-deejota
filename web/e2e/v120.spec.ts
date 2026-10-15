@@ -155,7 +155,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
     await expect(page.getByTestId('asistente-plan')).toBeVisible()
     await page.keyboard.press('Escape')
-    expect(await nFuentes(page)).toBe(n + 1)                                   // solo se sumó «Extra QA»; «Sueldo QA» no se duplicó                                       // sin duplicados
+    await expect.poll(() => nFuentes(page)).toBe(n + 1)                        // se sumó «Extra QA» (en segundo plano); «Sueldo QA» no se duplicó
   })
 
   test('acceso independiente (desde Cajas) no abre ni vuelve al asistente', async ({ page }) => {
@@ -183,16 +183,57 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     expect(await llamadas(page, 'aplicarEntidadesMes')).toBe(1)
   })
 
-  test('respuesta lenta: En progreso mientras guarda, el cierre queda bloqueado en el módulo hijo', async ({ page }) => {
+  test('segundo plano: el módulo se cierra al confirmar, el asistente sigue usable y la etapa pasa a Completada sola', async ({ page }) => {
     await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=900#cajas')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
     await aplicarFilaFuente(page, 'Sueldo QA')
-    await page.keyboard.press('Escape')                                         // Escape durante el guardado no cierra el módulo
-    await expect(page.getByTestId('pf-lista')).toBeVisible()
+    // De inmediato: sin módulo ni confirmaciones encimadas, asistente visible con la etapa En progreso.
     await expect(page.getByTestId('asistente-plan')).toBeVisible()
+    await expect(page.getByTestId('pf-lista')).toHaveCount(0)
+    await expect(estado(page, 'fuentes')).toHaveText('En progreso')
+    await expect(page.getByTestId('bg-fuentes')).toBeVisible()
+    await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
+    // Mientras guarda se puede seguir con el resto (aquí: omitir Subcajas) y Finalizar queda bloqueado.
+    await page.getByTestId('etapa-subcajas').click()
+    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
+    await expect(estado(page, 'subcajas')).toHaveText('Omitida')
     await expect(estado(page, 'fuentes')).toHaveText('Completada')
+    await expect(page.getByTestId('bg-fuentes')).toHaveCount(0)
+    expect(await llamadas(page, 'aplicarPlantillasFin')).toBe(1)
+  })
+
+  test('segundo plano con aplicación múltiple (vista previa): se cierra todo y se completa sin duplicar', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&latencia=600#cajas')
+    await sembrarPlantillas(page)
+    await abrirAsistente(page)
+    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
+    await dialog(page).getByRole('button', { name: /Seleccionar todas/ }).click()
+    await dialog(page).getByRole('button', { name: /^Aplicar \d+ a / }).click()
+    await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
+    await expect(page.getByTestId('pf-vista-previa')).toHaveCount(0)
+    await expect(page.getByTestId('pf-lista')).toHaveCount(0)
+    await expect(estado(page, 'fuentes')).toHaveText('En progreso')
+    await expect(estado(page, 'fuentes')).toHaveText('Completada')
+    await expect(page.getByTestId('ok-fuentes')).toBeVisible()
+    expect(await llamadas(page, 'aplicarPlantillasFin')).toBe(1)
+  })
+
+  test('segundo plano con error: la etapa pasa a Error con Reintentar, nada queda aplicado ni marcado', async ({ page }) => {
+    await abrir(page, '/?demo=60&fuentes=3&cajas=3&falla=aplicar#cajas')
+    await sembrarPlantillas(page)
+    const antes = await nFuentes(page)
+    await abrirAsistente(page)
+    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
+    await aplicarFilaFuente(page, 'Sueldo QA')
+    await expect(page.getByTestId('asistente-plan')).toBeVisible()
+    await expect(estado(page, 'fuentes')).toHaveText('Error')
+    await expect(page.getByTestId('error-fuentes')).toBeVisible()
+    await expect(page.getByTestId('ok-fuentes')).toHaveCount(0)
+    expect(await nFuentes(page)).toBe(antes)
+    await page.getByTestId('error-fuentes').getByRole('button', { name: /Reintentar/ }).click()   // reabre el módulo para volver a intentarlo
+    await expect(page.getByTestId('pf-lista')).toBeVisible()
   })
 
   test('error del backend: sin éxito falso, estado Error visible y nada aplicado', async ({ page }) => {

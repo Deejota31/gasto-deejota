@@ -57,7 +57,8 @@ export function usePlantillasFin(store: AppStore, hoyMes: string) {
     <>
       {ui && <PlantillasFinModal key={ui.key} store={store} tipo={ui.tipo} inicio={ui.inicio} hoyMes={ui.ctx?.mes ?? hoyMes} ctx={ui.ctx}
         onClose={() => { const c = ui.ctx; setUi(null); c?.onCerrar() }}
-        onAplicado={r => { const c = ui.ctx; setUi(null); c?.onAplicado(r) }} />}
+        onAplicado={r => { const c = ui.ctx; setUi(null); c?.onAplicado(r) }}
+        onSegundoPlano={() => { const c = ui.ctx; setUi(null); c?.onIniciado?.() }} />}
       {yaExiste && (
         <Modal open onClose={() => setYaExiste(null)} size="sm" title="Ya existe una plantilla" icon={<Info className="size-5" />}
           footer={<>
@@ -105,9 +106,9 @@ const BADGE = {
 
 type Vista = { kind: 'lista' } | { kind: 'form'; plantilla: PlantillaFin | null; origenId?: string; existente?: boolean; clonDe?: PlantillaFin }
 
-export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, onAplicado }: {
+export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, onAplicado, onSegundoPlano }: {
   store: AppStore; tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; hoyMes: string; onClose: () => void
-  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void
+  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
 }) {
   const data = store.data
   const T = TXT[tipo]
@@ -136,7 +137,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
   }
   return (
     <>
-      <ListaPlantillas store={store} tipo={tipo} items={todas} hoyMes={hoyMes} onClose={onClose} ctx={ctx} onAplicado={onAplicado}
+      <ListaPlantillas store={store} tipo={tipo} items={todas} hoyMes={hoyMes} onClose={onClose} ctx={ctx} onAplicado={onAplicado} onSegundoPlano={onSegundoPlano}
         onForm={(plantilla, extra) => setVista({ kind: 'form', plantilla, ...extra })} onBorrar={setBorrar} />
       {borrar && (
         <Modal open onClose={() => setBorrar(null)} size="sm" title="Eliminar plantilla" icon={<Trash2 className="size-5" />}
@@ -157,9 +158,9 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
 
 /* ------------------------------------- Lista ------------------------------------- */
 
-function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado, onForm, onBorrar }: {
+function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado, onSegundoPlano, onForm, onBorrar }: {
   store: AppStore; tipo: TipoPlantillaFin; items: PlantillaFin[]; hoyMes: string; onClose: () => void
-  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void
+  ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
   onForm: (p: PlantillaFin | null, extra?: { origenId?: string; existente?: boolean; clonDe?: PlantillaFin }) => void; onBorrar: (p: PlantillaFin) => void
 }) {
   const data = store.data!
@@ -221,9 +222,20 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
         if (accion === 'aplicar') setSel(s => s.filter(id => !ps.some(p => p.id === id)))
       }, { onDone: (ok, error) => { if (!ok) setErrorAplicar(error ?? 'No se pudo confirmar la operación.'); cb?.(ok, error) } })
   }
-  const aplicarFila = (ps: PlantillaFin[]) => aplicar(ps, 'aplicar', ok => { if (ok && ctx && ctx.mes === mes) onAplicado?.({ mes, n: ps.length }) })
+  /**
+   * Segundo plano: si se abrió desde «Prepara tu mes», el módulo se cierra al instante y el asistente sigue visible con la etapa «En progreso»;
+   * el guardado continúa en el store (toast de progreso) y, al confirmarse y verificarse en Sheets, la etapa pasa a «Completada».
+   * Si falla no queda nada aplicado: la etapa muestra Error y el aviso ofrece «Reintentar».
+   */
+  const enPlan = !!ctx && ctx.mes === mes
+  const lanzar = (ps: PlantillaFin[]) => {
+    if (!enPlan) { aplicar(ps, 'aplicar'); return }
+    onSegundoPlano?.()
+    aplicar(ps, 'aplicar', (ok, err) => { if (ok) onAplicado?.({ mes, n: ps.length }); else ctx?.onFallo?.(err ?? 'No se pudo confirmar la operación.') })
+  }
+  const aplicarFila = (ps: PlantillaFin[]) => lanzar(ps)
   // Mientras se guarda no se cierra el módulo (Escape, X o clic fuera): evita perder el resultado de un guardado crítico.
-  const cerrar = () => { if (!enviando) onClose() }
+  const cerrar = () => onClose()
 
   const alternarActiva = (p: PlantillaFin) => store.track(`pf:${p.id}`, { pending: 'Guardando…', ok: `${p.nombre} ${p.activo ? 'desactivada' : 'activada'}.`, error: 'No se pudo cambiar el estado.' },
     () => store.actions.savePlantillaFin({ ...p, medios: p.medios, activo: !p.activo }))
@@ -260,7 +272,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
   )
 
   return (
-    <Modal open onClose={cerrar} bloqueado={enviando} size="xl" title={T.titulo} subtitle={ctx ? `${T.sub}. Aplicando a ${nombreMes(mes)} desde «Prepara tu mes».` : `${T.sub}. Aplica cada una al mes que elijas.`} icon={<T.Icon className="size-5" />}
+    <Modal open onClose={cerrar} size="xl" title={T.titulo} subtitle={ctx ? `${T.sub}. Aplicando a ${nombreMes(mes)} desde «Prepara tu mes».` : `${T.sub}. Aplica cada una al mes que elijas.`} icon={<T.Icon className="size-5" />}
       footer={
         <div className="w-full space-y-2" data-testid="pf-footer">
           {detalle && n > 0 && Resumen}
@@ -375,18 +387,10 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
       </div>
 
       {confirmar && (
-        <Modal open onClose={() => { if (!enviando) { setConfirmar(false); setErrorAplicar(null) } }} bloqueado={enviando} size="md" title={`Aplicar a ${mesLabel}`} icon={<CalendarDays className="size-5" />}
+        <Modal open onClose={() => { setConfirmar(false); setErrorAplicar(null) }} size="md" title={`Aplicar a ${mesLabel}`} icon={<CalendarDays className="size-5" />}
           footer={<>
             <Button variant="outline" disabled={enviando} onClick={() => { setConfirmar(false); setErrorAplicar(null) }}>Cancelar</Button>
-            <Button disabled={enviando} onClick={() => {
-              const hechas = elegidas.length
-              // El diálogo se queda abierto con estado de carga hasta que el backend confirme; si falla, muestra el error y deja reintentar.
-              aplicar(elegidas, 'aplicar', ok => {
-                if (!ok) return
-                setConfirmar(false)
-                if (ctx && ctx.mes === mes) onAplicado?.({ mes, n: hechas })
-              })
-            }}>{enviando ? <Loader2 className="size-4 animate-spin" /> : errorAplicar ? <RotateCcw className="size-4" /> : <Check className="size-4" />} {enviando ? 'Guardando…' : errorAplicar ? 'Reintentar' : 'Confirmar y aplicar'}</Button>
+            <Button disabled={enviando} onClick={() => { setConfirmar(false); lanzar(elegidas) }}><Check className="size-4" /> Confirmar y aplicar</Button>
           </>}>
           <div className="space-y-2" data-testid="pf-vista-previa">
             <p className="text-sm">Vista previa de lo que se escribirá. Solo cambia <b>{mesLabel}</b>; volver a aplicar no duplica nada.</p>
