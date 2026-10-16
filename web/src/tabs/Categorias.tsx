@@ -288,7 +288,6 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
     ? (store.data?.gastos ?? []).filter(g => g.ambito === target.ambito && (nivel === 'ambito' || g.categoria === target.categoria) && (nivel !== 'subcategoria' || g.subcategoria === target.subcategoria)).length
     : 0
 
-  // No bloquea: valida, cierra y la escritura sigue en segundo plano; el resultado llega como notificación.
   // La validación se recalcula con cada cambio: tras el primer intento, el error desaparece en cuanto el campo es válido.
   const n = nombre.trim().replace(/\s+/g, ' ')
   const claveCat = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
@@ -304,6 +303,7 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   }
   const error = intentado ? validar() : ''
 
+  // No bloquea: valida, cierra y la escritura sigue en segundo plano; el resultado llega como notificación.
   function save() {
     setIntentado(true)
     if (validar()) return
@@ -311,8 +311,8 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
     const a = nivel === 'ambito' ? n : ambito
     const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
     const s = nivel === 'subcategoria' ? n : ''
-    const ok = store.track(`cat:${finalKey}`, mode === 'create'
     const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    const ok = store.track(`cat:${finalKey}`, mode === 'create'
       ? { pending: `Creando ${label}…`, ok: `${Label} ${masc ? 'creado' : 'creada'} correctamente.`, error: `No se pudo crear ${masc ? 'el' : 'la'} ${label}.` }
       : { pending: `Actualizando ${label}…`, ok: `${Label} ${masc ? 'actualizado' : 'actualizada'} correctamente.`, error: `Error al actualizar ${masc ? 'el' : 'la'} ${label}.` },
     async () => {

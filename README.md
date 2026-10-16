@@ -28,6 +28,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.23.0 — Correcciones de auditoría (P1–P7), interfaz instantánea
+
+- **P1 · «Hoy» ya no se congela**: nuevo hook `useHoy(tz)` (timeout hasta la medianoche de la zona configurada + `visibilitychange`/`focus`). Lo usan App, formularios, Gastos mensuales y Conciliación; el filtro «Este mes» avanza solo al cambiar de mes y la fecha de corte de la conciliación se actualiza.
+- **P2 · Sin falso «formato inesperado»**: el backend normaliza la fila (fecha `YYYY-MM-DD`, monto numérico, booleano real, fechas ISO); el esquema del frontend tolera tipos coercibles; si la escritura se confirmó pero la respuesta es ilegible, se relee la hoja y se recupera el gasto.
+- **P3 · Rendimiento**: escrituras optimistas en todo (con reversión y «Reintentar»), cola secuencial persistida en `localStorage` con aviso «N cambios pendientes» y `beforeunload`, reintentos 1/3/7 s con jitter (429/500/502/503/504, 404 de Google, HTML), timeout 45 s, lectura con snapshot + refresco en segundo plano y GET de calentamiento. `?debug=1` imprime en consola los ms totales y del servidor. **Backend** (`Code.gs` **1.23.0**): búsqueda por ID con `TextFinder`, escrituras agrupadas en `setEstado_`/`setEstadoLote_`. → **Debes volver a desplegar el script** (misma URL). Sin redesplegar, la web sigue funcionando (solo sin las mejoras del servidor).
+- **P4 · Errores que se borran**: validación derivada en Nuevo gasto, categoría y caja; el mensaje de la caja sigue al alcance («Elige un medio de pago»); sin aviso «otro ámbito» cuando el nombre ya existe en el mismo ámbito.
+- **P5 · Totales coherentes**: el total de Gastos usa la misma conversión que el Dashboard («≈ S/ X (incluye USD convertido)»), avisa si falta el tipo de cambio y no suma anulados (los muestra aparte).
+- **P6 · Menús ⋯**: todos usan el menú en portal (`position: fixed`, abre hacia arriba si no cabe) y siguen al botón al hacer scroll. Al eliminar una plantilla se vuelve a Gastos mensuales conservando la búsqueda.
+- **P7 · Catálogo**: «66 activas · 69 en total» en el chip del ámbito y en el encabezado.
+- **Modo demo**: `?demo` fuerza el transporte de demostración aunque haya una conexión guardada (no la modifica).
+
 ## Novedades v1.22.1 — Conciliación de saldos como quinta tarjeta
 
 Salud financiera ahora tiene cinco tarjetas de navegación (Calidad de datos · Mi presupuesto · Evolución · Compromisos · **Conciliación de saldos**). El panel de conciliación ya no aparece encima: solo se muestra al seleccionar su tarjeta, usando el mismo mecanismo de pestañas. La tarjeta resume el estado real (Sin verificar / diferencia pendiente / conciliado / desactualizada) con la misma función que el panel (`resumenConciliacion`). La conciliación usa su propio período y fecha de corte; los filtros globales se conservan pero no se aplican a saldos (se explica en el panel). Solo frontend: `Code.gs` sigue en 1.22.0.

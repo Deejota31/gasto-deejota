@@ -79,3 +79,121 @@ test.describe('P3: UI optimista con Apps Script lento o caído', () => {
     await expect.poll(vio, { timeout: 3000 }).toBe(true)                                   // "Reintentar" lo vuelve a mostrar al instante
   })
 })
+
+const dinero = (t: string) => Number(t.match(/[\d,]+\.\d{2}/)![0].replace(/,/g, ''))
+const kpiTotal = (page: Page) => page.locator('p', { hasText: /^Total gastado/ }).locator('xpath=following-sibling::p[1]').first()
+
+test.describe('P4: los errores de validación se borran al corregir el campo', () => {
+  test('Nuevo gasto: monto y medio de pago', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await expect(page.getByRole('button', { name: 'Nuevo gasto' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    const d = dialog(page)
+    await d.getByRole('button', { name: 'Registrar gasto' }).click()
+    await expect(d.getByText('Elige un medio de pago')).toBeVisible()
+    await d.getByRole('radiogroup', { name: 'Medio de pago' }).getByRole('radio').first().click()
+    await expect(d.getByText('Elige un medio de pago')).toHaveCount(0)
+    await d.getByLabel('Monto', { exact: true }).fill('12')
+    await expect(d.getByText(/monto/i).filter({ hasText: /mayor|inválido|Ingresa/i })).toHaveCount(0)
+  })
+
+  test('Nueva categoría: el aviso de duplicado desaparece y no aparece el de "otro ámbito" en el mismo ámbito', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Catálogo')
+    await page.getByRole('button', { name: 'Agregar', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Nueva categoría' }).click()
+    const d = dialog(page)
+    const nombre = d.getByLabel('Nombre', { exact: true })
+    await nombre.fill('Alimentación')
+    await d.getByRole('button', { name: 'Agregar', exact: true }).click()
+    const dup = d.getByText(/Ya existe ese nombre/)
+    await expect(dup).toBeVisible()
+    await expect(d.getByText(/ya existe en otro ámbito/)).toHaveCount(0)
+    await nombre.fill('TEST-categoría nueva')
+    await expect(dup).toHaveCount(0)
+  })
+
+  test('Caja: el mensaje sigue al alcance elegido', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Cajas')
+    await page.getByRole('button', { name: /Nueva caja|Nueva subcaja|Crear caja/ }).first().click()
+    const d = dialog(page)
+    await d.getByLabel('Nombre', { exact: true }).fill('TEST-caja')
+    await d.getByRole('radio', { name: 'Medio de pago' }).click()
+    await d.getByRole('button', { name: /Guardar|Crear/ }).click()
+    await expect(d.getByText('Elige un medio de pago')).toBeVisible()
+    await expect(d.getByText('Elige una categoría')).toHaveCount(0)
+  })
+})
+
+test.describe('P5: el total de Gastos cuadra con el Dashboard', () => {
+  test('incluye USD convertido y lo dice', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await expect(page.getByRole('button', { name: 'Nuevo gasto' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Nuevo gasto' }).click()
+    const d = dialog(page)
+    await d.getByRole('radiogroup', { name: 'Ámbito' }).getByRole('radio', { name: 'Personal', exact: true }).click()
+    await d.getByRole('radiogroup', { name: 'Categoría' }).getByRole('radio', { name: 'Alimentación', exact: true }).click()
+    await d.getByRole('radiogroup', { name: 'Subcategoría' }).getByRole('radio', { name: 'Almuerzo', exact: true }).click()
+    await d.getByRole('radiogroup', { name: 'Moneda' }).getByRole('radio', { name: 'USD' }).click()
+    await d.getByLabel('Monto', { exact: true }).fill('10')
+    await d.getByRole('radiogroup', { name: 'Medio de pago' }).getByRole('radio').first().click()
+    await d.getByLabel('Descripción').fill('TEST-USD')
+    await d.getByRole('button', { name: 'Registrar gasto' }).click()
+    await expect(d).toHaveCount(0)
+    await expect(kpiTotal(page)).toContainText('S/', { timeout: 10000 })
+    const dash = dinero(await kpiTotal(page).innerText())
+    await go(page, 'Gastos')
+    const t = page.getByTestId('gastos-total')
+    await expect(t).toContainText('≈')
+    await expect(page.getByTestId('gastos-total-conv')).toContainText('USD')
+    expect(Math.abs(dinero(await t.innerText()) - dash)).toBeLessThan(0.02)
+  })
+})
+
+test.describe('P6: menús ⋯ en portal y búsqueda conservada', () => {
+  test('con una sola fila, "Eliminar" queda visible; al confirmar vuelve la lista con la búsqueda', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Gastos')
+    await page.getByRole('button', { name: 'Gastos mensuales' }).click()
+    const m = dialog(page)
+    await m.getByLabel('Buscar plantilla').fill('Antojos')
+    const filas = m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')
+    await expect(filas).toHaveCount(1)
+    await filas.first().getByRole('button', { name: /Más acciones/ }).click()
+    const eliminar = page.getByRole('menuitem', { name: 'Eliminar' })
+    await expect(eliminar).toBeVisible()
+    const box = await eliminar.boundingBox()
+    const vp = page.viewportSize()!
+    expect(box!.y).toBeGreaterThanOrEqual(0)
+    expect(box!.y + box!.height).toBeLessThanOrEqual(vp.height)
+    // el menú no vive dentro del contenedor con scroll (portal)
+    expect(await eliminar.evaluate(el => !!el.closest('[role="list"]'))).toBe(false)
+    await eliminar.click()
+    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
+    await expect(dialog(page).getByLabel('Buscar plantilla')).toHaveValue('Antojos')
+  })
+})
+
+test.describe('P7: etiquetas del Catálogo', () => {
+  test('el chip del ámbito y el encabezado dicen "N activas · M en total"', async ({ page }) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Catálogo')
+    const chip = page.getByRole('tab').first()
+    await expect(chip).toContainText(/\d+ activas · \d+ en total/)
+    await expect(chip).not.toContainText('sub.')
+    await expect(page.getByText(/subcategorías activas · \d+ en total/).first()).toBeVisible()
+  })
+})
+
+test.describe('?demo ignora la conexión guardada', () => {
+  test('con una conexión en localStorage, ?demo=60 sigue mostrando datos de demostración y no la modifica', async ({ page }) => {
+    await page.addInitScript(() => { try { localStorage.setItem('gd.connection', JSON.stringify({ url: 'https://script.google.com/macros/s/NO-USAR/exec', token: 't'.repeat(32) })) } catch { /* sin almacenamiento */ } })
+    const llamadas: string[] = []
+    page.on('request', r => { if (r.url().includes('script.google.com')) llamadas.push(r.url()) })
+    await page.goto('/?demo=60')
+    await expect(page.locator('p', { hasText: /^Total gastado/ }).locator('xpath=following-sibling::p[1]').first()).toContainText('S/', { timeout: 10000 })
+    expect(llamadas).toEqual([])
+    expect(await page.evaluate(() => localStorage.getItem('gd.connection'))).toContain('NO-USAR')
+  })
+})
