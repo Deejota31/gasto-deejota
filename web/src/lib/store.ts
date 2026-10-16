@@ -48,7 +48,8 @@ function writeSnapshot(conn: Connection | null, data: AppData) {
 }
 
 export function buildApi(conn: Connection | null): Api {
-  if (conn) return createApi(httpTransport(conn))
+  // ?demo manda sobre una conexión guardada: nunca se toca la hoja real desde el modo demostración (y la conexión guardada no se modifica).
+  if (conn && !hayDemoParam()) return createApi(httpTransport(conn))
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
@@ -67,7 +68,7 @@ export function buildApi(conn: Connection | null): Api {
 
 /** Estado global: una lectura completa al abrir y al pulsar "Actualizar"; las escrituras actualizan el estado local. */
 /** El modo demostración (datos de ejemplo) solo se activa a propósito con ?demo=… (desarrollo y pruebas). Sin conexión NO se inventan datos. */
-const hayDemoParam = () => { try { return new URLSearchParams(location.search).has('demo') } catch { return false } }
+export const hayDemoParam = () => { try { return new URLSearchParams(location.search).has('demo') } catch { return false } }
 
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const demoActivo = hayDemoParam()

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { configurarExcepciones } from './lib/texto'
 import { loadConnection, type Api, type Connection } from './lib/api'
-import { useAppData } from './lib/store'
+import { hayDemoParam, useAppData } from './lib/store'
 import { Skeleton, ErrorBox } from './components/ui'
 import { Desconectado } from './components/Desconectado'
 import Toaster from './components/Toaster'
@@ -31,7 +31,7 @@ const Salud = lazy(() => import('./tabs/Salud'))
 const CajasTab = lazy(() => import('./tabs/Cajas'))
 
 export default function App({ api }: { api?: Api }) {
-  const [conn, setConn] = useState<Connection | null>(() => loadConnection())
+  const [conn, setConn] = useState<Connection | null>(() => (hayDemoParam() ? null : loadConnection()))
   const store = useAppData(conn, api)
   const [tab, setTab] = useState<TabId>(() => tabDeHash(location.hash) ?? 'dashboard')
   const [conexionAbierta, setConexionAbierta] = useState(false)
