@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarClock, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Copy, ExternalLink,
-  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, MoreHorizontal, PiggyBank, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet, Landmark,
+  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet, Landmark,
 } from 'lucide-react'
 import { cajaDe, prioridadCajas, type Aggregates } from '../lib/engine'
 import { formatDate, monthLabel, rangeLabel, singleMonth, shiftMonth } from '../lib/dates'
@@ -15,8 +15,9 @@ import type { AppStore } from '../lib/store'
 import type { CatalogoItem, EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
 import { cajaLook } from '../lib/visual'
 import { Conciliacion } from './conciliacion/Conciliacion'
+import { MenuAcciones } from './MenuAcciones'
 import { difTxt, montoTxt, resumenConciliacion } from '../lib/conciliacion'
-import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField, useDismiss } from './ui'
+import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
 
 type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos' | 'conciliacion'
 let vistaSesion: Vista = 'presupuesto'
@@ -741,24 +742,14 @@ function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, 
   )
 }
 
-function MenuAcciones({ label, items }: { label: string; items: { txt: string; Icon: typeof Link2; run: () => void; peligro?: boolean }[] }) {
-  const [open, setOpen] = useState(false)
-  const ref = useDismiss(open, () => setOpen(false))
+/** Menú ⋯ de cada compromiso: el menú compartido (portal, no se recorta). El envoltorio evita que el clic abra el detalle de la fila. */
+function MenuFila({ label, items }: { label: string; items: { txt: string; Icon: typeof Link2; run: () => void; peligro?: boolean }[] }) {
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
-        className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-bg hover:text-ink"><MoreHorizontal className="size-4" /></button>
-      {open && (
-        <div role="menu" className="absolute top-9 right-0 z-30 w-52 rounded-xl border border-line bg-card p-1 shadow-xl">
-          {items.map(it => (
-            <button key={it.txt} role="menuitem" type="button" onClick={e => { e.stopPropagation(); setOpen(false); it.run() }}
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-bg ${it.peligro ? 'text-danger' : ''}`}>
-              <it.Icon className="size-3.5 shrink-0" />{it.txt}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <span onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+      <MenuAcciones label={label} ancho={208}
+        triggerClass="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-bg hover:text-ink"
+        acciones={items.map(it => ({ key: it.txt, label: it.txt, icon: <it.Icon />, onClick: it.run, danger: it.peligro }))} />
+    </span>
   )
 }
 
@@ -791,7 +782,7 @@ function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsoc
         <span className="tabular hidden text-right text-sm font-semibold md:block" style={{ color: i.pendiente ? TONO.cerca.fg : 'var(--muted)' }}>{sinMonto ? '—' : money(i.pendiente)}</span>
         <span className="justify-self-end md:justify-self-start"><Chip tono={e.tono} testid="estado-compromiso"><e.Icon className="size-3" />{e.txt}</Chip></span>
         <span className="justify-self-end">
-          <MenuAcciones label={`Acciones de ${p.descripcion}`} items={[
+          <MenuFila label={`Acciones de ${p.descripcion}`} items={[
             { txt: 'Asociar movimiento', Icon: Link2, run: onAsociar },
             { txt: abierto ? 'Ocultar detalle' : 'Ver detalle', Icon: Info, run: onToggle },
             { txt: 'Editar plantilla', Icon: CalendarDays, run: onEditar },
@@ -820,7 +811,7 @@ function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsoc
                     <CheckCircle2 className="size-3.5 shrink-0" style={{ color: TONO.ok.fg }} />
                     <span className="min-w-0 flex-1 truncate text-muted">{formatDate(g.fecha, fmt)} · {g.descripcion || g.subcategoria} · {g.medioPago}</span>
                     <b className="tabular shrink-0">{formatMoney(Math.round(g.monto * 100), g.moneda)}</b>
-                    <MenuAcciones label={`Acciones del pago ${g.descripcion || 'gasto'} del ${g.fecha}`} items={[
+                    <MenuFila label={`Acciones del pago ${g.descripcion || 'gasto'} del ${g.fecha}`} items={[
                       { txt: 'Abrir movimiento', Icon: ExternalLink, run: () => onRevisarGasto(g) },
                       { txt: 'Quitar vínculo', Icon: Link2Off, run: () => onQuitar(g), peligro: true },
                     ]} />

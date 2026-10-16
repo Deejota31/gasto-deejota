@@ -142,6 +142,7 @@ export default function Categorias({ store }: { store: AppStore }) {
               const l = ambitoLook(a.name, catalogo)
               const on = current?.name === a.name
               const subs = a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)
+              const subsTotal = a.cats.reduce((s, c) => s + c.subs.length, 0)
               return (
                 <div key={a.name} className="relative">
                   <button role="tab" aria-selected={on} type="button" onClick={() => setSel(a.name)}
@@ -151,7 +152,7 @@ export default function Categorias({ store }: { store: AppStore }) {
                       <IconTile color={l.color} Icon={l.Icon} />
                       <div className="min-w-0 pr-10">
                         <p className="truncate text-sm font-semibold" title={a.name}>{a.name}</p>
-                        <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} sub.{!a.activo && ' · inactivo'}</p>
+                        <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} activas · {subsTotal} en total{!a.activo && ' · inactivo'}</p>
                       </div>
                     </div>
                   </button>
@@ -212,7 +213,7 @@ function AmbHeader({ a, catalogo, q }: { a: AmbNode; catalogo: CatalogoItem[]; q
       <IconTile color={l.color} Icon={l.Icon} size="lg" />
       <div>
         <h2 className="text-base font-semibold"><Hl text={a.name} q={q} /></h2>
-        <p className="text-xs text-muted">{a.cats.length} categorías · {a.cats.reduce((s, c) => s + c.subs.length, 0)} subcategorías{!a.activo && ' · inactivo'}</p>
+        <p className="text-xs text-muted">{a.cats.length} categorías · {a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)} subcategorías activas · {a.cats.reduce((s, c) => s + c.subs.length, 0)} en total{!a.activo && ' · inactivo'}</p>
       </div>
     </div>
   )
@@ -277,7 +278,6 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   const [icono, setIcono] = useState(iconoInicial)
   const [color, setColor] = useState(mode === 'edit' ? (head?.color || look.color) : COLORS[0])
   const [activo, setActivo] = useState(mode === 'edit' ? (nivel === 'ambito' ? amb?.activo : nivel === 'categoria' ? cat?.activo : sub?.activo) ?? true : true)
-  const [error, setError] = useState('')
   const cats = tree.find(a => a.name === ambito)?.cats.map(c => c.name) ?? []
   const label = { ambito: 'ámbito', categoria: 'categoría', subcategoria: 'subcategoría' }[nivel]
   const masc = nivel === 'ambito'
@@ -288,21 +288,30 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
     ? (store.data?.gastos ?? []).filter(g => g.ambito === target.ambito && (nivel === 'ambito' || g.categoria === target.categoria) && (nivel !== 'subcategoria' || g.subcategoria === target.subcategoria)).length
     : 0
 
+  // La validación se recalcula con cada cambio: tras el primer intento, el error desaparece en cuanto el campo es válido.
+  const n = nombre.trim().replace(/\s+/g, ' ')
+  const claveCat = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
+  const finalKey = nivel === 'ambito' ? claveCat(n, '', '') : nivel === 'categoria' ? claveCat(ambito, n, '') : claveCat(ambito, categoria, n)
+  const [intentado, setIntentado] = useState(false)
+  function validar(): string {
+    if (!n) return `Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`
+    if (nivel !== 'ambito' && !ambito) return 'Elige un ámbito.'
+    if (nivel === 'subcategoria' && !categoria) return 'Elige una categoría.'
+    const exists = catalogo.some(c => claveCat(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
+    if (exists && (mode === 'create' || normName(n) !== normName(original))) return `Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`
+    return ''
+  }
+  const error = intentado ? validar() : ''
+
   // No bloquea: valida, cierra y la escritura sigue en segundo plano; el resultado llega como notificación.
   function save() {
-    const n = nombre.trim().replace(/\s+/g, ' ')
-    if (!n) return setError(`Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`)
-    if (nivel !== 'ambito' && !ambito) return setError('Elige un ámbito.')
-    if (nivel === 'subcategoria' && !categoria) return setError('Elige una categoría.')
-    const key = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
-    const finalKey = nivel === 'ambito' ? key(n, '', '') : nivel === 'categoria' ? key(ambito, n, '') : key(ambito, categoria, n)
-    const exists = catalogo.some(c => key(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
-    if (exists && (mode === 'create' || normName(n) !== normName(original))) return setError(`Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`)
-    const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    setIntentado(true)
+    if (validar()) return
     let renombrado = false
     const a = nivel === 'ambito' ? n : ambito
     const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
     const s = nivel === 'subcategoria' ? n : ''
+    const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
     const ok = store.track(`cat:${finalKey}`, mode === 'create'
       ? { pending: `Creando ${label}…`, ok: `${Label} ${masc ? 'creado' : 'creada'} correctamente.`, error: `No se pudo crear ${masc ? 'el' : 'la'} ${label}.` }
       : { pending: `Actualizando ${label}…`, ok: `${Label} ${masc ? 'actualizado' : 'actualizada'} correctamente.`, error: `Error al actualizar ${masc ? 'el' : 'la'} ${label}.` },
@@ -320,8 +329,8 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   // Categorías y subcategorías se comparten entre ámbitos: si el nombre ya existe en otro, usa su mismo icono y color.
   const nn = normName(nombre)
   const hermana = mode === 'create' && nn && nivel !== 'ambito'
-    ? catalogo.find(c => nivel === 'categoria' ? !!c.categoria && !c.subcategoria && normName(c.categoria) === nn
-      : c.categoria === categoria && !!c.subcategoria && normName(c.subcategoria) === nn)
+    ? catalogo.find(c => c.ambito !== ambito && (nivel === 'categoria' ? !!c.categoria && !c.subcategoria && normName(c.categoria) === nn
+      : c.categoria === categoria && !!c.subcategoria && normName(c.subcategoria) === nn))   // solo "otro" ámbito: si ya existe en este, el error de duplicado basta
     : undefined
   const heredado = hermana ? (nivel === 'categoria' ? categoriaLook(hermana.categoria, catalogo) : subcategoriaLook(hermana.subcategoria, hermana.categoria, catalogo)) : null
   const Preview = heredado ? heredado.Icon : ICONS[icono] ?? ICONS.tag

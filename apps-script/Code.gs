@@ -5,7 +5,7 @@
  * así el token nunca viaja en la URL.
  */
 
-var APP_VERSION = '1.22.0';
+var APP_VERSION = '1.23.0';
 var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
@@ -929,10 +929,15 @@ function setEstadoLote_(p) {
     if (veces[k] > 1) throw appError_('VALIDATION', 'Un gasto tiene el ID repetido en la hoja. Ejecuta repararIds primero.');
   });
   var now = new Date().toISOString();
-  ids.forEach(function (id) {
-    var r = filas[id.toLowerCase()];
-    sh.getRange(r, G.ESTADO + 1).setValue(p.estado);
-    sh.getRange(r, G.ACTUALIZADO + 1).setValue(now);
+  // Dos escrituras en bloque (una por columna) en lugar de dos por gasto: se lee y se escribe el tramo entre la primera y la
+  // última fila elegidas, y solo cambian las celdas de los gastos del lote.
+  var rows = ids.map(function (id) { return filas[id.toLowerCase()]; });
+  var desde = Math.min.apply(null, rows), hasta = Math.max.apply(null, rows);
+  [[G.ESTADO + 1, p.estado], [G.ACTUALIZADO + 1, now]].forEach(function (c) {
+    var rango = sh.getRange(desde, c[0], hasta - desde + 1, 1);
+    var vals = rango.getValues();
+    rows.forEach(function (r) { vals[r - desde][0] = c[1]; });
+    rango.setValues(vals);
   });
   return { ids: ids, estado: p.estado, actualizadoEn: now };
 }
@@ -3109,7 +3114,14 @@ function gastoToRow_(g, estado, origen, creado, actualizado) {
     g.ambito, g.recurrente, estado, origen, g.url, g.id, creado, actualizado];
 }
 
-function findRowById_(sh, col, id) { return findRowByValue_(sh, col, id); }
+// Busca un ID (UUID) con TextFinder: Sheets lo resuelve en el servidor, sin traer la columna entera al script.
+// Mismo criterio que antes: celda completa, sin distinguir mayúsculas; devuelve la primera fila (0 si no está).
+function findRowById_(sh, col, id) {
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var hit = sh.getRange(2, col, last - 1, 1).createTextFinder(String(id)).matchEntireCell(true).matchCase(false).findNext();
+  return hit ? hit.getRow() : 0;
+}
 
 function findRowByValue_(sh, col, value) {
   var last = sh.getLastRow();

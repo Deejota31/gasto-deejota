@@ -27,6 +27,8 @@ export interface AccionesGlobales {
   /** Campana de planificación mensual (v1.19): va antes de Actualizar. */
   campana?: ReactNode
   loading: boolean
+  /** Escrituras que ya se ven en pantalla pero Sheets aún no confirmó (cola en segundo plano). */
+  pendientes?: number
   lastSync: Date | null
   onRefresh: () => void
   conectado: boolean
@@ -241,7 +243,7 @@ function Topbar({ headerRef, actual, acciones, movil, conMenu, botonMenu, onMenu
   headerRef: React.RefObject<HTMLElement | null>; actual: (typeof TABS)[number]; acciones: AccionesGlobales; movil: boolean; conMenu: boolean
   botonMenu: React.RefObject<HTMLButtonElement | null>; onMenu: () => void; menuAbierto: boolean
 }) {
-  const { loading, lastSync, onRefresh, conectado, onConexion, sheetUrl, isDemo, campana } = acciones
+  const { loading, lastSync, onRefresh, conectado, onConexion, sheetUrl, isDemo, campana, pendientes = 0 } = acciones
   const Icon = actual.icon
   const btn = 'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border text-sm font-medium whitespace-nowrap outline-none transition hover:bg-bg focus-visible:ring-2 focus-visible:ring-navy/60'
   const sinHoja = !sheetUrl || isDemo
@@ -259,6 +261,12 @@ function Topbar({ headerRef, actual, acciones, movil, conMenu, botonMenu, onMenu
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {campana}
+          {pendientes > 0 && (
+            <span role="status" aria-live="polite" data-testid="cambios-pendientes" title="Se guardan en segundo plano; no cierres la pestaña todavía."
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-warning-soft px-2.5 text-xs font-semibold whitespace-nowrap text-warning">
+              <RefreshCw className="size-3.5 animate-spin" aria-hidden />{pendientes}<span className="max-sm:sr-only">{' '}cambio{pendientes === 1 ? '' : 's'} pendiente{pendientes === 1 ? '' : 's'}</span>
+            </span>
+          )}
           <button type="button" onClick={onRefresh} disabled={loading} aria-label="Actualizar datos" title={lastSync ? `Última sincronización ${lastSync.toLocaleTimeString('es-PE')}` : 'Actualizar'}
             className={`${btn} w-9 border-transparent text-muted disabled:opacity-60`}>
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />

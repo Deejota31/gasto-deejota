@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, ListChecks,
-  Loader2, MoreHorizontal, Pencil, Plus, Repeat, Save, Search, Send, Trash2, Zap,
+  Loader2, Pencil, Plus, Repeat, Save, Search, Send, Trash2, Zap,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { GastoInput, PlantillaInput } from '../lib/api'
@@ -22,10 +22,10 @@ import { Combobox, type Opcion } from './Combobox'
 import type { GastoPreset } from './GastoModal'
 import type { ContextoPlan } from '../lib/planificar'
 import { nombreMes } from '../lib/plan'
-import { type AccionMenu } from './MenuAcciones'
+import { MenuAcciones, type AccionMenu } from './MenuAcciones'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
 import { SwipeFila, useEsMovil } from './swipe'
-import { Button, Checkbox, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, Skeleton, Switch, useDismiss } from './ui'
+import { Button, Checkbox, DateField, Empty, ErrorBox, Field, inputCls, Modal, Segmented, Skeleton, Switch } from './ui'
 
 export interface PlantillaDraft extends Clasif {
   id: string; descripcion: string; monto: number | null; moneda: string; medioPago: string; esCompromiso?: boolean; tipoGasto?: TipoGasto; esRecurrente?: boolean; existente: boolean; afterId?: string
@@ -51,6 +51,8 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
   draft?: PlantillaDraft; onReopen: (d: PlantillaDraft) => void
 }) {
   const [view, setView] = useState<View>(() => (draft ? { kind: 'form', plantilla: null, draft } : { kind: 'list' }))
+  // La búsqueda y el filtro viven aquí: al ir a Editar/Eliminar y volver, la lista conserva lo que habías escrito.
+  const [busqueda, setBusqueda] = useState({ q: '', ambito: '' })
   const { items, error, loaded } = store.plantillas
   const { loadPlantillas } = store
 
@@ -95,13 +97,13 @@ export default function PlantillasModal({ store, onClose, onUse, draft, onReopen
       </Modal>
     )
   }
-  return <Lista store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} ctx={ctx} onRegistrado={onRegistrado} onSegundoPlano={onSegundoPlano} />
+  return <Lista busqueda={busqueda} setBusqueda={setBusqueda} store={store} items={items} loaded={loaded} error={error} onClose={onClose} onUse={onUse} setView={setView} ctx={ctx} onRegistrado={onRegistrado} onSegundoPlano={onSegundoPlano} />
 }
 
 /* ============================== Lista + lote ============================== */
 
-function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRegistrado, onSegundoPlano }: {
-  store: AppStore; items: Plantilla[]; loaded: boolean; error: string | null; onClose: () => void; onUse: (p: GastoPreset) => void; setView: (v: View) => void
+function Lista({ busqueda, setBusqueda, store, items, loaded, error, onClose, onUse, setView, ctx, onRegistrado, onSegundoPlano }: {
+  busqueda: { q: string; ambito: string }; setBusqueda: (b: { q: string; ambito: string }) => void; store: AppStore; items: Plantilla[]; loaded: boolean; error: string | null; onClose: () => void; onUse: (p: GastoPreset) => void; setView: (v: View) => void
   ctx?: ContextoPlan; onRegistrado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
 }) {
   const { lote, setLote } = store
@@ -110,8 +112,9 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRe
   const hoy = todayIn(cfg.zona_horaria || 'America/Lima')
   const monedas = (cfg.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   const medios = sortMedios((store.data?.medios ?? []).filter(m => m.activo).map(m => m.nombre))
-  const [q, setQ] = useState('')
-  const [ambito, setAmbito] = useState('')
+  const { q, ambito } = busqueda
+  const setQ = (v: string) => setBusqueda({ ...busqueda, q: v })
+  const setAmbito = (v: string) => setBusqueda({ ...busqueda, ambito: v })
   const [detalle, setDetalle] = useState(false)
   const [errores, setErrores] = useState<Record<string, string>>({})
   const movil = useEsMovil()
@@ -359,28 +362,20 @@ function Lista({ store, items, loaded, error, onClose, onUse, setView, ctx, onRe
   )
 }
 
+/** Menú ⋯ de cada fila: el componente compartido (portal con position: fixed y apertura hacia arriba si abajo no cabe). */
 function RowMenu({ label, canMove, first, last, onEdit, onClone, onDelete, onUp, onDown }: {
   label: string; canMove: boolean; first: boolean; last: boolean; onEdit: () => void; onClone: () => void; onDelete: () => void; onUp: () => void; onDown: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const close = useCallback(() => setOpen(false), [])
-  const ref = useDismiss(open, close)
-  const item = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-bg disabled:opacity-40'
-  const run = (fn: () => void) => () => { setOpen(false); fn() }
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`Más acciones de ${label}`} onClick={() => setOpen(o => !o)}
-        className="grid size-10 place-items-center rounded-xl border border-line text-muted hover:bg-bg md:size-8 md:rounded-lg"><MoreHorizontal className="size-4" /></button>
-      {open && (
-        <div role="menu" className="absolute top-11 right-0 z-30 w-44 md:top-9 rounded-xl border border-line bg-card p-1 shadow-xl">
-          <button role="menuitem" type="button" className={item} onClick={run(onEdit)}><Pencil className="size-3.5 text-muted" /> Editar</button>
-          <button role="menuitem" type="button" className={item} onClick={run(onClone)}><Copy className="size-3.5 text-muted" /> Clonar</button>
-          <button role="menuitem" type="button" className={item} disabled={!canMove || first} onClick={run(onUp)}><ArrowUp className="size-3.5 text-muted" /> Subir</button>
-          <button role="menuitem" type="button" className={item} disabled={!canMove || last} onClick={run(onDown)}><ArrowDown className="size-3.5 text-muted" /> Bajar</button>
-          <button role="menuitem" type="button" className={`${item} text-danger`} onClick={run(onDelete)}><Trash2 className="size-3.5" /> Eliminar</button>
-        </div>
-      )}
-    </div>
+    <MenuAcciones label={`Más acciones de ${label}`} ancho={176}
+      triggerClass="grid size-10 place-items-center rounded-xl border border-line text-muted hover:bg-bg md:size-8 md:rounded-lg"
+      acciones={[
+        { key: 'edit', label: 'Editar', icon: <Pencil />, onClick: onEdit },
+        { key: 'clone', label: 'Clonar', icon: <Copy />, onClick: onClone },
+        { key: 'up', label: 'Subir', icon: <ArrowUp />, onClick: onUp, disabled: !canMove || first },
+        { key: 'down', label: 'Bajar', icon: <ArrowDown />, onClick: onDown, disabled: !canMove || last },
+        { key: 'delete', label: 'Eliminar', icon: <Trash2 />, onClick: onDelete, danger: true },
+      ]} />
   )
 }
 

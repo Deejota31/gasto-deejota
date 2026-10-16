@@ -1,7 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { configurarExcepciones } from './lib/texto'
 import { loadConnection, type Api, type Connection } from './lib/api'
-import { useAppData } from './lib/store'
+import { hayDemoParam, useAppData } from './lib/store'
 import { Skeleton, ErrorBox } from './components/ui'
 import { Desconectado } from './components/Desconectado'
 import Toaster from './components/Toaster'
@@ -15,7 +15,8 @@ import type { Gasto } from './lib/types'
 import { showToast } from './lib/toast'
 import { refrescoSegundos } from './lib/refresco'
 import { emptyFilters } from './components/shared'
-import { todayIn } from './lib/dates'
+import { presetRange, todayIn } from './lib/dates'
+import { useHoy } from './lib/useHoy'
 import type { Filters } from './lib/types'
 import Gastos from './tabs/Gastos'
 import Catalogo from './tabs/Categorias'
@@ -30,7 +31,7 @@ const Salud = lazy(() => import('./tabs/Salud'))
 const CajasTab = lazy(() => import('./tabs/Cajas'))
 
 export default function App({ api }: { api?: Api }) {
-  const [conn, setConn] = useState<Connection | null>(() => loadConnection())
+  const [conn, setConn] = useState<Connection | null>(() => (hayDemoParam() ? null : loadConnection()))
   const store = useAppData(conn, api)
   const [tab, setTab] = useState<TabId>(() => tabDeHash(location.hash) ?? 'dashboard')
   const [conexionAbierta, setConexionAbierta] = useState(false)
@@ -42,12 +43,20 @@ export default function App({ api }: { api?: Api }) {
   const irATab = useCallback((t: TabId) => { setTab(t); if (t !== 'gastos') setFoco(null) }, [])
   const [plantillasOpen, setPlantillasOpen] = useState<false | { draft?: PlantillaDraft; key: number; ctx?: ContextoPlan }>(false)
   const tz = store.data?.config.zona_horaria || 'America/Lima'
-  const today = useMemo(() => { try { return todayIn(tz) } catch { return todayIn() } }, [tz])
+  const today = useHoy(tz)   // se actualiza solo al cambiar de día (medianoche de la zona configurada / al volver a la pestaña)
   // Planificación mensual (v1.19): campana, asistente y resumen globales. Las plantillas se abren desde el asistente.
   const plantillasApp = usePlantillasFin(store, today.slice(0, 7))
   const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: ctx => setPlantillasOpen({ key: Date.now(), ctx }), onPlantillas: (t, ctx) => plantillasApp.abrir(t, { modo: 'lista' }, ctx), onConfigurar: () => irATab('config') })
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
   const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
+  // Si el período es relativo ("Este mes", "Últimos 3 meses"…) y cambia el día/mes/zona, el filtro avanza con la fecha. Un rango personalizado no se toca.
+  useEffect(() => {
+    setFilters(f => {
+      if (f.preset === 'custom') return f
+      const r = presetRange(f.preset, today)
+      return r.desde === f.desde && r.hasta === f.hasta ? f : { ...f, ...r }
+    })
+  }, [today])
 
   useEffect(() => {
     history.replaceState(null, '', `#${tab}`)
@@ -161,7 +170,7 @@ export default function App({ api }: { api?: Api }) {
   return (
     <div className="min-h-dvh">
       <AppShell tab={tab} onTab={irATab} headerRef={headerRef} avisos={avisos}
-        acciones={{ loading: store.loading, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo, campana: plan.campana }}>
+        acciones={{ loading: store.loading, pendientes: store.enCola, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo, campana: plan.campana }}>
         {contenido}
       </AppShell>
 

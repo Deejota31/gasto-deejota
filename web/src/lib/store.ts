@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createApi, httpTransport, type Api, type Connection, type AplicarItem, type FuenteInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
+import { calentar, createApi, httpTransport, type Api, type Connection, type AplicarItem, type FuenteInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { ConcGrupoInput, ConcSeguimientoInput, ConcVerificacionInput } from './api'
@@ -7,17 +7,12 @@ import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fuent
 import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
+import { guardarCola, leerCola, OPS, upsertVinculos, type ArgsOp, type NombreOp, type OpPersistida, type ResultadoOp } from './operaciones'
 
 /** El catálogo siempre se entrega ordenado ("Otros" al final de cada grupo), venga de la hoja o de un cambio local. */
 // El orden personalizado de Gastos se separa de `data`: reordenar no debe recalcular KPIs ni gráficos.
 const normalize = (d: AppData): AppData => { const { ordenGastos: _o, ...rest } = d; return { ...rest, catalogo: sortCatalogo(d.catalogo) } }
 const ordenMap = (d: AppData | null) => new Map((d?.ordenGastos ?? []).map(([id, o]) => [id.toLowerCase(), o]))
-/** Vínculos gasto → plantilla: upsert por ID de gasto; plantilla vacía = sin vínculo. */
-const upsertVinculos = (prev: [string, string][] | undefined, pares: [string, string][]) => {
-  const m = new Map((prev ?? []).map(([g, p]) => [g.toLowerCase(), p]))
-  for (const [g, p] of pares) { if (p) m.set(g.toLowerCase(), p); else m.delete(g.toLowerCase()) }
-  return [...m.entries()]
-}
 const aplicarRangos = (m: Map<string, number>, ids: string[]) => { const n = new Map(m); ids.forEach((id, i) => n.set(id.toLowerCase(), i + 1)); return n }
 const aplicarOrden = (items: Plantilla[], ids: string[]) => {
   const byId = new Map(items.map(x => [x.id, x]))
@@ -53,7 +48,8 @@ function writeSnapshot(conn: Connection | null, data: AppData) {
 }
 
 export function buildApi(conn: Connection | null): Api {
-  if (conn) return createApi(httpTransport(conn))
+  // ?demo manda sobre una conexión guardada: nunca se toca la hoja real desde el modo demostración (y la conexión guardada no se modifica).
+  if (conn && !hayDemoParam()) return createApi(httpTransport(conn))
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
@@ -72,7 +68,7 @@ export function buildApi(conn: Connection | null): Api {
 
 /** Estado global: una lectura completa al abrir y al pulsar "Actualizar"; las escrituras actualizan el estado local. */
 /** El modo demostración (datos de ejemplo) solo se activa a propósito con ?demo=… (desarrollo y pruebas). Sin conexión NO se inventan datos. */
-const hayDemoParam = () => { try { return new URLSearchParams(location.search).has('demo') } catch { return false } }
+export const hayDemoParam = () => { try { return new URLSearchParams(location.search).has('demo') } catch { return false } }
 
 export function useAppData(conn: Connection | null, apiOverride?: Api) {
   const demoActivo = hayDemoParam()
@@ -102,6 +98,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   // para que una respuesta tardía no pise datos más recientes. Todos los parches son idempotentes (upsert por clave).
   const journal = useRef<((d: AppData) => AppData)[]>([])
   const inflight = useRef(new Set<string>())
+  // Escrituras optimistas pendientes (v1.23): cambio local por operación, cola secuencial y cola persistida (sobrevive a recargar).
+  const pend = useRef(new Map<string, (d: AppData) => AppData>())
+  const serie = useRef<Promise<unknown>>(Promise.resolve())
+  const colaPersist = useRef<OpPersistida[]>([])
+  const [enCola, setEnCola] = useState(0)
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   // Plantillas: estado aparte de `data` para que sus cambios no recalculen KPIs ni gráficos.
   // Se leen una sola vez (al abrir "Gastos mensuales") y se reutilizan; "Actualizar" las marca para releer.
@@ -141,7 +142,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     const ordenAlEmpezar = ordenVersion.current
     try {
       const raw = await api.getData(fresh)
-      const merged = journal.current.reduce((acc, fn) => fn(acc), raw)
+      // Lo que ya se ve en pantalla pero el backend aún no confirmó se vuelve a aplicar encima de la lectura (si no, "desaparecería").
+      const merged = [...pend.current.values()].reduce((acc, fn) => fn(acc), journal.current.reduce((acc, fn) => fn(acc), raw))
       journal.current = []
       setData(normalize(merged))
       const ordenVigente = ordenVersion.current === ordenAlEmpezar && !inflight.current.has('gastos:orden')
@@ -160,17 +162,6 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     }
   }, [api, conn, desconectado])
 
-  useEffect(() => {
-    const s = readSnapshot(conn)
-    setData(s && normalize(s))
-    setOrdenGastos(ordenMap(s))
-    setConfirmado(false)
-    if (desconectado) { setError(null); return }   // sin conexión no se lee nada ni se muestran datos de ejemplo
-    // Siempre lectura fresca al abrir/recargar: la caché del servidor (10 min) no ve las ediciones hechas a mano en la
-    // hoja y mostraba registros ya eliminados. El respaldo del navegador solo sirve para pintar mientras llega la lectura.
-    void refresh(true)
-  }, [refresh, conn, desconectado])
-
   const patch = useCallback((fn: (d: AppData) => AppData) => {
     if (loadingRef.current) journal.current.push(fn)
     setData(prev => {
@@ -181,46 +172,86 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     })
   }, [conn])
 
+  const url = conn?.url
+  /**
+   * Escritura optimista: el cambio se ve al instante, se envía a Apps Script en segundo plano (una a una, en orden) y, si falla,
+   * se revierte SOLO esa entidad. La promesa se resuelve/rechaza con el resultado real del backend (los avisos dependen de él).
+   */
+  const lanzar = useCallback(<N extends NombreOp>(nombre: N, args: ArgsOp<N>, o?: Pick<OpPersistida, 'id' | 'ts' | 'prev' | 'hay'>): Promise<ResultadoOp<N>> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = OPS[nombre] as any
+    const id = o?.id ?? crypto.randomUUID(), ts = o?.ts ?? new Date().toISOString(), miApi = api
+    // Al reenviar tras recargar, "lo que había antes" viene de la cola guardada (la pantalla ya traía el cambio optimista).
+    const hay = o ? !!o.hay : !!dataRef.current
+    const prev = o ? o.prev : hay ? d.capturar(dataRef.current, ...args) : undefined
+    const local = (x: AppData): AppData => d.local(x, ts, ...args)
+    pend.current.set(id, local)
+    patch(local)
+    if (!o?.id) { colaPersist.current = [...colaPersist.current, { id, nombre, args: args as unknown[], ts, prev, hay }]; guardarCola(url, colaPersist.current) }
+    setEnCola(n => n + 1)
+    const fin = () => {
+      pend.current.delete(id)
+      colaPersist.current = colaPersist.current.filter(x => x.id !== id)
+      guardarCola(url, colaPersist.current)
+      setEnCola(n => n - 1)
+    }
+    const p = serie.current.then(async () => {
+      try {
+        const r = await d.remoto(miApi, ...args)
+        fin()
+        if (d.confirmar) patch(x => d.confirmar(x, r, prev, ...args))
+        return r
+      } catch (e) {
+        fin()
+        if (hay) patch(x => d.deshacer(x, prev, ...args))
+        throw e
+      }
+    }) as Promise<ResultadoOp<N>>
+    serie.current = p.catch(() => undefined)
+    return p
+  }, [api, patch, url])
+
+  /** Al abrir: reenvía lo que quedó pendiente de la sesión anterior (recarga o cierre con cambios sin confirmar). */
+  const reproducir = useCallback(() => {
+    const ops = leerCola(url).filter(o => !pend.current.has(o.id))
+    if (!ops.length) return
+    colaPersist.current = [...colaPersist.current, ...ops]
+    const toast = showToast('pending', `Enviando ${ops.length} cambio${ops.length === 1 ? '' : 's'} pendiente${ops.length === 1 ? '' : 's'} de la sesión anterior…`)
+    const fallos: OpPersistida[] = []
+    void Promise.all(ops.map(o => (lanzar(o.nombre as NombreOp, o.args as never, o) as Promise<unknown>).catch(() => { fallos.push(o) }))).then(() => {
+      if (!fallos.length) { if (quiet.current) dismiss(toast); else updateToast(toast, 'success', 'Cambios pendientes enviados.'); return }
+      updateToast(toast, 'error', `No se pudieron enviar ${fallos.length} cambio${fallos.length === 1 ? '' : 's'} pendiente${fallos.length === 1 ? '' : 's'}; se revirtieron en pantalla. Reintentar no duplica.`,
+        [{ label: 'Reintentar', run: () => { fallos.forEach(o => { void (lanzar(o.nombre as NombreOp, o.args as never) as Promise<unknown>).catch(() => undefined) }); dismiss(toast) } }])
+    })
+  }, [url, lanzar])
+
+  // Con cambios sin confirmar, el navegador pide confirmación antes de cerrar la pestaña.
+  useEffect(() => {
+    if (!enCola) return
+    const alCerrar = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', alCerrar)
+    return () => window.removeEventListener('beforeunload', alCerrar)
+  }, [enCola])
+
+  useEffect(() => {
+    const s = readSnapshot(conn)
+    setData(s && normalize(s))
+    setOrdenGastos(ordenMap(s))
+    setConfirmado(false)
+    if (desconectado) { setError(null); return }   // sin conexión no se lee nada ni se muestran datos de ejemplo
+    if (conn && !apiOverride) calentar(conn)   // despierta Apps Script mientras se pinta el respaldo del navegador (sin esperar)
+    reproducir()
+    // Siempre lectura fresca al abrir/recargar: la caché del servidor (10 min) no ve las ediciones hechas a mano en la
+    // hoja y mostraba registros ya eliminados. El respaldo del navegador solo sirve para pintar mientras llega la lectura.
+    void refresh(true)
+  }, [refresh, conn, desconectado, reproducir, apiOverride])
+
   const actions = useMemo(() => ({
-    async saveGasto(g: GastoInput, mode: 'create' | 'update') {
-      const saved = await api.saveGasto(g, mode)
-      const plId = mode === 'create' ? g.plantillaId : undefined
-      patch(d => ({
-        ...d,
-        gastos: mode === 'create' && !d.gastos.some(x => x.id === saved.id) ? [...d.gastos, saved] : d.gastos.map(x => x.id === saved.id ? saved : x),
-        ...(plId ? { vinculos: upsertVinculos(d.vinculos, [[saved.id, plId]]) } : {}),
-      }))
-      return saved
-    },
-    async setEstado(g: Gasto, estado: 'Activo' | 'Anulado') {
-      const r = await api.setEstado(g.id, estado)
-      patch(d => ({ ...d, gastos: d.gastos.map(x => x.id === g.id ? { ...x, estado, actualizadoEn: r.actualizadoEn } : x) }))
-    },
-    async setEstadoLote(gs: Gasto[], estado: 'Activo' | 'Anulado') {
-      const r = await api.setEstadoLote(gs.map(g => g.id), estado)   // se actualiza la pantalla SOLO tras la confirmación del backend
-      const ids = new Set(gs.map(g => g.id))
-      patch(d => ({ ...d, gastos: d.gastos.map(x => ids.has(x.id) ? { ...x, estado, actualizadoEn: r.actualizadoEn } : x) }))
-    },
-    async saveCatalogo(item: CatalogoItem) {
-      const s = await api.saveCatalogo(item)
-      const key = (c: CatalogoItem) => `${c.ambito}|${c.categoria}|${c.subcategoria}`.toLowerCase()
-      // Categorías y subcategorías se comparten entre ámbitos: sus hermanas toman el mismo icono y color.
-      const hermana = (c: CatalogoItem) => !!s.categoria && c.categoria === s.categoria && c.subcategoria === s.subcategoria
-      const compartir = (c: CatalogoItem) => hermana(c) && key(c) !== key(s) ? { ...c, icono: s.icono || c.icono, color: s.color || c.color } : c
-      patch(d => ({ ...d, catalogo: (d.catalogo.some(c => key(c) === key(s)) ? d.catalogo.map(c => key(c) === key(s) ? s : c) : [...d.catalogo, s]).map(compartir) }))
-    },
-    async renameCatalogo(p: Parameters<Api['renameCatalogo']>[0]) {
-      const r = await api.renameCatalogo(p)
-      const col = ({ ambito: 'ambito', categoria: 'categoria', subcategoria: 'subcategoria' } as const)[p.nivel]
-      const hit = (x: { ambito: string; categoria: string; subcategoria: string }) =>
-        x.ambito === p.ambito && (p.nivel === 'ambito' || x.categoria === p.categoria) && (p.nivel !== 'subcategoria' || x.subcategoria === p.subcategoria)
-      patch(d => ({
-        ...d,
-        catalogo: d.catalogo.map(c => (hit(c) ? { ...c, [col]: p.nuevo } : c)),
-        gastos: d.gastos.map(g => (hit(g) ? { ...g, [col]: p.nuevo } : g)),
-      }))
-      return r
-    },
+    saveGasto: (g: GastoInput, mode: 'create' | 'update') => lanzar('saveGasto', [g, mode]),
+    async setEstado(g: Gasto, estado: 'Activo' | 'Anulado') { await lanzar('setEstado', [g.id, estado]) },
+    async setEstadoLote(gs: Gasto[], estado: 'Activo' | 'Anulado') { await lanzar('setEstadoLote', [gs.map(g => g.id), estado]) },
+    async saveCatalogo(item: CatalogoItem) { await lanzar('saveCatalogo', [item]) },
+    renameCatalogo: (p: Parameters<Api['renameCatalogo']>[0]) => lanzar('renameCatalogo', [p]),
     /** Orden manual de categorías de un ámbito: se ve al instante; si falla, vuelve al anterior. */
     async reorderCategorias(ambito: string, nombres: string[]) {
       let previo: CatalogoItem[] = []
@@ -229,24 +260,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       try { await api.reorderCategorias(ambito, nombres); patch(aplicar) } catch (e) { setData(d => d && { ...d, catalogo: previo }); throw e }
     },
     /** Elimina una categoría (y, con `cascada`, sus subcategorías) del catálogo. Nunca borra gastos. */
-    async deleteCategoria(ambito: string, categoria: string, cascada = false) {
-      const r = await api.deleteCategoria(ambito, categoria, cascada)
-      if (r.eliminada) patch(d => ({ ...d, catalogo: d.catalogo.filter(c => !(c.ambito === ambito && c.categoria === categoria)) }))
-      return r
-    },
-    async saveMedio(m: Medio) {
-      const s = await api.saveMedio(m)
-      patch(d => ({ ...d, medios: d.medios.some(x => x.nombre.toLowerCase() === s.nombre.toLowerCase()) ? d.medios.map(x => x.nombre.toLowerCase() === s.nombre.toLowerCase() ? s : x) : [...d.medios, s] }))
-    },
-    async saveCaja(c: Caja) {
-      const s = await api.saveCaja(c)
-      patch(d => ({ ...d, cajas: d.cajas.some(x => x.id === s.id) ? d.cajas.map(x => x.id === s.id ? s : x) : [...d.cajas, s] }))
-    },
+    deleteCategoria: (ambito: string, categoria: string, cascada = false) => lanzar('deleteCategoria', [ambito, categoria, cascada]),
+    async saveMedio(m: Medio) { await lanzar('saveMedio', [m]) },
+    async saveCaja(c: Caja) { await lanzar('saveCaja', [c]) },
     /** Elimina una caja. Sus gastos pasan a "fuera de cajas" (u otra caja que coincida); no se borra ningún gasto. */
-    async deleteCaja(id: string) {
-      await api.deleteCaja(id)
-      patch(d => ({ ...d, cajas: d.cajas.filter(c => c.id !== id) }))
-    },
+    async deleteCaja(id: string) { await lanzar('deleteCaja', [id]) },
     /** Orden manual de subcajas: se ve al instante; si falla, vuelve al anterior. */
     async reorderCajas(ids: string[]) {
       let previo: Caja[] = []
@@ -254,20 +272,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       setData(d => { previo = d?.cajas ?? []; return d && aplicar(d) })
       try { await api.reorderCajas(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, cajas: previo }); throw e }
     },
-    async savePresupuesto(p: Presupuesto) {
-      const s = await api.savePresupuesto(p)
-      patch(d => ({ ...d, presupuestos: [...d.presupuestos.filter(x => !(x.periodo === s.periodo && x.cajaId === s.cajaId)), s] }))
-    },
+    async savePresupuesto(p: Presupuesto) { await lanzar('savePresupuesto', [p]) },
     /** Plantillas de fuentes/subcajas. Solo guardan configuración: no crean fuentes, subcajas, dinero ni gastos. */
-    async savePlantillaFin(p: PlantillaFinInput) {
-      const s = await api.savePlantillaFin(p)
-      patch(d => { const xs = d.plantillasFin ?? []; return { ...d, plantillasFin: xs.some(x => x.id === s.id) ? xs.map(x => x.id === s.id ? s : x) : [...xs, s] } })
-      return s
-    },
-    async deletePlantillaFin(id: string) {
-      await api.deletePlantillaFin(id)
-      patch(d => ({ ...d, plantillasFin: (d.plantillasFin ?? []).filter(x => x.id !== id) }))
-    },
+    savePlantillaFin: (p: PlantillaFinInput) => lanzar('savePlantillaFin', [p]),
+    async deletePlantillaFin(id: string) { await lanzar('deletePlantillaFin', [id]) },
     /** Orden de las plantillas: se ve al instante; si falla, vuelve al anterior (una sola solicitud por arrastre). */
     async reorderPlantillasFin(tipo: TipoPlantillaFin, ids: string[]) {
       let previo: PlantillaFin[] = []
@@ -293,25 +301,11 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       return { fuentes: raw.fuentes ?? [], fuentesMeses: raw.fuentesMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos }
     },
     /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
-    async saveFuente(f: FuenteInput) {
-      const s = await api.saveFuente(f)
-      patch(d => {
-        const fs = d.fuentes ?? []
-        return { ...d, fuentes: fs.some(x => x.id === s.id) ? fs.map(x => x.id === s.id ? s : x) : [...fs, s] }
-      })
-      return s
-    },
+    saveFuente: (f: FuenteInput) => lanzar('saveFuente', [f]),
     /** Importe de una fuente para un mes ("solo") o desde un mes ("desde"). Nunca toca otros meses. */
-    async saveFuenteMes(m: FuenteMes, quitar = false) {
-      await api.saveFuenteMes(m, quitar)
-      const mismo = (x: FuenteMes) => x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo
-      patch(d => ({ ...d, fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => !mismo(x)), ...(quitar ? [] : [m])] }))
-    },
+    async saveFuenteMes(m: FuenteMes, quitar = false) { await lanzar('saveFuenteMes', [m, quitar]) },
     /** Elimina una fuente y sus importes por mes. Los gastos no se tocan (la atribución se calcula, no se guarda). */
-    async deleteFuente(id: string) {
-      await api.deleteFuente(id)
-      patch(d => ({ ...d, fuentes: (d.fuentes ?? []).filter(x => x.id !== id), fuentesMeses: (d.fuentesMeses ?? []).filter(x => x.fuenteId !== id) }))
-    },
+    async deleteFuente(id: string) { await lanzar('deleteFuente', [id]) },
     /** Orden de las fuentes: se ve al instante; si falla, vuelve al anterior. */
     async reorderFuentes(ids: string[]) {
       let previo: Fuente[] = []
@@ -330,15 +324,9 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       }))
       return r
     },
-    async saveConfig(clave: string, valor: string) {
-      await api.saveConfig(clave, valor)
-      patch(d => ({ ...d, config: { ...d.config, [clave]: valor } }))
-    },
+    async saveConfig(clave: string, valor: string) { await lanzar('saveConfig', [clave, valor]) },
     /** Asocia (o desasocia con '') un movimiento existente a un compromiso. No cambia el gasto. */
-    async vincular(gastoId: string, plantillaId: string) {
-      await api.vincularGasto(gastoId, plantillaId)
-      patch(d => ({ ...d, vinculos: upsertVinculos(d.vinculos, [[gastoId, plantillaId]]) }))
-    },
+    async vincular(gastoId: string, plantillaId: string) { await lanzar('vincular', [gastoId, plantillaId]) },
     /** Conciliación de saldos: solo agrega filas a CONCILIACIONES. Nunca modifica fuentes, gastos, cajas ni presupuestos. */
     async saveConciliacion(i: ConcVerificacionInput) { const f = await api.saveConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
     async saveSeguimientoConciliacion(i: ConcSeguimientoInput) { const f = await api.saveSeguimientoConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
@@ -374,7 +362,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     carpetaRespaldo: () => api.carpetaRespaldo(),
     saveCarpetaRespaldo: (c: string) => api.saveCarpetaRespaldo(c),
     backup: () => api.backup(),
-  }), [api, patch, refresh])
+  }), [api, patch, refresh, lanzar])
 
   /**
    * Ejecuta una escritura sin bloquear la interfaz: la promesa sigue en segundo plano y el resultado real
@@ -500,7 +488,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
   }, [api, guardarOrden])
 
   return {
-    data, loading, error, lastSync, confirmado, refresh, actions, track, pending, plantillas, loadPlantillas, plantillaActions,
+    data, loading, error, lastSync, confirmado, refresh, actions, track, pending, enCola, plantillas, loadPlantillas, plantillaActions,
     lote, setLote, nuevoLote, registrarLote, ordenGastos, reorderGastos, isDemo: !conn && !apiOverride && demoActivo, desconectado,
   }
 }

@@ -400,7 +400,7 @@ test.describe('Apps Script lento o caído', () => {
     // la interfaz sigue usable: cambiar de pestaña, usar filtros y volver
     await go(page, 'Catálogo')
     await go(page, 'Gastos')
-    await expect(page.getByRole('row', { name: /Lento/ })).toHaveCount(0) // aún no confirmado: no se muestra como guardado
+    await expect(page.getByRole('row', { name: /Lento/ })).toHaveCount(1) // UI optimista (v1.23): aparece al instante, aunque el servidor tarde
     await go(page, 'Dashboard')
     await expect(page.getByRole('status').filter({ hasText: 'Gasto registrado correctamente.' })).toBeVisible({ timeout: 6000 })
     await expect.poll(() => total(page)).toBeCloseTo(antes + 4, 2)

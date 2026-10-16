@@ -3,7 +3,8 @@ import { AlertTriangle, ArrowDown, ArrowLeft, ChevronDown, ChevronUp, ListOrdere
 import type { AppStore } from '../lib/store'
 import type { Filters, Gasto } from '../lib/types'
 import { formatDate } from '../lib/dates'
-import { formatMoney, toCents } from '../lib/money'
+import { formatMoney, ratesFromConfig, toCents } from '../lib/money'
+import { totalesLista } from '../lib/totales'
 import { matchesDims } from '../lib/engine'
 import { ambitoLook, categoriaLook, medioLook } from '../lib/visual'
 import type { ModalMode } from '../components/GastoModal'
@@ -108,7 +109,9 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   const pages = Math.max(1, Math.ceil(rows.length / pageSize))
   const current = Math.min(page, pages - 1)
   const visible = rows.slice(current * pageSize, current * pageSize + pageSize)
-  const totalCents = rows.reduce((s, g) => s + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0)
+  // Total con la MISMA regla que el Dashboard: anulados fuera, otras monedas convertidas con el tipo de cambio de Configuración.
+  const monedaBase = cfg.moneda || 'PEN'
+  const tot = useMemo(() => totalesLista(rows, monedaBase, ratesFromConfig(cfg)), [rows, monedaBase, cfg])
 
   // Orden personalizado GLOBAL: el orden se guarda sobre todos los gastos (no solo los visibles). Arrastrar dentro de la página
   // reubica esos gastos en los mismos huecos del orden global; los que no se ven (otras páginas o filtros) no se mueven.
@@ -231,7 +234,18 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="mr-auto">
             <h2 className="text-sm font-semibold">Movimientos</h2>
-            <p className="text-xs text-muted">{rows.length} registro(s) · total <b className="tabular text-ink">{formatMoney(totalCents, cfg.moneda || 'PEN')}</b></p>
+            <p className="text-xs text-muted" data-testid="gastos-total">{rows.length} registro(s) ·{' '}
+              {estado === 'Anulado'
+                ? <>eliminados <b className="tabular text-ink">{formatMoney(tot.anuladosCents, monedaBase)}</b></>
+                : <>total <b className="tabular text-ink">{tot.convertido ? '≈ ' : ''}{formatMoney(tot.cents, monedaBase)}</b>
+                  {tot.convertido && <span data-testid="gastos-total-conv"> (incluye {tot.monedasConvertidas.join(', ')} convertido)</span>}
+                  {estado === 'todos' && tot.nAnulados > 0 && <span data-testid="gastos-total-anulados"> · anulados: {formatMoney(tot.anuladosCents, monedaBase)} (no suman)</span>}</>}
+            </p>
+            {tot.nSinCambio > 0 && estado !== 'Anulado' && (
+              <p role="alert" className="text-xs text-warning" data-testid="gastos-sin-cambio">
+                Falta el tipo de cambio de {tot.sinCambio.join(', ')} en Configuración: {tot.nSinCambio} movimiento(s) no suman al total.
+              </p>
+            )}
           </div>
           <Button variant="outline" onClick={() => store.refresh()} loading={store.loading}><RefreshCw className="size-4" /> <span className="hidden sm:inline">Actualizar</span></Button>
           <Button variant="outline" onClick={() => downloadCsv(rows, `gastos-${filters.desde}_${filters.hasta}.csv`)} disabled={!rows.length}><Download className="size-4" /> CSV</Button>

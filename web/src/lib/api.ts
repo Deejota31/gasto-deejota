@@ -27,7 +27,9 @@ export function saveConnection(c: Connection | null) {
 
 export class ApiError extends Error {
   code: string
-  constructor(code: string, message: string) { super(message); this.code = code }
+  /** Fallo transitorio de Google/Apps Script (saturación, 404 temporal, HTML en vez de JSON): reintentar es seguro. */
+  reintentable: boolean
+  constructor(code: string, message: string, reintentable = false) { super(message); this.code = code; this.reintentable = reintentable }
 }
 
 const envelope = z.object({
@@ -38,21 +40,33 @@ const envelope = z.object({
 })
 
 const RETRYABLE = new Set(['NETWORK', 'TIMEOUT', 'BUSY', 'HTTP'])
-const TIMEOUT_MS = 30_000
+/** Apps Script tarda 12–33 s en responder cuando está frío o saturado: el tiempo máximo por intento lo tolera. */
+const TIMEOUT_MS = 45_000
+/** Códigos HTTP transitorios: límite de uso, errores de servidor y el 404 que Google devuelve a veces al redistribuir el despliegue. */
+const HTTP_TRANSITORIO = new Set([404, 408, 425, 429, 500, 502, 503, 504])
+const ESPERAS_MS = [1000, 3000, 7000]   // backoff exponencial entre los 4 intentos
+/** Espera antes del reintento nº `n` (1..3): 1 s, 3 s, 7 s con ±30 % de jitter para no sincronizar reintentos. */
+export const retardoReintento = (n: number, rnd: () => number = Math.random) => Math.round(ESPERAS_MS[Math.min(n, ESPERAS_MS.length) - 1] * (0.7 + 0.6 * rnd()))
+const depurar = () => { try { return new URLSearchParams(location.search).get('debug') === '1' } catch { return false } }
+
+/** Calienta Apps Script (arranque en frío) con un GET sin esperar ni leer la respuesta. Nunca bloquea ni falla. */
+export function calentar(conn: Connection, fetchImpl: typeof fetch = fetch): void {
+  try { void fetchImpl(conn.url, { method: 'GET', mode: 'no-cors', cache: 'no-store' }).catch(() => undefined) } catch { /* sin red: no importa */ }
+}
 
 export type Transport = (action: string, payload: unknown) => Promise<unknown>
 
 export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
   return async (action, payload) => {
     let lastError: ApiError | null = null
-    // Todas las acciones son idempotentes (el alta lleva su UUID), así que reintentar es seguro. Máximo 3 intentos.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await sleep(1000 * attempt)
+    // Todas las acciones son idempotentes (el alta lleva su UUID), así que reintentar es seguro. Máximo 4 intentos (1 s, 3 s, 7 s entre ellos).
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt) await sleep(retardoReintento(attempt))
       try {
         return await once(conn, action, payload, fetchImpl)
       } catch (e) {
         lastError = e instanceof ApiError ? e : new ApiError('NETWORK', 'Error de red.')
-        if (!RETRYABLE.has(lastError.code)) throw lastError
+        if (!RETRYABLE.has(lastError.code) && !lastError.reintentable) throw lastError
       }
     }
     throw lastError!
@@ -61,6 +75,7 @@ export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch,
 
 async function once(conn: Connection, action: string, payload: unknown, fetchImpl: typeof fetch): Promise<unknown> {
   const ctrl = new AbortController()
+  const t0 = performance.now()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   let res: Response
   try {
@@ -78,14 +93,17 @@ async function once(conn: Connection, action: string, payload: unknown, fetchImp
   } finally {
     clearTimeout(timer)
   }
-  if (!res.ok) throw new ApiError('HTTP', `Apps Script respondió ${res.status}.`)
+  if (!res.ok) throw new ApiError(HTTP_TRANSITORIO.has(res.status) ? 'HTTP' : 'HTTP_FATAL', `Apps Script respondió ${res.status}.`)
+  let texto = ''
+  try { texto = await res.text() } catch { /* cuerpo ilegible */ }
   let json: unknown
-  try { json = await res.json() } catch {
-    // Una página HTML en lugar de JSON suele indicar despliegue sin acceso "Cualquier persona" o URL incorrecta.
-    throw new ApiError('INVALID_RESPONSE', 'Respuesta inválida. Verifica que la URL sea la del despliegue /exec con acceso "Cualquier persona".')
+  try { json = JSON.parse(texto) } catch {
+    // Una página HTML en lugar de JSON: Google saturado (transitorio) o despliegue sin acceso "Cualquier persona" / URL incorrecta.
+    throw new ApiError('INVALID_RESPONSE', 'Respuesta inválida. Verifica que la URL sea la del despliegue /exec con acceso "Cualquier persona".', /^\s*</.test(texto))
   }
   const env = envelope.safeParse(json)
   if (!env.success) throw new ApiError('INVALID_RESPONSE', 'Respuesta con formato inesperado.')
+  if (depurar()) console.debug(`[gd] ${action}: ${Math.round(performance.now() - t0)} ms en total · servidor ${env.data.ms ?? '?'} ms`)
   if (!env.data.ok) throw new ApiError(env.data.error?.code ?? 'SERVER_ERROR', env.data.error?.message ?? 'Error desconocido.')
   return env.data.data
 }
@@ -93,7 +111,13 @@ async function once(conn: Connection, action: string, payload: unknown, fetchImp
 /* ============ Conversión de filas de la hoja ↔ objetos tipados ============ */
 
 const str = z.string()
-const gastoRow = z.tuple([str, z.number(), str, str, str, str, str, str, str, z.boolean(), str, str, str, str, str, str])
+// La fila de un gasto tolera los tipos "casi correctos" que Sheets puede devolver (texto, nulos, fechas ISO completas,
+// "TRUE") y los convierte; lo que de verdad no se puede interpretar (monto "abc") sigue siendo un error.
+const strC = z.preprocess(v => (v === null || v === undefined ? '' : typeof v === 'string' ? v : String(v)), z.string())
+const fechaC = z.preprocess(v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? v.slice(0, 10) : v === null || v === undefined ? '' : String(v)), z.string())
+const numC = z.preprocess(v => (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v), z.number())
+const boolC = z.preprocess(v => (typeof v === 'string' ? v.trim().toUpperCase() === 'TRUE' : v === 1 ? true : v === 0 || v === null || v === undefined ? false : v), z.boolean())
+const gastoRow = z.tuple([fechaC, numC, strC, strC, strC, strC, strC, strC, strC, boolC, strC, strC, strC, strC, strC, strC])
 
 export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
   return {
@@ -262,7 +286,15 @@ export function createApi(t: Transport) {
       return inflight
     },
     async saveGasto(g: GastoInput, mode: 'create' | 'update'): Promise<Gasto> {
-      return rowToGasto(parse(gastoRow, await t('saveGasto', { ...g, mode })))
+      const raw = await t('saveGasto', { ...g, mode })
+      try { return rowToGasto(parse(gastoRow, raw)) } catch (e) {
+        // El backend confirmó la escritura (respondió ok) pero la fila no se puede leer: no se muestra error. Se relee la hoja
+        // y se devuelve el registro tal como quedó guardado; solo si tampoco está ahí el error es real.
+        if (!(e instanceof ApiError) || e.code !== 'INVALID_RESPONSE') throw e
+        const guardado = (await this.getData(true)).gastos.find(x => x.id.toLowerCase() === g.id.toLowerCase())
+        if (guardado) return guardado
+        throw e
+      }
     },
     async setEstado(id: string, estado: 'Activo' | 'Anulado'): Promise<{ actualizadoEn: string }> {
       return parse(z.object({ actualizadoEn: str }), await t('setEstado', { id, estado }))

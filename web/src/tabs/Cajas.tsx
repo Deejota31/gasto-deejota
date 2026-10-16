@@ -459,7 +459,7 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
   const [descripcion, setDescripcion] = useState(origen?.descripcion ?? '')
   const [activo, setActivo] = useState(caja ? cajaActiva(caja) : clonDe ? false : true)
   const [mesAplic, setMesAplic] = useState(mesSel)
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [intentado, setIntentado] = useState(false)   // tras el primer intento de guardar, cada campo se valida al cambiarlo
   const opciones = useMemo(() => {
     const xs = opcionesValor(campo, catalogo, medios)
     return valor && !xs.includes(valor) ? [valor, ...xs] : xs
@@ -479,15 +479,18 @@ function CajaForm({ store, caja, clonDe = null, cajas, catalogo, medios, onClose
     return d > 0 ? 'esta caja' : d < 0 ? o.nombre : (borrador.orden || Infinity) <= o.orden ? 'esta caja' : o.nombre
   }
 
+  // Validación pura sobre el estado actual: el mensaje sigue al alcance elegido y desaparece en cuanto el campo es válido.
+  const m = monto.trim()
+  const errs: Record<string, string> = {}
+  if (!nombre.trim()) errs.nombre = 'Escribe un nombre'
+  if (!/^\d{1,9}([.,]\d{1,2})?$/.test(m) || Number(m.replace(',', '.')) < 0) errs.monto = 'Monto mayor o igual a 0, hasta 2 decimales'
+  if (!valor) errs.valor = `Elige ${campo === 'Medio de pago' ? 'un medio de pago' : `un${campo === 'Categoría' || campo === 'Subcategoría' ? 'a' : ''} ${campo.toLowerCase()}`}`
+  const dup = activo && otras.find(x => cajaActiva(x) && x.filtroCampo === campo && normName(x.filtroValor) === normName(valor))
+  if (dup) errs.valor = `La caja “${dup.nombre}” ya usa ${campo} = ${valor}. Cambia el alcance o desactiva una de las dos.`
+  const errors = intentado ? errs : {}
+
   function save() {
-    const errs: Record<string, string> = {}
-    const m = monto.trim()
-    if (!nombre.trim()) errs.nombre = 'Escribe un nombre'
-    if (!/^\d{1,9}([.,]\d{1,2})?$/.test(m) || Number(m.replace(',', '.')) < 0) errs.monto = 'Monto mayor o igual a 0, hasta 2 decimales'
-    if (!valor) errs.valor = `Elige ${campo === 'Medio de pago' ? 'un medio de pago' : `un${campo === 'Categoría' || campo === 'Subcategoría' ? 'a' : ''} ${campo.toLowerCase()}`}`
-    const dup = activo && otras.find(x => cajaActiva(x) && x.filtroCampo === campo && normName(x.filtroValor) === normName(valor))
-    if (dup) errs.valor = `La caja “${dup.nombre}” ya usa ${campo} = ${valor}. Cambia el alcance o desactiva una de las dos.`
-    setErrors(errs)
+    setIntentado(true)
     if (Object.keys(errs).length) return
     const orden = caja?.orden ?? Math.max(1, ...cajas.map(x => x.orden)) + 1
     const data: Caja = { ...borrador, nombre: nombre.trim(), presupuesto: Math.round(Number(m.replace(',', '.')) * 100) / 100, orden, descripcion: formatearDescripcion(descripcion) }
