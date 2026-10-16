@@ -93,7 +93,13 @@ async function once(conn: Connection, action: string, payload: unknown, fetchImp
 /* ============ Conversión de filas de la hoja ↔ objetos tipados ============ */
 
 const str = z.string()
-const gastoRow = z.tuple([str, z.number(), str, str, str, str, str, str, str, z.boolean(), str, str, str, str, str, str])
+// La fila de un gasto tolera los tipos "casi correctos" que Sheets puede devolver (texto, nulos, fechas ISO completas,
+// "TRUE") y los convierte; lo que de verdad no se puede interpretar (monto "abc") sigue siendo un error.
+const strC = z.preprocess(v => (v === null || v === undefined ? '' : typeof v === 'string' ? v : String(v)), z.string())
+const fechaC = z.preprocess(v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? v.slice(0, 10) : v === null || v === undefined ? '' : String(v)), z.string())
+const numC = z.preprocess(v => (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v), z.number())
+const boolC = z.preprocess(v => (typeof v === 'string' ? v.trim().toUpperCase() === 'TRUE' : v === 1 ? true : v === 0 || v === null || v === undefined ? false : v), z.boolean())
+const gastoRow = z.tuple([fechaC, numC, strC, strC, strC, strC, strC, strC, strC, boolC, strC, strC, strC, strC, strC, strC])
 
 export function rowToGasto(r: z.infer<typeof gastoRow>): Gasto {
   return {
@@ -262,7 +268,15 @@ export function createApi(t: Transport) {
       return inflight
     },
     async saveGasto(g: GastoInput, mode: 'create' | 'update'): Promise<Gasto> {
-      return rowToGasto(parse(gastoRow, await t('saveGasto', { ...g, mode })))
+      const raw = await t('saveGasto', { ...g, mode })
+      try { return rowToGasto(parse(gastoRow, raw)) } catch (e) {
+        // El backend confirmó la escritura (respondió ok) pero la fila no se puede leer: no se muestra error. Se relee la hoja
+        // y se devuelve el registro tal como quedó guardado; solo si tampoco está ahí el error es real.
+        if (!(e instanceof ApiError) || e.code !== 'INVALID_RESPONSE') throw e
+        const guardado = (await this.getData(true)).gastos.find(x => x.id.toLowerCase() === g.id.toLowerCase())
+        if (guardado) return guardado
+        throw e
+      }
     },
     async setEstado(id: string, estado: 'Activo' | 'Anulado'): Promise<{ actualizadoEn: string }> {
       return parse(z.object({ actualizadoEn: str }), await t('setEstado', { id, estado }))

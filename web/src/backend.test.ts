@@ -336,6 +336,25 @@ describe('backend Apps Script', () => {
     expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)
   })
 
+  it('P2: la respuesta de un reintento normaliza lo que Sheets devuelva (Date, número como texto, "TRUE", fechas ISO)', () => {
+    b.post('saveGasto', gasto())
+    b.post('saveGasto', gasto({ mode: 'update', monto: 40 }))          // ya editado: el reintento devuelve la fila guardada
+    const sh = b.ss.getSheetByName('GASTOS')!
+    sh.rows[1][0] = new Date('2026-10-09T05:00:00.000Z')               // fecha como Date
+    sh.rows[1][1] = '40.50'                                            // monto como texto
+    sh.rows[1][9] = 'TRUE'                                             // booleano como texto
+    sh.rows[1][14] = new Date('2026-10-09T10:00:00.000Z')              // creado como Date
+    sh.rows[1][15] = new Date('2026-10-09T11:00:00.000Z')              // actualizado como Date
+    const r = b.post('saveGasto', gasto()).data
+    expect(r[0]).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(r[1]).toBe(40.5)
+    expect(r[9]).toBe(true)
+    expect(r[14]).toBe('2026-10-09T10:00:00.000Z')
+    expect(r[15]).toBe('2026-10-09T11:00:00.000Z')
+    expect(r).toHaveLength(16)
+    expect(r.every((v: unknown, i: number) => i === 1 ? typeof v === 'number' : i === 9 ? typeof v === 'boolean' : typeof v === 'string')).toBe(true)
+  })
+
   it('repararIds: respalda y cambia solo los IDs repetidos, vacíos o inválidos (el primero conserva el suyo)', () => {
     const sh = b.ss.getSheetByName('GASTOS')!
     const row = (id: string, desc: string, monto: number) => ['2026-10-01', monto, 'PEN', 'Auto', 'Gas', desc, 'Plin', 'Variable', 'Personal', false, 'Activo', 'web', '', id, 't0', 't0']

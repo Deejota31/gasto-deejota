@@ -84,3 +84,37 @@ describe('cliente HTTP de Apps Script', () => {
     expect(new Set(r.map(x => x.uid)).size).toBe(4)
   })
 })
+
+describe('P2: guardar un gasto no falla por tipos distintos en la respuesta', () => {
+  const fila = (over: Record<number, unknown> = {}) => {
+    const r: unknown[] = ['2026-10-09', 10, 'PEN', 'Alimentación', 'Cena', 'x', 'Yape', 'Variable', 'Personal', false, 'Activo', 'web', '', 'a1b2c3d4-0000', 't', 't']
+    for (const [i, v] of Object.entries(over)) r[Number(i)] = v
+    return r
+  }
+  const entrada = { id: 'a1b2c3d4-0000', fecha: '2026-10-09', monto: 10, moneda: 'PEN', categoria: 'Alimentación', subcategoria: 'Cena', descripcion: 'x', medioPago: 'Yape', tipoGasto: 'Variable' as const, ambito: 'Personal', esRecurrente: false, comprobanteUrl: '' }
+
+  it('tolera monto como texto, booleano "TRUE", fecha ISO completa y nulos', async () => {
+    const api = createApi(async () => fila({ 0: '2026-10-09T05:00:00.000Z', 1: '12.50', 9: 'TRUE', 12: null }))
+    const g = await api.saveGasto(entrada, 'create')
+    expect(g).toMatchObject({ fecha: '2026-10-09', monto: 12.5, esRecurrente: true, comprobanteUrl: '' })
+  })
+  it('sigue rechazando lo que no es interpretable (monto "abc")', async () => {
+    const api = createApi(async (a: string) => a === 'data' ? { version: 't', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [], presupuestos: [], config: {} } : fila({ 1: 'abc' }))
+    await expect(api.saveGasto(entrada, 'create')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+  it('si la escritura se confirmó pero la respuesta es ilegible, recupera el gasto releyendo la hoja', async () => {
+    const llamadas: string[] = []
+    const api = createApi(async (a: string) => {
+      llamadas.push(a)
+      if (a === 'saveGasto') return { raro: true }
+      return { version: 't', sheetUrl: '', gastos: [fila()], catalogo: [], medios: [], cajas: [], presupuestos: [], config: {} }
+    })
+    const g = await api.saveGasto(entrada, 'create')
+    expect(g.id).toBe('a1b2c3d4-0000')
+    expect(llamadas).toEqual(['saveGasto', 'data'])
+  })
+  it('si tras releer el gasto no está, el error sigue siendo real', async () => {
+    const api = createApi(async (a: string) => a === 'saveGasto' ? { raro: true } : { version: 't', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [], presupuestos: [], config: {} })
+    await expect(api.saveGasto(entrada, 'create')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+})
