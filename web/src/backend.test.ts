@@ -18,6 +18,8 @@ class FakeSheet {
   frozen = 0
   filter: object | null = null
   writes = 0
+  /** Lecturas de una columna entera (varias filas, una columna): lo que el TextFinder evita. */
+  colReads = 0
   constructor(public name: string) {}
   // Como Sheets: la última fila con cualquier valor (un FALSE de casilla cuenta, una celda vacía no).
   getLastRow() {
@@ -39,6 +41,7 @@ class FakeSheet {
 class FakeRange {
   constructor(private s: FakeSheet, private r: number, private c: number, private nr: number, private nc: number) {}
   getValues() {
+    if (this.nr > 1 && this.nc === 1) this.s.colReads++
     return Array.from({ length: this.nr }, (_, i) => Array.from({ length: this.nc }, (_, j) => this.s.rows[this.r - 1 + i]?.[this.c - 1 + j] ?? ''))
   }
   setValues(v: Cell[][]) {
@@ -57,6 +60,25 @@ class FakeRange {
   setFontWeight() { return this }
   setBackground() { return this }
   createFilter() { this.s.filter = {}; return this }
+  getRow() { return this.r }
+  /** Como el TextFinder de Sheets: sin distinguir mayúsculas salvo matchCase(true); matchEntireCell exige igualdad con la celda completa. */
+  createTextFinder(txt: string) {
+    const o = { entera: false, mayus: false }
+    const f = {
+      matchEntireCell: (b: boolean) => { o.entera = b; return f },
+      matchCase: (b: boolean) => { o.mayus = b; return f },
+      findNext: () => {
+        const norm = (v: unknown) => (o.mayus ? String(v) : String(v).toLowerCase())
+        for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) {
+          const v = this.s.rows[this.r - 1 + i]?.[this.c - 1 + j]
+          if (v === undefined || v === '') continue
+          if (o.entera ? norm(v) === norm(txt) : norm(v).includes(norm(txt))) return new FakeRange(this.s, this.r + i, this.c + j, 1, 1)
+        }
+        return null
+      },
+    }
+    return f
+  }
 }
 class FakeSpreadsheet {
   sheets = new Map<string, FakeSheet>([['Sheet1', new FakeSheet('Sheet1')]])
@@ -1185,6 +1207,33 @@ describe('backend Apps Script', () => {
     // repetir el mismo lote es idempotente
     b.post('setEstadoLote', { ids: [ids[1]], estado: 'Anulado' }); b.post('setEstadoLote', { ids: [ids[1]], estado: 'Anulado' })
     expect(estados()[1]).toEqual([ids[1], 'Anulado'])
+  })
+
+  it('P3: buscar un gasto por ID no lee la columna entera (TextFinder) y el comportamiento no cambia', () => {
+    const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
+    ids.forEach(id => b.post('saveGasto', gasto({ id })))
+    const sh = b.ss.getSheetByName('GASTOS')!
+    sh.colReads = 0
+    expect(b.post('setEstado', { id: ids[1].toUpperCase(), estado: 'Anulado' }).ok).toBe(true)         // sin distinguir mayúsculas, como antes
+    const t0 = Date.now(); while (Date.now() === t0) { /* el alta y la edición deben tener marcas de tiempo distintas */ }
+    expect(b.post('saveGasto', gasto({ id: ids[0], mode: 'update', monto: 33 })).data[1]).toBe(33)
+    expect(b.post('saveGasto', gasto({ id: ids[0], monto: 44 })).data[1]).toBe(33)                     // reintento de alta tras una edición: gana lo guardado, sin duplicar
+    expect(sh.colReads).toBe(0)
+    expect(b.post('data', { fresh: true }).data.gastos.map((r: unknown[]) => [r[13], r[10]])).toEqual([[ids[0], 'Activo'], [ids[1], 'Anulado']])
+    expect(b.post('setEstado', { id: '99999999-9999-4999-8999-999999999999', estado: 'Anulado' }).error.code).toBe('NOT_FOUND')
+  })
+
+  it('P3: eliminar/restaurar en lote escribe en bloque (no celda por celda)', () => {
+    const ids = Array.from({ length: 8 }, (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`)
+    ids.forEach(id => b.post('saveGasto', gasto({ id })))
+    const sh = b.ss.getSheetByName('GASTOS')!
+    const antes = sh.writes
+    expect(b.post('setEstadoLote', { ids: [ids[1], ids[4], ids[7]], estado: 'Anulado' }).ok).toBe(true)
+    expect(sh.writes - antes).toBeLessThanOrEqual(2)                                                  // antes: 2 escrituras por gasto
+    const est = b.post('data', { fresh: true }).data.gastos.map((r: unknown[]) => r[10])
+    expect(est).toEqual(['Activo', 'Anulado', 'Activo', 'Activo', 'Anulado', 'Activo', 'Activo', 'Anulado'])
+    const act = b.post('data', { fresh: true }).data.gastos.map((r: unknown[]) => r[15])
+    expect(act[1]).toBe(act[4]); expect(act[1]).toBe(act[7]); expect(act[0]).not.toBe(act[1])           // solo cambia "actualizado" de los elegidos
   })
 
   it('valida entradas en el límite de confianza', () => {

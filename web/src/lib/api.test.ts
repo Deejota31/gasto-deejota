@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, createApi, httpTransport, marcarIds } from './api'
+import { ApiError, createApi, httpTransport, calentar, marcarIds, retardoReintento } from './api'
 import { demoTransport } from './demo'
 
 const conn = { url: 'https://script.google.com/macros/s/x/exec', token: 't'.repeat(32) }
@@ -18,16 +18,49 @@ describe('cliente HTTP de Apps Script', () => {
     expect(JSON.parse(init.body).token).toBe(conn.token)
   })
 
-  it('reintenta errores de red y BUSY hasta 3 intentos', async () => {
+  it('reintenta errores de red y BUSY', async () => {
     const f = vi.fn().mockRejectedValueOnce(new TypeError('fetch failed')).mockResolvedValueOnce(fail('BUSY')).mockResolvedValueOnce(ok(1))
     await expect(httpTransport(conn, f, noSleep)('data', {})).resolves.toBe(1)
     expect(f).toHaveBeenCalledTimes(3)
   })
 
-  it('no reintenta para siempre: falla tras 3 intentos', async () => {
+  it('no reintenta para siempre: 4 intentos como máximo', async () => {
     const f = vi.fn().mockRejectedValue(new TypeError('fetch failed'))
     await expect(httpTransport(conn, f, noSleep)('data', {})).rejects.toMatchObject({ code: 'NETWORK' })
-    expect(f).toHaveBeenCalledTimes(3)
+    expect(f).toHaveBeenCalledTimes(4)
+  })
+
+  it('P3: reintenta 429/500/502/503/504 y el 404 transitorio de Google; no reintenta 400/401/403', async () => {
+    for (const status of [429, 500, 502, 503, 504, 404]) {
+      const f = vi.fn().mockResolvedValueOnce(new Response('<html>Error</html>', { status })).mockResolvedValueOnce(ok(status))
+      await expect(httpTransport(conn, f, noSleep)('data', {})).resolves.toBe(status)
+      expect(f, `HTTP ${status}`).toHaveBeenCalledTimes(2)
+    }
+    for (const status of [400, 401, 403]) {
+      const f = vi.fn().mockResolvedValue(new Response('no', { status }))
+      await expect(httpTransport(conn, f, noSleep)('data', {})).rejects.toMatchObject({ code: 'HTTP_FATAL' })
+      expect(f, `HTTP ${status}`).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('P3: una respuesta HTML con 200 (Apps Script saturado) se reintenta; un cuerpo que no es HTML ni JSON no', async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response('<!DOCTYPE html><html>Servicio no disponible</html>', { status: 200 })).mockResolvedValueOnce(ok('listo'))
+    await expect(httpTransport(conn, f, noSleep)('data', {})).resolves.toBe('listo')
+    expect(f).toHaveBeenCalledTimes(2)
+    const g = vi.fn().mockResolvedValue(new Response('texto plano', { status: 200 }))
+    await expect(httpTransport(conn, g, noSleep)('data', {})).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    expect(g).toHaveBeenCalledTimes(1)
+  })
+
+  it('P3: espera 1 s, 3 s y 7 s (con jitter) entre intentos', async () => {
+    const esperas: number[] = []
+    const f = vi.fn().mockRejectedValue(new TypeError('fetch failed'))
+    await expect(httpTransport(conn, f, ms => { esperas.push(ms); return Promise.resolve() })('data', {})).rejects.toBeInstanceOf(ApiError)
+    expect(esperas).toHaveLength(3)
+    esperas.forEach((ms, i) => { const b = [1000, 3000, 7000][i]; expect(ms).toBeGreaterThanOrEqual(b * 0.7); expect(ms).toBeLessThanOrEqual(b * 1.3) })
+    expect([retardoReintento(1, () => 0), retardoReintento(1, () => 1)]).toEqual([700, 1300])
+    expect(retardoReintento(2, () => 0.5)).toBe(3000)
+    expect(retardoReintento(3, () => 0.5)).toBe(7000)
   })
 
   it('no reintenta errores de validación, permisos ni cuota', async () => {
@@ -49,7 +82,7 @@ describe('cliente HTTP de Apps Script', () => {
       init.signal!.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))
     }))
     const p = httpTransport(conn, f as unknown as typeof fetch, noSleep)('data', {}).catch(e => e)
-    await vi.advanceTimersByTimeAsync(31_000 * 3)
+    await vi.advanceTimersByTimeAsync(46_000 * 4)
     const err = await p
     vi.useRealTimers()
     expect(err).toBeInstanceOf(ApiError)
@@ -116,5 +149,26 @@ describe('P2: guardar un gasto no falla por tipos distintos en la respuesta', ()
   it('si tras releer el gasto no está, el error sigue siendo real', async () => {
     const api = createApi(async (a: string) => a === 'saveGasto' ? { raro: true } : { version: 't', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [], presupuestos: [], config: {} })
     await expect(api.saveGasto(entrada, 'create')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+})
+
+describe('P3: diagnóstico y calentamiento', () => {
+  it('con ?debug=1 registra en consola el tiempo total y el del servidor', async () => {
+    history.pushState({}, '', '/?debug=1')
+    const dbg = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    const f = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ ok: true, data: 1, ms: 123 }), { status: 200 })))
+    await httpTransport(conn, f, noSleep)('data', {})
+    expect(dbg).toHaveBeenCalledWith(expect.stringMatching(/\[gd\] data: \d+ ms en total · servidor 123 ms/))
+    dbg.mockClear()
+    history.pushState({}, '', '/')
+    await httpTransport(conn, f, noSleep)('data', {})
+    expect(dbg).not.toHaveBeenCalled()
+    dbg.mockRestore()
+  })
+  it('calentar lanza un GET no bloqueante y nunca lanza errores', async () => {
+    const f = vi.fn().mockRejectedValue(new TypeError('sin red'))
+    expect(() => calentar(conn, f as unknown as typeof fetch)).not.toThrow()
+    expect(f).toHaveBeenCalledWith(conn.url, expect.objectContaining({ method: 'GET', mode: 'no-cors' }))
+    expect(() => calentar(conn, (() => { throw new Error('x') }) as unknown as typeof fetch)).not.toThrow()
   })
 })

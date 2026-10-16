@@ -36,11 +36,12 @@ describe('operaciones con Google Sheets sin bloquear', () => {
     expect(accepted).toBe(true)
     expect(hook.result.current.store.pending.has('gasto:a')).toBe(true)
     expect(hook.result.current.toasts.at(-1)).toMatchObject({ kind: 'pending', message: 'Guardando gasto…' })
-    expect(hook.result.current.store.data!.gastos).toHaveLength(0) // nada de éxito anticipado
+    expect(hook.result.current.store.data!.gastos.map(g => g.id)).toEqual(['a']) // v1.23: el cambio se ve al instante (optimista)...
+    expect(hook.result.current.toasts.some(t => t.message === MSG.ok)).toBe(false) // ...pero el éxito solo se anuncia con la respuesta real
 
     // Un segundo envío de la misma operación se rechaza (no duplica).
     act(() => { expect(hook.result.current.store.track('gasto:a', MSG, async () => {})).toBe(false) })
-    expect(be.calls.filter(c => c.action === 'saveGasto')).toHaveLength(1)
+    await waitFor(() => expect(be.calls.filter(c => c.action === 'saveGasto')).toHaveLength(1))
 
     await act(async () => { be.calls[1].resolve(gastoRow('a')) })
     await waitFor(() => expect(hook.result.current.store.pending.size).toBe(0))
@@ -53,11 +54,15 @@ describe('operaciones con Google Sheets sin bloquear', () => {
     const { be, hook } = setup()
     await act(async () => { be.calls[0].resolve(base()) })
     act(() => { hook.result.current.store.track('gasto:b', MSG, () => hook.result.current.store.actions.saveGasto(input('b'), 'create')) })
+    expect(hook.result.current.store.data!.gastos.map(g => g.id)).toEqual(['b'])      // se ve al instante
+    await waitFor(() => expect(be.calls).toHaveLength(2))
     await act(async () => { be.calls[1].reject(Object.assign(new Error('No se pudo conectar con Apps Script.'), { code: 'NETWORK' })) })
     const err = hook.result.current.toasts.find(t => t.kind === 'error')!
     expect(err.message).toContain('No se pudo registrar el gasto.')
-    expect(hook.result.current.store.data!.gastos).toHaveLength(0)
+    expect(hook.result.current.store.data!.gastos).toHaveLength(0)                     // al fallar se revierte
     act(() => { err.actions!.find(a => a.label === 'Reintentar')!.run() })
+    expect(hook.result.current.store.data!.gastos.map(g => g.id)).toEqual(['b'])      // el reintento lo vuelve a mostrar al instante
+    await waitFor(() => expect(be.calls).toHaveLength(3))
     expect(be.calls[2].action).toBe('saveGasto')
     expect(be.calls[2].payload.id).toBe('b')
     await act(async () => { be.calls[2].resolve(gastoRow('b')) })
@@ -76,8 +81,11 @@ describe('operaciones con Google Sheets sin bloquear', () => {
       hook.result.current.store.track('gasto:c', MSG, () => hook.result.current.store.actions.saveGasto(input('c'), 'create'))
       hook.result.current.store.track('gasto:d', MSG, () => hook.result.current.store.actions.saveGasto(input('d'), 'create'))
     })
-    await act(async () => { be.calls[3].resolve(gastoRow('d')) })
+    expect(hook.result.current.store.data!.gastos.map(g => g.id).sort()).toEqual(['c', 'd', 'x'])   // ambos se ven al instante
+    await waitFor(() => expect(be.calls).toHaveLength(3))                                           // las escrituras salen una a una, en orden
     await act(async () => { be.calls[2].resolve(gastoRow('c')) })
+    await waitFor(() => expect(be.calls).toHaveLength(4))
+    await act(async () => { be.calls[3].resolve(gastoRow('d')) })
     // 3) llega la lectura vieja (sin c ni d): no debe borrar lo confirmado
     await act(async () => { lectura.resolve(base([gastoRow('x', 5)])) })
     await waitFor(() => expect(hook.result.current.store.loading).toBe(false))
@@ -198,6 +206,7 @@ describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', 
     await act(async () => { be.calls[0].resolve(datos([fila('f1', 'General', 100)])) })
     await act(async () => { void hook.result.current.refresh() })       // lectura en curso
     act(() => { void hook.result.current.actions.saveFuente({ id: 'f2', nombre: 'Extra', monto: 20, moneda: 'PEN', color: '#1e3a8a', icono: '', activo: true, orden: 2, recurrencia: 'mensual', mes: '', medioPago: '' }) })
+    await waitFor(() => expect(be.calls).toHaveLength(3))
     await act(async () => { be.calls[2].resolve(fila('f2', 'Extra', 20, true, 2)) })           // guardado confirmado
     await act(async () => { be.calls[1].resolve(datos([fila('f1', 'General', 100)])) })        // respuesta antigua (sin Extra)
     expect(hook.result.current.data!.fuentes!.map(f => f.id)).toEqual(['f1', 'f2'])

@@ -170,7 +170,7 @@ export default function App({ api }: { api?: Api }) {
   return (
     <div className="min-h-dvh">
       <AppShell tab={tab} onTab={irATab} headerRef={headerRef} avisos={avisos}
-        acciones={{ loading: store.loading, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo, campana: plan.campana }}>
+        acciones={{ loading: store.loading, pendientes: store.enCola, lastSync: store.lastSync, onRefresh: () => void store.refresh(), conectado: !!conn, onConexion: () => setConexionAbierta(true), sheetUrl: store.data?.sheetUrl, isDemo: store.isDemo, campana: plan.campana }}>
         {contenido}
       </AppShell>
 
