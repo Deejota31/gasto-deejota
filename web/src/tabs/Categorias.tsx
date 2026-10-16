@@ -277,7 +277,6 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   const [icono, setIcono] = useState(iconoInicial)
   const [color, setColor] = useState(mode === 'edit' ? (head?.color || look.color) : COLORS[0])
   const [activo, setActivo] = useState(mode === 'edit' ? (nivel === 'ambito' ? amb?.activo : nivel === 'categoria' ? cat?.activo : sub?.activo) ?? true : true)
-  const [error, setError] = useState('')
   const cats = tree.find(a => a.name === ambito)?.cats.map(c => c.name) ?? []
   const label = { ambito: 'ámbito', categoria: 'categoría', subcategoria: 'subcategoría' }[nivel]
   const masc = nivel === 'ambito'
@@ -289,21 +288,30 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
     : 0
 
   // No bloquea: valida, cierra y la escritura sigue en segundo plano; el resultado llega como notificación.
+  // La validación se recalcula con cada cambio: tras el primer intento, el error desaparece en cuanto el campo es válido.
+  const n = nombre.trim().replace(/\s+/g, ' ')
+  const claveCat = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
+  const finalKey = nivel === 'ambito' ? claveCat(n, '', '') : nivel === 'categoria' ? claveCat(ambito, n, '') : claveCat(ambito, categoria, n)
+  const [intentado, setIntentado] = useState(false)
+  function validar(): string {
+    if (!n) return `Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`
+    if (nivel !== 'ambito' && !ambito) return 'Elige un ámbito.'
+    if (nivel === 'subcategoria' && !categoria) return 'Elige una categoría.'
+    const exists = catalogo.some(c => claveCat(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
+    if (exists && (mode === 'create' || normName(n) !== normName(original))) return `Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`
+    return ''
+  }
+  const error = intentado ? validar() : ''
+
   function save() {
-    const n = nombre.trim().replace(/\s+/g, ' ')
-    if (!n) return setError(`Escribe el nombre ${masc ? 'del' : 'de la'} ${label}.`)
-    if (nivel !== 'ambito' && !ambito) return setError('Elige un ámbito.')
-    if (nivel === 'subcategoria' && !categoria) return setError('Elige una categoría.')
-    const key = (a: string, c: string, s: string) => `${normName(a)}|${normName(c)}|${normName(s)}`
-    const finalKey = nivel === 'ambito' ? key(n, '', '') : nivel === 'categoria' ? key(ambito, n, '') : key(ambito, categoria, n)
-    const exists = catalogo.some(c => key(c.ambito, nivel === 'ambito' ? '' : c.categoria, nivel === 'subcategoria' ? c.subcategoria : '') === finalKey)
-    if (exists && (mode === 'create' || normName(n) !== normName(original))) return setError(`Ya existe ese nombre en este ${nivel === 'subcategoria' ? 'categoría' : nivel === 'categoria' ? 'ámbito' : 'catálogo'}.`)
-    const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    setIntentado(true)
+    if (validar()) return
     let renombrado = false
     const a = nivel === 'ambito' ? n : ambito
     const c = nivel === 'ambito' ? '' : nivel === 'categoria' ? n : categoria
     const s = nivel === 'subcategoria' ? n : ''
     const ok = store.track(`cat:${finalKey}`, mode === 'create'
+    const Label = `${label.charAt(0).toUpperCase()}${label.slice(1)}`
       ? { pending: `Creando ${label}…`, ok: `${Label} ${masc ? 'creado' : 'creada'} correctamente.`, error: `No se pudo crear ${masc ? 'el' : 'la'} ${label}.` }
       : { pending: `Actualizando ${label}…`, ok: `${Label} ${masc ? 'actualizado' : 'actualizada'} correctamente.`, error: `Error al actualizar ${masc ? 'el' : 'la'} ${label}.` },
     async () => {
@@ -320,8 +328,8 @@ function CatalogModal({ store, target, tree, onClose }: { store: AppStore; targe
   // Categorías y subcategorías se comparten entre ámbitos: si el nombre ya existe en otro, usa su mismo icono y color.
   const nn = normName(nombre)
   const hermana = mode === 'create' && nn && nivel !== 'ambito'
-    ? catalogo.find(c => nivel === 'categoria' ? !!c.categoria && !c.subcategoria && normName(c.categoria) === nn
-      : c.categoria === categoria && !!c.subcategoria && normName(c.subcategoria) === nn)
+    ? catalogo.find(c => c.ambito !== ambito && (nivel === 'categoria' ? !!c.categoria && !c.subcategoria && normName(c.categoria) === nn
+      : c.categoria === categoria && !!c.subcategoria && normName(c.subcategoria) === nn))   // solo "otro" ámbito: si ya existe en este, el error de duplicado basta
     : undefined
   const heredado = hermana ? (nivel === 'categoria' ? categoriaLook(hermana.categoria, catalogo) : subcategoriaLook(hermana.subcategoria, hermana.categoria, catalogo)) : null
   const Preview = heredado ? heredado.Icon : ICONS[icono] ?? ICONS.tag

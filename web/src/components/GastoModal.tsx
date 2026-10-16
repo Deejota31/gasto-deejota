@@ -81,7 +81,7 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
   const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft, preset))
   // La descripción sigue a la subcategoría (ver useDescripcionSub): editar/clonar conservan la del registro al abrir.
   const desc = useDescripcionSub(form.descripcion, form.subcategoria)
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [intentado, setIntentado] = useState(false)   // tras el primer intento de guardar, cada campo se valida al cambiarlo
   const set = (p: Partial<Form>) => setForm(f => ({ ...f, ...p }))
   const catalogo = store.data?.catalogo ?? []
   const subOptions = opcionesClasif(catalogo, form, mode !== 'create' || !!draft).subsVigentes
@@ -97,18 +97,21 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
   const t = TITLES[mode]
   const symbol = form.moneda === 'PEN' ? 'S/' : form.moneda === 'USD' ? 'US$' : form.moneda
 
+  // Validación pura sobre el estado actual: el error de un campo desaparece en cuanto el campo es válido (sin volver a pulsar Guardar).
+  const montoTxt = form.montoText.trim()
+  const monto = Number(montoTxt.replace(',', '.'))
+  const descripcion = formatearDescripcion(desc.descripcion) // normalización final antes de guardar
+  const parsed = schema.safeParse({ ...form, descripcion })
+  const errs: Record<string, string> = {}
+  if (!montoTxt) errs.monto = 'Ingresa un monto'
+  else if (!AMOUNT.test(montoTxt) || !(monto > 0)) errs.monto = 'Monto mayor a 0, con hasta 2 decimales'
+  if (!parsed.success) parsed.error.issues.forEach(i => { errs[String(i.path[0])] ??= i.message })
+  if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
+  const errors = intentado ? errs : {}
+
   function submit(e?: React.FormEvent) {
     e?.preventDefault()
-    const errs: Record<string, string> = {}
-    const montoTxt = form.montoText.trim()
-    const monto = Number(montoTxt.replace(',', '.'))
-    if (!montoTxt) errs.monto = 'Ingresa un monto'
-    else if (!AMOUNT.test(montoTxt) || !(monto > 0)) errs.monto = 'Monto mayor a 0, con hasta 2 decimales'
-    const descripcion = formatearDescripcion(desc.descripcion) // normalización final antes de guardar
-    const parsed = schema.safeParse({ ...form, descripcion })
-    if (!parsed.success) parsed.error.issues.forEach(i => { errs[String(i.path[0])] ??= i.message })
-    if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
-    setErrors(errs)
+    setIntentado(true)
     if (Object.keys(errs).length || !parsed.success) return
     // El mismo ID viaja en cada reintento: el backend no duplica aunque llegue dos veces.
     // Solo un alta desde plantilla queda vinculada a ella; editar o clonar nunca crea un compromiso nuevo.
