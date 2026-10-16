@@ -264,7 +264,7 @@ function Topbar({ headerRef, actual, acciones, movil, conMenu, botonMenu, onMenu
           {pendientes > 0 && (
             <span role="status" aria-live="polite" data-testid="cambios-pendientes" title="Se guardan en segundo plano; no cierres la pestaña todavía."
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-warning-soft px-2.5 text-xs font-semibold whitespace-nowrap text-warning">
-              <RefreshCw className="size-3.5 animate-spin" aria-hidden />{pendientes} cambio{pendientes === 1 ? '' : 's'} pendiente{pendientes === 1 ? '' : 's'}
+              <RefreshCw className="size-3.5 animate-spin" aria-hidden />{pendientes}<span className="max-sm:sr-only">{' '}cambio{pendientes === 1 ? '' : 's'} pendiente{pendientes === 1 ? '' : 's'}</span>
             </span>
           )}
           <button type="button" onClick={onRefresh} disabled={loading} aria-label="Actualizar datos" title={lastSync ? `Última sincronización ${lastSync.toLocaleTimeString('es-PE')}` : 'Actualizar'}
