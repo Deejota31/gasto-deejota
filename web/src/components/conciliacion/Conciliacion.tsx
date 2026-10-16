@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Download, History, Landmark, Layers, Plus, Search } from 'lucide-react'
 import type { AppStore } from '../../lib/store'
 import { formatDate, monthEnd, monthLabel } from '../../lib/dates'
@@ -34,6 +34,13 @@ export function Conciliacion({ store, today, onRevisarGastos, onNuevoGasto, onIr
   const hoyMes = today.slice(0, 7)
   const [periodo, setPeriodo] = useState(hoyMes)
   const [corte, setCorte] = useState(today)
+  // Si cambia el día con el panel abierto y el usuario seguía en "hoy", período y corte avanzan con la fecha (no se queda en el día anterior).
+  const hoyPrev = useRef(today)
+  if (hoyPrev.current !== today) {
+    if (periodo === hoyPrev.current.slice(0, 7)) setPeriodo(hoyMes)
+    if (corte === hoyPrev.current) setCorte(today)
+    hoyPrev.current = today
+  }
   const [modal, setModal] = useState<Modal>(null)
   const [historialAbierto, setHistorialAbierto] = useState(false)
   const [fPeriodo, setFPeriodo] = useState('')
