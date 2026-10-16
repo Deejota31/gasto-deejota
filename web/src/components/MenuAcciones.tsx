@@ -30,8 +30,16 @@ export function MenuAcciones({ label, acciones: sinOrden, ancho = 224, trigger, 
       setPos({ left, top: abajo ? r.bottom + 4 : Math.max(8, r.top - 4 - h) })
     }
     place()
+    // Con scroll (de la página o de un contenedor) el menú sigue al botón; solo se cierra si el botón sale de la pantalla.
+    const seguir = (e?: Event) => {
+      if (e && menu.current?.contains(e.target as Node)) return
+      const r = btn.current?.getBoundingClientRect()
+      if (!r || r.bottom < 0 || r.top > window.innerHeight) setOpen(false)
+      else place()
+    }
     window.addEventListener('resize', place)
-    return () => window.removeEventListener('resize', place)
+    window.addEventListener('scroll', seguir, true)
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', seguir, true) }
   }, [open, acciones.length])
 
   useEffect(() => {
@@ -44,8 +52,7 @@ export function MenuAcciones({ label, acciones: sinOrden, ancho = 224, trigger, 
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { close(); btn.current?.focus() } }
     document.addEventListener('pointerdown', onDown)
     document.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', close, true)
-    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', close, true) }
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
 
   const item = 'flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-bg focus-visible:bg-bg focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40'
