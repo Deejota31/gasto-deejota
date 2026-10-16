@@ -142,6 +142,7 @@ export default function Categorias({ store }: { store: AppStore }) {
               const l = ambitoLook(a.name, catalogo)
               const on = current?.name === a.name
               const subs = a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)
+              const subsTotal = a.cats.reduce((s, c) => s + c.subs.length, 0)
               return (
                 <div key={a.name} className="relative">
                   <button role="tab" aria-selected={on} type="button" onClick={() => setSel(a.name)}
@@ -151,7 +152,7 @@ export default function Categorias({ store }: { store: AppStore }) {
                       <IconTile color={l.color} Icon={l.Icon} />
                       <div className="min-w-0 pr-10">
                         <p className="truncate text-sm font-semibold" title={a.name}>{a.name}</p>
-                        <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} sub.{!a.activo && ' · inactivo'}</p>
+                        <p className="text-[11px] text-muted">{a.cats.filter(c => c.activo).length} categorías · {subs} activas · {subsTotal} en total{!a.activo && ' · inactivo'}</p>
                       </div>
                     </div>
                   </button>
@@ -212,7 +213,7 @@ function AmbHeader({ a, catalogo, q }: { a: AmbNode; catalogo: CatalogoItem[]; q
       <IconTile color={l.color} Icon={l.Icon} size="lg" />
       <div>
         <h2 className="text-base font-semibold"><Hl text={a.name} q={q} /></h2>
-        <p className="text-xs text-muted">{a.cats.length} categorías · {a.cats.reduce((s, c) => s + c.subs.length, 0)} subcategorías{!a.activo && ' · inactivo'}</p>
+        <p className="text-xs text-muted">{a.cats.length} categorías · {a.cats.reduce((s, c) => s + c.subs.filter(x => x.activo).length, 0)} subcategorías activas · {a.cats.reduce((s, c) => s + c.subs.length, 0)} en total{!a.activo && ' · inactivo'}</p>
       </div>
     </div>
   )
