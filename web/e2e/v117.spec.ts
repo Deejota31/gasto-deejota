@@ -25,7 +25,7 @@ test.describe('v1.17: revisión responsive y menú Agregar', () => {
     test(`${w}×${h}: sin desborde horizontal en los 6 módulos y menú Agregar dentro de la pantalla`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fuentes=3')
-      await expect(page.getByText('Total gastado').first()).toBeVisible()
+      await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
       for (const tab of ['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración']) {
         await go(page, tab)
         await page.waitForTimeout(250)
@@ -47,7 +47,7 @@ test.describe('v1.17: revisión responsive y menú Agregar', () => {
   test('Agregar: elegir una opción cierra el menú y abre su formulario', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/?demo=60')
-    await expect(page.getByText('Total gastado').first()).toBeVisible()
+    await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
     await go(page, 'Catálogo')
     await page.getByRole('button', { name: /^Agregar/ }).first().click()
     await page.getByRole('menuitem').first().click()

@@ -81,7 +81,8 @@ test.describe('P3: UI optimista con Apps Script lento o caído', () => {
 })
 
 const dinero = (t: string) => Number(t.match(/[\d,]+\.\d{2}/)![0].replace(/,/g, ''))
-const kpiTotal = (page: Page) => page.locator('p', { hasText: /^Total gastado/ }).locator('xpath=following-sibling::p[1]').first()
+// "Total gastado" ya no es una tarjeta: el Dashboard lo muestra como "Gastado del período" en el Presupuesto consolidado.
+const kpiTotal = (page: Page) => page.getByTestId('cons-gastado-del-período').locator('p').nth(1)
 
 test.describe('P4: los errores de validación se borran al corregir el campo', () => {
   test('Nuevo gasto: monto y medio de pago', async ({ page }) => {
@@ -192,7 +193,7 @@ test.describe('?demo ignora la conexión guardada', () => {
     const llamadas: string[] = []
     page.on('request', r => { if (r.url().includes('script.google.com')) llamadas.push(r.url()) })
     await page.goto('/?demo=60')
-    await expect(page.locator('p', { hasText: /^Total gastado/ }).locator('xpath=following-sibling::p[1]').first()).toContainText('S/', { timeout: 10000 })
+    await expect(page.getByTestId('cons-gastado-del-período').locator('p').nth(1)).toContainText('S/', { timeout: 10000 })
     expect(llamadas).toEqual([])
     expect(await page.evaluate(() => localStorage.getItem('gd.connection'))).toContain('NO-USAR')
   })
