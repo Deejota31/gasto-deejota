@@ -13,7 +13,13 @@ async function go(page: Page, tab: string) {
   await page.getByRole('dialog', { name: 'Más opciones' }).getByRole('button', { name: tab, exact: true }).click()
 }
 const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
-const total = async (page: Page) => money(await kpi(page, 'Total gastado').innerText())
+// "Total gastado" ya no es una tarjeta: sus cifras viven en el Presupuesto consolidado ("Gastado del período"), que sin filtros de
+// dimensión coincide con el total. Con filtros de ámbito/categoría/medio usa `totalFiltrado` (promedio × movimientos).
+const total = (page: Page) => cons(page, 'gastado-del-período')
+const movimientos = async (page: Page) => Number((await kpi(page, 'Movimientos').innerText()).replace(/\D/g, ''))
+const totalFiltrado = async (page: Page) => money(await kpi(page, 'Promedio por movimiento').innerText()) * (await movimientos(page))
+/** Espera a que el Dashboard tenga datos: el Presupuesto consolidado ya muestra dinero. */
+const datosListos = (page: Page) => page.getByTestId('cons-gastado-del-período')
 const dialog = (page: Page) => page.getByRole('dialog')
 /** Elige una opción en un selector Combobox (por su id "#x" o su nombre accesible); la lista se pinta en un portal. */
 async function pick(page: Page, trigger: string, option: string) {
@@ -76,7 +82,7 @@ test.beforeEach(async ({ page }) => {
   // Las pruebas históricas se escribieron para tarjetas; la vista por defecto ahora es Lista (se prueba aparte).
   await page.addInitScript(() => { try { if (sessionStorage.getItem('vistaDefecto')) return; if (!localStorage.getItem('deejota.vista.fuentes')) localStorage.setItem('deejota.vista.fuentes', 'grid'); if (!localStorage.getItem('deejota.vista.subcajas')) localStorage.setItem('deejota.vista.subcajas', 'grid') } catch { /* sin almacenamiento */ } })
   await page.goto('/?demo=60')
-  await expect(kpi(page, 'Total gastado')).toContainText('S/')
+  await expect(datosListos(page)).toContainText('S/')
 })
 
 test('navega por las pestañas; ya no existe el gráfico "Últimos 6 meses"', async ({ page }) => {
@@ -90,10 +96,16 @@ test('navega por las pestañas; ya no existe el gráfico "Últimos 6 meses"', as
   await expect(page.getByText('Gasto diario', { exact: true })).toBeVisible()
 })
 
-test('cada KPI tiene su icono de información con explicación', async ({ page }) => {
-  for (const l of ['Caja mensual', 'Total gastado', 'Disponible', 'Consumido', 'Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) {
-    await expect(kpi(page, l)).toBeVisible()
+test('cada KPI y cada indicador del presupuesto tiene su icono de información con explicación', async ({ page }) => {
+  // Solo quedan cuatro tarjetas KPI (Presupuesto, Total gastado, Disponible y Consumido viven en el Presupuesto consolidado)
+  for (const l of ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) await expect(kpi(page, l)).toBeVisible()
+  for (const l of ['Caja mensual', 'Total gastado', 'Disponible', 'Presupuesto']) await expect(page.locator('p', { hasText: new RegExp(`^${l}$`) })).toHaveCount(0)
+  await expect(page.getByTestId('kpis').locator('p.text-xs')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
+  const indicadores = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos',
+    'Presupuesto consolidado', 'Gastado del período', 'Disponible consolidado', 'Reservado en cajas', 'Libre inicial', 'Gastado fuera de reservas', 'Saldo libre actual', 'Consumido', 'Cómo se calcula']
+  for (const l of indicadores) {
     const btn = page.getByRole('button', { name: `Información: ${l}`, exact: true })
+    await btn.scrollIntoViewIfNeeded()
     await btn.click()
     await expect(page.getByRole('tooltip')).toBeVisible()
     await page.mouse.move(0, 0) // que el puntero no reabra otro ⓘ al moverse el contenido
@@ -105,11 +117,14 @@ test('cada KPI tiene su icono de información con explicación', async ({ page }
 })
 
 test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) => {
-  const t0 = await total(page)
+  const n0 = await movimientos(page)
+  const t0 = await totalFiltrado(page)
+  const presupuesto0 = await cons(page, 'presupuesto-consolidado')
   await pickMulti(page, 'Ámbito', 'Personal')
   await expect(page.getByRole('button', { name: 'Quitar filtro Personal' })).toBeVisible()
-  const t1 = await total(page)
-  expect(t1).toBeLessThan(t0)
+  await expect.poll(() => movimientos(page)).toBeLessThan(n0)
+  expect(await totalFiltrado(page)).toBeLessThan(t0)
+  expect(await cons(page, 'presupuesto-consolidado')).toBe(presupuesto0)       // el presupuesto usa el período completo
   // Categorías dependientes: solo las del ámbito Personal (Suscripciones sí, Bebé no)
   await page.getByRole('button', { name: 'Categoría', exact: true }).click()
   const cats = page.getByRole('listbox', { name: 'Categoría' })
@@ -117,11 +132,12 @@ test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) 
   await expect(cats.getByRole('option', { name: 'Bebé', exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Limpiar filtros' }).click()
-  expect(await total(page)).toBe(t0)
+  await expect.poll(() => movimientos(page)).toBe(n0)
+  expect(await totalFiltrado(page)).toBe(t0)
   // Presets de período
   await page.getByRole('button', { name: 'Período', exact: true }).click()
   await page.getByRole('dialog', { name: 'Elegir período' }).getByRole('button', { name: 'Este año' }).click()
-  expect(await total(page)).toBeGreaterThanOrEqual(t0)
+  await expect.poll(() => movimientos(page)).toBeGreaterThanOrEqual(n0)
 })
 
 test('presupuesto consolidado: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin usar', async ({ page }) => {
@@ -129,10 +145,10 @@ test('presupuesto consolidado: libre inicial = P − reservado; disponible = P �
   const P = await c('presupuesto-consolidado'), R = await c('reservado-en-cajas')
   expect(await c('libre-inicial')).toBeCloseTo(P - R, 2)
   const disp = money(await page.getByTestId('disponible-consolidado').innerText())
-  expect(disp).toBeCloseTo(P - (await total(page)), 2)                    // sin filtros, gastado del período = Total gastado
+  expect(disp).toBeCloseTo(P - (await c('gastado-del-período')), 2)       // disponible = presupuesto − gastado del período
   expect(await c('disponible-consolidado')).toBeCloseTo(disp, 2)
-  expect(await c('gastado-del-período')).toBeCloseTo(await total(page), 2)
-  expect(money(await kpi(page, 'Disponible').innerText())).toBeCloseTo(disp, 2)
+  // disponible consolidado ≠ saldo libre: difieren en las reservas sin utilizar (siempre ≥ 0)
+  expect(disp).toBeGreaterThanOrEqual((await c('saldo-libre-actual')) - 0.005)
 })
 
 test('medios de pago: orden pedido y sin opciones en blanco', async ({ page }) => {
@@ -285,7 +301,9 @@ test('caso 10: Familia + Bebé + Yape → tabla y KPI muestran exactamente esos 
     suma += money(t.match(/S\/\s?[\d,.]+/)![0])
   }
   await go(page, 'Dashboard')
-  expect(await total(page)).toBeCloseTo(suma, 2)
+  // Dashboard con los mismos filtros: mismos movimientos y mismo total (promedio × movimientos, con la tolerancia del redondeo a céntimos)
+  await expect.poll(() => movimientos(page)).toBe(n)
+  expect(Math.abs((await totalFiltrado(page)) - suma)).toBeLessThanOrEqual(0.005 * n + 0.01)
 })
 
 const toastStack = (page: Page) => page.locator('[aria-live="polite"]').filter({ has: page.locator('[data-kind]') })
@@ -393,7 +411,7 @@ test('históricos: un gasto con una subcategoría retirada se ve y se puede filt
 test.describe('Apps Script lento o caído', () => {
   test('con 2,5 s de latencia se puede navegar mientras se guarda; el éxito llega al final', async ({ page }) => {
     await page.goto('/?demo=60&latencia=2500')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 10000 })
+    await expect(datosListos(page)).toContainText('S/', { timeout: 10000 })
     const antes = await total(page)
     await newGasto(page, { ambito: 'Trabajo', categoria: 'Transporte', sub: 'Moto Taxi', monto: '4', medio: 'Yape', desc: 'Lento' })
     await expect(page.locator('[data-kind="pending"]')).toContainText('Guardando gasto…')
@@ -410,7 +428,7 @@ test.describe('Apps Script lento o caído', () => {
 
   test('si la escritura falla: notificación roja, sin éxito falso, y "Abrir formulario" conserva los datos', async ({ page }) => {
     await page.goto('/?demo=60&falla=1')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await expect(datosListos(page)).toContainText('S/')
     const antes = await total(page)
     await newGasto(page, { ambito: 'Amigos', categoria: 'Salidas', sub: 'Cine', monto: '30', medio: 'Plin', desc: 'Falla' })
     const err = page.getByRole('alert').filter({ hasText: 'No se pudo registrar el gasto.' })
@@ -431,7 +449,7 @@ test.describe('Apps Script lento o caído', () => {
 
   test('las notificaciones no bloquean clics fuera de su área', async ({ page }) => {
     await page.goto('/?demo=60&latencia=3000')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 10000 })
+    await expect(datosListos(page)).toContainText('S/', { timeout: 10000 })
     await newGasto(page, { ambito: 'Personal', categoria: 'Auto', sub: 'Gas', monto: '20', medio: 'Yape', desc: 'Bloqueo' })
     await expect(page.locator('[data-kind="pending"]')).toBeVisible()
     // el botón "Mi hoja"/actualizar está bajo la zona de notificaciones en escritorio: se puede pulsar igual
@@ -612,7 +630,7 @@ test.describe('v1.3: descripción, clonación, plantillas y configuración', () 
 
 test('plantillas con Apps Script caído: el formulario se cierra, sin éxito falso; error con Reintentar y Reabrir formulario con lo escrito', async ({ page }) => {
   await page.goto('/?demo=60&falla=1')
-  await expect(kpi(page, 'Total gastado')).toContainText('S/')
+  await expect(datosListos(page)).toContainText('S/')
   await page.getByRole('button', { name: 'Gastos mensuales' }).click()
   const m = dialog(page)
   await m.getByRole('button', { name: 'Nueva plantilla' }).click()
@@ -640,7 +658,7 @@ test('plantillas con Apps Script caído: el formulario se cierra, sin éxito fal
 
 test('plantillas con tiempo agotado: el error dice que el resultado es incierto y no bloquea', async ({ page }) => {
   await page.goto('/?demo=60&falla=timeout')
-  await expect(kpi(page, 'Total gastado')).toContainText('S/')
+  await expect(datosListos(page)).toContainText('S/')
   await page.getByRole('button', { name: 'Gastos mensuales' }).click()
   const m = dialog(page)
   await m.getByRole('button', { name: 'Más acciones de Luz' }).click()
@@ -697,7 +715,7 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
 
   test('registro masivo con Apps Script caído: no suma nada y conserva la selección para reintentar', async ({ page }) => {
     await page.goto('/?demo=60&falla=1')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await expect(datosListos(page)).toContainText('S/')
     const antes = await total(page)
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     const m = dialog(page)
@@ -996,7 +1014,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
   test('guardar plantillas no bloquea: con 5 s de latencia se navega libremente y el éxito llega al final', async ({ page }) => {
     test.setTimeout(60_000)
     await page.goto('/?demo=60&latencia=5000')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 15_000 })
+    await expect(datosListos(page)).toContainText('S/', { timeout: 15_000 })
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     const m = dialog(page)
     await expect(m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(11, { timeout: 15_000 })
@@ -1023,7 +1041,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
   test('con 15 s de latencia: crear y clonar siguen sin bloquear y no se duplican', async ({ page }) => {
     test.setTimeout(90_000)
     await page.goto('/?demo=60&latencia=15000')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/', { timeout: 25_000 })
+    await expect(datosListos(page)).toContainText('S/', { timeout: 25_000 })
     await page.getByRole('button', { name: 'Gastos mensuales' }).click()
     const m = dialog(page)
     const filas = m.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')
@@ -1165,7 +1183,7 @@ test.describe('v1.8: fuentes de dinero y presupuesto consolidado', () => {
     // Dashboard y Salud financiera usan el mismo cálculo
     await go(page, 'Dashboard')
     expect(await cons(page, 'presupuesto-consolidado')).toBe(3780)
-    expect(money(await kpi(page, 'Disponible').innerText())).toBeCloseTo(3780 - gastado, 2)
+    expect(await cons(page, 'disponible-consolidado')).toBeCloseTo(3780 - gastado, 2)
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
     expect(await saludValor(page, 'pres-presupuesto')).toBe(3780)
@@ -1325,7 +1343,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
   test('orden: filtros → Presupuesto consolidado → acordeones → KPIs → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3')
     const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y
-    const kpiY = await y(page.getByText('Total gastado', { exact: true }).first())
+    const kpiY = await y(page.getByTestId('kpis'))
     const consY = await y(page.getByTestId('caja-general'))
     const accY = await y(page.getByTestId('resumen-cajas'))
     const chartY = await y(page.getByText(/^Gasto acumulado/).first())
@@ -1712,7 +1730,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
   test('actualización automática: se elige en Configuración, avisa en verde y se puede desactivar', async ({ page }) => {
     await page.clock.install()
     await page.goto('/?demo=60')
-    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await expect(datosListos(page)).toContainText('S/')
     await go(page, 'Configuración')
     const sel = page.locator('#cfg-refresco')
     await expect(sel).toContainText('Cada 5 minutos')                        // predeterminado: cada 5 minutos
@@ -2335,7 +2353,7 @@ test.describe('v1.16: navegación, preferencias, medios, calendarios y operacion
     await expect.poll(async () => (await lat.boundingBox())!.width).toBeGreaterThanOrEqual(220)
     expect(await page.evaluate(() => localStorage.getItem('deejota.sidebar.collapsed'))).toBe('0')
     await page.reload()
-    await expect(kpi(page, 'Total gastado')).toContainText('S/')
+    await expect(datosListos(page)).toContainText('S/')
     await expect.poll(async () => (await lat.boundingBox())!.width).toBeGreaterThanOrEqual(220)
     await page.getByRole('button', { name: 'Contraer barra lateral' }).click()
     await expect.poll(async () => (await lat.boundingBox())!.width).toBeLessThanOrEqual(76)

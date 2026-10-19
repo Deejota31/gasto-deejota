@@ -28,6 +28,19 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.24.0 — Dashboard: Presupuesto consolidado protagonista y cuatro KPIs sin duplicados
+
+Solo frontend: **`Code.gs` sigue en 1.23.0 (no hay que volver a desplegarlo)**. No cambia el modelo de datos ni ninguna fórmula (`engine.ts` intacto).
+
+- **Cuatro tarjetas menos**: se quitaron *Presupuesto* (o *Caja mensual*), *Total gastado*, *Disponible* y *Consumido* como tarjetas independientes; sus cifras siguen en el Presupuesto consolidado. Quedan **Promedio diario · Promedio por movimiento · Mayor gasto · Movimientos**, en una sola fila en escritorio (2 columnas en tablet y móvil ancho, 1 en móvil angosto), con la misma altura, estilo, iconos e ⓘ de antes.
+- **Presupuesto consolidado en dos niveles**: principal (*Presupuesto consolidado, Gastado del período, Disponible consolidado, Reservado en cajas*) con cifras grandes e icono; secundario (*Libre inicial, Gastado fuera de reservas, Saldo libre actual, Consumido*) más compacto. Mismos nombres, mismos `data-testid` (`cons-*`) y mismos importes que antes.
+- **Estado en texto + color** en el encabezado: *Dentro del presupuesto* (verde), *Cerca del límite · N % consumido* (ámbar, desde 70 %), *Presupuesto agotado* (ámbar, 100 %), *Presupuesto excedido en S/ X* (rojo; X = −disponible, siempre calculado) y *Sin presupuesto definido* (neutro).
+- **Barra segmentada** e interactiva: gastado fuera de reservas, gastado en cajas, reservas sin utilizar (rayado) y saldo libre. Tooltip con nombre, importe y % del presupuesto (ratón, toque y teclado; Esc lo cierra) y leyenda. Con consumo > 100 % o saldo libre negativo la barra **nunca desborda**: el ancho se calcula sobre la suma de tramos y una marca punteada indica dónde estaba el límite del presupuesto. Los importes no se alteran.
+- **Disponible ≠ Saldo libre**: cada indicador tiene su ⓘ con la definición real (disponible = presupuesto − gastado; saldo libre = libre inicial − gastado fuera de reservas − excesos de cajas; disponible = saldo libre + reservas sin utilizar). El ⓘ del encabezado resume cómo leer el bloque completo.
+- **Orden del Dashboard**: encabezado y acciones → filtros → Presupuesto consolidado → Fuentes de dinero y Cajas / reservas → 4 KPIs → gráficos.
+- **Filtros**: el Presupuesto consolidado sigue usando el período completo (ignora ámbito/categoría/subcategoría/medio/tipo, como antes); los 4 KPIs responden a todos los filtros. Sin llamadas nuevas al backend. El total filtrado sigue visible en la pestaña Gastos.
+- **Pruebas**: `lib/presupuestoVista.test.ts` (reparto de la barra y estados con consumo < 70 %, 70–100 %, = 100 %, > 100 %, saldo libre negativo y exceso en una caja; regresión de las fórmulas del motor), `components/PresupuestoConsolidado.test.tsx`, `tabs/Dashboard.test.tsx` (solo cuatro KPIs, orden, importes idénticos al motor con y sin filtros, sin errores de consola) y `e2e/v124.spec.ts` (escritorio, tablet y móvil sin desborde ni superposición, exceso de presupuesto, barra y tooltips, modo oscuro). Las e2e que leían *Total gastado* / *Disponible* ahora leen *Gastado del período* / *Disponible consolidado*.
+
 ## Novedades v1.23.0 — Correcciones de auditoría (P1–P7), interfaz instantánea
 
 - **P1 · «Hoy» ya no se congela**: nuevo hook `useHoy(tz)` (timeout hasta la medianoche de la zona configurada + `visibilitychange`/`focus`). Lo usan App, formularios, Gastos mensuales y Conciliación; el filtro «Este mes» avanza solo al cambiar de mes y la fecha de corte de la conciliación se actualiza.

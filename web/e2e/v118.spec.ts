@@ -25,7 +25,7 @@ for (const tema of ['light', 'dark'] as const) {
       await page.addInitScript(t => { try { localStorage.setItem('deejota.tema', t); localStorage.setItem('theme', t) } catch { /* */ } }, tema)
       await page.setViewportSize({ width: 1366, height: 768 })
       await page.goto('/?demo=60&fuentes=3')
-      await expect(page.getByText('Total gastado').first()).toBeVisible()
+      await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
       if (tema === 'dark') {
         await go(page, 'Configuración')
         await page.locator('#cfg-tema').click()
@@ -125,7 +125,7 @@ test.describe('Design System: catálogo y responsive', () => {
   test('los colores del catálogo siguen viniendo del catálogo (no de tokens del sistema)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60')
-    await expect(page.getByText('Total gastado').first()).toBeVisible()
+    await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
     await go(page, 'Catálogo')
     const colores = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('[style*="color"]')].map(e => e.style.color).filter(Boolean))
     const propios = new Set(colores.filter(c => !c.startsWith('var(')))
@@ -136,7 +136,7 @@ test.describe('Design System: catálogo y responsive', () => {
     test(`${w}×${h}: sin desborde y botones de módulo en orden`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fuentes=3')
-      await expect(page.getByText('Total gastado').first()).toBeVisible()
+      await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
       for (const tab of ['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración']) {
         await go(page, tab); await page.waitForTimeout(200)
         expect(await sinScrollH(page), `${tab} a ${w}px`).toBe(true)

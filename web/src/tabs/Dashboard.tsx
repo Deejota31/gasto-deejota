@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
-  Percent, PieChart as PieIcon, PiggyBank, Shapes, TrendingUp, Trophy, Wallet,
+  PieChart as PieIcon, Shapes, Trophy,
   Receipt,
 } from 'lucide-react'
 import { aislaDesde, subKey } from '../lib/engine'
@@ -61,7 +61,10 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
 
       {!a ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-28" />)}</div>
+        <div className="space-y-4">
+          <Skeleton className="h-64" />
+          <div className={KPI_GRID}>{Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />)}</div>
+        </div>
       ) : (
         <>
           {a.excluidosSinTipoCambio > 0 && (
@@ -88,21 +91,8 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               : undefined} />
           <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi tone="blue" icon={<Wallet />} label={a.cajas.origen === 'fuentes' ? 'Presupuesto' : 'Caja mensual'} value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.presupuesto) : '—'}
-              hint={a.cajas.origen === 'fuentes' ? `${a.cajas.fuentes.activas} fuente${a.cajas.fuentes.activas === 1 ? '' : 's'} · reservado ${money(a.cajas.reservado)}` : a.cajas.presupuesto ? `Reservado ${money(a.cajas.reservado)}` : 'Defínela en Cajas'}
-              info={a.cajas.origen === 'fuentes'
-                ? <><p>Presupuesto consolidado de {periodoTxt}: la suma de lo que aportan tus fuentes activas (General, Sodexo, extras…). Si el período abarca varios meses, suma cada mes.</p><p>Las cajas son reservas dentro de este monto, no dinero adicional.</p></>
-                : <><p>Presupuesto total de la caja general para {periodoTxt}. Si el período abarca varios meses, suma el presupuesto de cada mes.</p><p>Las cajas (Auto, Bebé, Plan Nube) son reservas dentro de este monto, no dinero adicional.</p></>} />
-            <Kpi tone="coral" icon={<TrendingUp />} label="Total gastado" value={money(a.total)}
-              hint={a.filtrado ? `De ${money(a.totalPeriodo)} en el período` : `${a.count} movimientos`}
-              info={<><p>Suma de los gastos activos del período con todos los filtros aplicados. Los eliminados no cuentan.</p><p>Montos en otra moneda se convierten con el tipo de cambio de Configuración.</p></>} />
-            <Kpi tone={a.cajas.disponible < 0 ? 'red' : 'green'} icon={<PiggyBank />} label="Disponible" value={a.cajas.presupuesto || a.cajas.origen === 'fuentes' ? money(a.cajas.disponible) : '—'}
-              hint={a.cajas.presupuesto ? `Saldo libre ${money(a.cajas.saldoLibre)}` : undefined} tag={a.filtrado ? 'Período completo' : undefined}
-              info={<><p>Disponible = Caja mensual − todo lo gastado en el período (en cajas y fuera de ellas).</p><p>Saldo libre = lo que queda fuera de las reservas de cajas. No cambia con los filtros de categoría, ámbito o medio, porque el presupuesto es del período completo.</p></>} />
-            <Kpi tone="violet" icon={<Percent />} label="Consumido" value={a.cajas.pct === null ? '—' : `${a.cajas.pct}%`} progress={a.cajas.pct}
-              tag={a.filtrado ? 'Período completo' : undefined}
-              info={<p>Porcentaje de la caja mensual ya gastado: gasto del período ÷ caja mensual × 100. Pasa de 100% si te excedes.</p>} />
+          {/* Solo los KPIs que el Presupuesto consolidado no repite (Presupuesto, Gastado, Disponible y Consumido viven allí). */}
+          <div className={KPI_GRID} data-testid="kpis">
             <Kpi tone="sky" icon={<CalendarDays />} label="Promedio diario" value={money(a.promedioDiario)}
               hint={a.estado === 'futuro' ? 'El período aún no comienza' : `${a.diasPeriodo} días ${a.estado === 'en-curso' ? 'transcurridos' : 'del período'}`}
               info={<p>Total gastado ÷ días. Si el período está en curso, cuenta solo los días hasta hoy; si ya terminó, todos sus días.</p>} />
@@ -175,33 +165,28 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
   )
 }
 
-const TONES: Record<string, { tile: string; bar: string }> = {
-  blue: { tile: 'bg-primary-soft text-navy', bar: 'bg-navy' },
-  coral: { tile: 'bg-coral-soft text-coral', bar: 'bg-coral' },
-  green: { tile: 'bg-verde-soft text-verde', bar: 'bg-verde' },
-  red: { tile: 'bg-coral-soft text-danger', bar: 'bg-danger' },
-  violet: { tile: 'bg-morado-soft text-morado', bar: 'bg-morado' },
-  sky: { tile: 'bg-celeste-soft text-celeste', bar: 'bg-celeste' },
+// Escritorio: cuatro tarjetas en una sola fila; tablet y móvil ancho: dos columnas; móvil angosto: una.
+const KPI_GRID = 'grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4'
+
+const TONES: Record<string, { tile: string }> = {
+  blue: { tile: 'bg-primary-soft text-navy' },
+  coral: { tile: 'bg-coral-soft text-coral' },
+  sky: { tile: 'bg-celeste-soft text-celeste' },
 }
 
-function Kpi({ icon, label, value, hint, info, tone, progress, tag }: { icon: ReactNode; label: string; value: string; hint?: string; info: ReactNode; tone: string; progress?: number | null; tag?: string }) {
+function Kpi({ icon, label, value, hint, info, tone }: { icon: ReactNode; label: string; value: string; hint?: string; info: ReactNode; tone: keyof typeof TONES }) {
   const t = TONES[tone]
   return (
-    <div className="relative flex flex-col gap-2 rounded-2xl border border-line bg-card p-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
+    <div className="relative flex h-full min-w-0 flex-col gap-2 rounded-2xl border border-line bg-card p-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
       <div className="flex items-start justify-between gap-2">
         <span className={`grid size-9 place-items-center rounded-xl [&>svg]:size-4.5 ${t.tile}`}>{icon}</span>
         <InfoTooltip title={label}>{info}</InfoTooltip>
       </div>
       <div className="min-w-0">
-        <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted">{label}{tag && <span className="rounded-full bg-bg px-1.5 py-px text-[10px]">{tag}</span>}</p>
-        <p className={`tabular truncate text-lg font-bold tracking-tight sm:text-xl ${tone === 'red' ? 'text-danger' : 'text-ink'}`}>{value}</p>
-        {hint && <p className="truncate text-[11px] text-muted" title={hint}>{hint}</p>}
+        <p className="text-xs font-medium text-muted">{label}</p>
+        <p className="tabular truncate text-lg font-bold tracking-tight text-ink sm:text-xl" title={value}>{value}</p>
+        {hint ? <p className="truncate text-[11px] text-muted" title={hint}>{hint}</p> : <p className="text-[11px] text-transparent select-none" aria-hidden>&nbsp;</p>}
       </div>
-      {progress != null && (
-        <div className="h-1.5 overflow-hidden rounded-full bg-bg" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
-          <div className={`bar-grow h-full rounded-full ${progress > 100 ? 'bg-danger' : t.bar}`} style={{ width: `${Math.min(progress, 100)}%` }} />
-        </div>
-      )}
     </div>
   )
 }
