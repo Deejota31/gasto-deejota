@@ -329,8 +329,6 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     async vincular(gastoId: string, plantillaId: string) { await lanzar('vincular', [gastoId, plantillaId]) },
     /** Revisión del presupuesto: solo agrega filas a REVISIONES_PRESUPUESTO. Nunca modifica fondos, gastos, cajas ni presupuestos. */
     async saveRevisionPresupuesto(i: RevisionPresInput) { const f = await api.saveRevisionPresupuesto(i); patch(d => ({ ...d, revisionesPresupuesto: [...(d.revisionesPresupuesto ?? []).filter(x => x.id !== f.id), f] })) },
-    /** Migra a Fondos del presupuesto (respaldo previo en el backend) y recarga todo: cambiaron nombres de hojas y datos. */
-    async migrarAFondosPresupuesto() { const r = await api.migrarAFondosPresupuesto(); await refresh(true); return r },
     /** Decisión sobre una coincidencia (legítima, pendiente o duplicado confirmado). Nunca modifica movimientos. */
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>) {
       const saved = await api.saveRevision(r)
