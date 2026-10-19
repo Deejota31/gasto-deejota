@@ -28,6 +28,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.25.0 — Iconografía coherente y explorador de gasto acumulado/diario
+
+Solo frontend: **`Code.gs` sigue en 1.23.0**. No cambia ninguna fórmula ni el modelo de datos (`engine.ts` intacto).
+
+- **Presupuesto consolidado, 12 indicadores con icono**: *Libre inicial* (wallet), *Gastado fuera de reservas* (arrow-up-right), *Saldo libre actual* (scale) y *Consumido* (gauge) completan a los principales y a los 4 complementarios. Un único componente de icono (`IconoIndicador`) da el mismo recuadro tintado con el color semántico del indicador en los tres niveles (principal 28 px > complementario 24 px > secundario 20 px), a la izquierda del título; el ⓘ sigue a la derecha. *Presupuesto consolidado* pasa a `landmark` para no repetir `wallet`. En móvil los títulos largos se parten en 2 líneas en vez de cortarse. Misma organización, mismos valores y tooltips.
+- **Explorador de Gasto acumulado + Gasto diario**: clic/toque en cualquier día de **cualquiera de los dos gráficos** (o ← → / Inicio / Fin / Esc con el gráfico enfocado) fija **un solo día seleccionado** compartido por ambos. Se resalta con línea vertical y punto en el acumulado y barra resaltada (las demás se atenúan); la curva mensual completa sigue visible. Clic en el mismo día o **Limpiar selección** lo quita; cambiar de período principal lo restablece.
+- **Panel de detalle** bajo los gráficos: fecha, gasto del día, acumulado hasta esa fecha, nº de movimientos, categorías y lista compacta (scroll interno, máx. ~13 rem) con descripción, ámbito, categoría › subcategoría, medio de pago e importe, con los iconos y colores de Deejota. Día sin gastos: estado vacío (el acumulado se mantiene). Día futuro: se marca como **proyección sin movimientos reales**; no se inventa ningún registro.
+- **Tooltips**: línea → acumulado, gasto del día, ritmo ideal acumulado y diferencia frente al ideal; barras → gasto diario, movimientos y % del gasto del período. La proyección conserva su fórmula.
+- **Local y barato**: la selección no cambia el período, los filtros ni el Presupuesto consolidado/KPIs. Los movimientos de cada día salen de los datos ya cargados (`lib/diario.ts`, memoizado, mismas reglas que el motor): cero consultas al backend por clic. El día del clic se calcula con la posición del puntero (Recharts actualiza su estado con retardo).
+- **Pruebas**: `lib/diario.test.ts`, `components/charts.test.tsx`, iconos en `tabs/Dashboard.test.tsx` y `e2e/v125.spec.ts` (clic real en ambos gráficos, sincronización, día vacío/futuro/con muchos gastos, filtros, cambio de mes, teclado, tooltips, sin peticiones ni errores de consola, móvil táctil).
+
 ## Novedades v1.24.0 — Dashboard: Presupuesto consolidado protagonista y cuatro KPIs sin duplicados
 
 Solo frontend: **`Code.gs` sigue en 1.23.0 (no hay que volver a desplegarlo)**. No cambia el modelo de datos ni ninguna fórmula (`engine.ts` intacto).
