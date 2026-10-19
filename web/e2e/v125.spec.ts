@@ -33,38 +33,59 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
 })
 
-test.describe('Iconografía del Presupuesto consolidado', () => {
-  for (const [w, h] of [[1366, 768], [390, 844]] as const) {
-    test(`${w}×${h}: los 12 indicadores tienen icono a la izquierda del título, ⓘ a la derecha y sin desborde`, async ({ page }) => {
+test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', () => {
+  const ids = ['cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido', 'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
+  for (const [w, h] of [[1366, 768], [834, 1112], [390, 844]] as const) {
+    test(`${w}×${h}: icono a la izquierda del título y del valor, ⓘ a la derecha, sin desborde ni solapes`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fuentes=3')
-      const ids = ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-reservado-en-cajas', 'cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido',
-        'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
       for (const id of ids) {
         const c = page.getByTestId(id)
         await expect(c, id).toBeVisible()
-        const ico = (await c.locator('svg').first().boundingBox())!, titulo = (await c.locator('p').first().boundingBox())!
-        expect(ico.x + ico.width, `${id}: icono a la izquierda del título`).toBeLessThanOrEqual(titulo.x + 2)
+        const ico = (await c.locator('span[aria-hidden="true"]').first().boundingBox())!
+        const [titulo, valor] = await Promise.all([c.locator('p').nth(0).boundingBox(), c.locator('p').nth(1).boundingBox()])
+        expect(ico.x + ico.width, `${id}: icono a la izquierda del título`).toBeLessThanOrEqual(titulo!.x + 1)
+        expect(ico.x + ico.width, `${id}: icono a la izquierda del valor`).toBeLessThanOrEqual(valor!.x + 1)
+        const cb = (await c.boundingBox())!
+        expect(Math.abs(ico.y + ico.height / 2 - (cb.y + cb.height / 2)), `${id}: icono centrado en vertical`).toBeLessThanOrEqual(12)
         const info = (await c.getByRole('button', { name: /^Información:/ }).boundingBox())!
-        expect(info.x, `${id}: ⓘ a la derecha`).toBeGreaterThan(titulo.x)
+        expect(info.x, `${id}: ⓘ a la derecha del título`).toBeGreaterThan(titulo!.x)
+        expect(info.x + info.width, `${id}: ⓘ dentro de la tarjeta`).toBeLessThanOrEqual(cb.x + cb.width + 1)
+        // el ⓘ no se superpone con el valor
+        const solapa = info.x < valor!.x + valor!.width && info.x + info.width > valor!.x && info.y < valor!.y + valor!.height && info.y + info.height > valor!.y
+        expect(solapa, `${id}: ⓘ sobre el valor`).toBe(false)
       }
-      // tamaño de icono por nivel: principal > secundario, y mismo tamaño dentro de cada nivel
-      const tam = async (id: string) => (await page.getByTestId(id).locator('span[aria-hidden="true"]').first().boundingBox())!.width
-      const principales = await Promise.all(ids.slice(0, 4).map(tam)), secundarios = await Promise.all(ids.slice(4, 8).map(tam)), complementarios = await Promise.all(ids.slice(8).map(tam))
-      expect(new Set(principales).size).toBe(1); expect(new Set(secundarios).size).toBe(1); expect(new Set(complementarios).size).toBe(1)
-      expect(principales[0]).toBeGreaterThan(complementarios[0]); expect(complementarios[0]).toBeGreaterThan(secundarios[0])
+      const tam = await Promise.all(ids.map(async id => (await page.getByTestId(id).locator('span[aria-hidden="true"]').first().boundingBox())!.width))
+      expect(new Set(tam).size, 'mismo tamaño de icono').toBe(1)
       expect(await sinScrollH(page)).toBe(true)
     })
   }
 
-  test('los iconos nuevos son los pedidos y el bloque no crece en escritorio', async ({ page }) => {
+  test('1366: alturas uniformes por fila, cuatro por fila y sin la fila de tarjetas grandes', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60&fuentes=3')
+    const fila1 = await Promise.all(ids.slice(0, 4).map(async id => (await page.getByTestId(id).boundingBox())!))
+    const fila2 = await Promise.all(ids.slice(4).map(async id => (await page.getByTestId(id).boundingBox())!))
+    for (const f of [fila1, fila2]) { expect(new Set(f.map(b => Math.round(b.y))).size).toBe(1); expect(new Set(f.map(b => Math.round(b.height))).size).toBe(1) }
+    expect(fila2[0].y).toBeGreaterThan(fila1[0].y)
+    await expect(page.getByTestId('consolidado-resumen').locator('svg')).toHaveCount(0)       // cifras clave en línea, sin tarjetas
+    // los iconos pedidos
     for (const [id, cls] of [['cons-libre-inicial', 'lucide-wallet'], ['cons-gastado-fuera-de-reservas', 'lucide-arrow-up-right'], ['cons-saldo-libre-actual', 'lucide-scale'], ['cons-consumido', 'lucide-gauge']] as const) {
       await expect(page.getByTestId(id).locator(`svg.${cls}`).first(), id).toBeVisible()
     }
-    const h = (await page.getByTestId('consolidado').boundingBox())!.height
-    expect(h).toBeLessThanOrEqual(420)
+    expect((await page.getByTestId('consolidado').boundingBox())!.height).toBeLessThanOrEqual(420)
+  })
+
+  test('tablet 834 y móvil 390: dos por fila; las cifras clave siguen visibles', async ({ page }) => {
+    await page.setViewportSize({ width: 834, height: 1112 })
+    await page.goto('/?demo=60&fuentes=3')
+    const ys = await Promise.all(ids.map(async id => Math.round((await page.getByTestId(id).boundingBox())!.y)))
+    expect(new Set(ys).size).toBe(4)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.waitForTimeout(200)
+    const ys2 = await Promise.all(ids.map(async id => Math.round((await page.getByTestId(id).boundingBox())!.y)))
+    expect(new Set(ys2).size).toBe(4)
+    for (const id of ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-reservado-en-cajas']) await expect(page.getByTestId(id)).toBeVisible()
   })
 })
 

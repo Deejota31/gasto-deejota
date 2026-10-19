@@ -100,9 +100,9 @@ test('cada KPI y cada indicador del presupuesto tiene su icono de información c
   // Solo quedan cuatro tarjetas KPI (Presupuesto, Total gastado, Disponible y Consumido viven en el Presupuesto consolidado)
   for (const l of ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) await expect(kpi(page, l)).toBeVisible()
   for (const l of ['Caja mensual', 'Total gastado', 'Disponible', 'Presupuesto']) await expect(page.locator('p', { hasText: new RegExp(`^${l}$`) })).toHaveCount(0)
-  await expect(page.getByTestId('kpis').locator('> div > div > p:first-child')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
+  await expect(page.getByTestId('kpis').locator('> div p:first-of-type')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
   const indicadores = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos',
-    'Presupuesto consolidado', 'Gastado del período', 'Disponible consolidado', 'Reservado en cajas', 'Libre inicial', 'Gastado fuera de reservas', 'Saldo libre actual', 'Consumido', 'Cómo se calcula']
+    'Libre inicial', 'Gastado fuera de reservas', 'Saldo libre actual', 'Consumido', 'Cómo se calcula']
   for (const l of indicadores) {
     const btn = page.getByRole('button', { name: `Información: ${l}`, exact: true })
     await btn.scrollIntoViewIfNeeded()
@@ -113,7 +113,7 @@ test('cada KPI y cada indicador del presupuesto tiene su icono de información c
     await expect(page.getByRole('tooltip')).toHaveCount(0)
   }
   // los gráficos también llevan su ⓘ
-  expect(await page.getByRole('button', { name: /^Información: / }).count()).toBeGreaterThanOrEqual(13)
+  expect(await page.getByRole('button', { name: /^Información: / }).count()).toBeGreaterThanOrEqual(9)
 })
 
 test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) => {
