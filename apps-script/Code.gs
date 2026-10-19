@@ -1662,7 +1662,7 @@ function generarDatosPrueba() {
     vincular_(ss, vinc.map(function (v) { return [v[0], v[1]]; }));
     // ---------- Presupuesto de jul–sep: fondo de un solo mes con importes propios (no afecta octubre) ----------
     var h = fondosSheets_();
-    appendRows_(h.fondos, [[PRUEBA_FONDO, 'Presupuesto prueba (jul–sep)', 2500, 'PEN', '#6366F1', '', true, 99, 'unica', '2026-07', '', now, now]]);
+    appendRows_(h.fondos, [[PRUEBA_FONDO, 'Presupuesto prueba (jul–sep)', 2500, 'PEN', '#6366F1', '', true, 99, 'unica', '2026-07', '', now, now, 'extra']]);
     appendRows_(h.meses, [[PRUEBA_FONDO, '2026-08', 2500, 'solo', now], [PRUEBA_FONDO, '2026-09', 1500, 'solo', now]]);
     props.setProperty('PRUEBA_DATOS', JSON.stringify(reg));
     invalidateCache_();

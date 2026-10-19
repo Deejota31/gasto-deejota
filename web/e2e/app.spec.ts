@@ -1179,7 +1179,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await dialog(page).getByRole('button', { name: 'Desactivar' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)
     await expect(fondo(page, 'Extra 1').getByTestId('estado-fondo')).toHaveText('Inactivo')
-    await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivada' })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivado' })).toBeVisible()
     // Dashboard y Salud financiera usan el mismo cálculo
     await go(page, 'Dashboard')
     expect(await cons(page, 'presupuesto-consolidado')).toBe(3780)
@@ -1352,7 +1352,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     const fondos = page.getByRole('button', { name: /^Fondos del presupuesto/ }), subcajas = page.getByRole('button', { name: /^Cajas \/ reservas/ })
     await expect(fondos).toHaveAttribute('aria-expanded', 'false')
     await expect(subcajas).toHaveAttribute('aria-expanded', 'false')
-    await expect(fondos).toContainText('3 activas · S/ 4,780.00')
+    await expect(fondos).toContainText('3 activos · S/ 4,780.00')
     await expect(page.getByRole('list', { name: 'Fondos del período' })).toHaveCount(0)            // no se renderiza cerrado
     await fondos.click()
     await expect(page.getByRole('list', { name: 'Fondos del período' }).getByRole('listitem')).toHaveCount(3)
@@ -1937,7 +1937,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await expect(page.getByRole('status').filter({ hasText: 'Sodexo clon creado inactivo' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => nFondos(page)).toBe(4)
     expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)                      // no sumó dinero
-    await expect(fondo(page, 'Sodexo clon')).toContainText('Inactiva')
+    await expect(fondo(page, 'Sodexo clon')).toContainText('Inactivo')
     expect((await fondo(page, 'Sodexo').innerText()).match(/disponible\s+(S\/\s*[\d,.]+)/)![1]).toBe(dispSodexo)   // sus gastos siguen en la original
     await actualizar(page)
     expect(await nFondos(page)).toBe(4)                                                // ni un registro duplicado
@@ -1982,7 +1982,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await b.getByRole('button', { name: 'Desactivar en su lugar' }).click()
     await dialog(page).getByRole('button', { name: 'Desactivar', exact: true }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4500)
-    await expect(fondo(page, 'Sodexo')).toContainText('Inactiva')
+    await expect(fondo(page, 'Sodexo')).toContainText('Inactivo')
     expect(await nFondos(page)).toBe(3)
   })
 

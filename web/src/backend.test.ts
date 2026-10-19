@@ -2189,6 +2189,35 @@ describe('v1.26 migración Fuentes de dinero → Fondos del presupuesto (backend
     expect(b.post('data', { fresh: true }).data.migracion.pendiente).toBe(false)
   })
 
+  it('si se interrumpe a la mitad, informa dónde está el respaldo y al repetirla termina sin perder ni duplicar filas', () => {
+    legacy()
+    const meses = b.ss.getSheetByName('FUENTES_MESES')!
+    const original = meses.setName.bind(meses)
+    meses.setName = () => { throw new Error('boom') }
+    const r1 = b.post('migrarAFondosPresupuesto')
+    expect(r1.ok).toBe(false); expect(r1.error.code).toBe('MIGRACION_ERROR'); expect(r1.error.message).toContain('https://copy/')
+    expect(b.props.get('MIGRACION_FONDOS')).toBe('error')
+    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')).toBeTruthy()             // el primer paso ya se hizo
+    meses.setName = original
+    const r2 = b.post('migrarAFondosPresupuesto')
+    expect(r2.ok).toBe(true); expect(r2.data.migrada).toBe(true)
+    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows.slice(1).filter(x => x[0])).toHaveLength(5)
+    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.rows.slice(1).filter(x => x[0])).toHaveLength(2)
+    expect(b.props.get('MIGRACION_FONDOS')).toBe('completa')
+  })
+
+  it('la migración no cambia los datos financieros: fondos e importes por mes idénticos antes y después (IDs, montos, períodos, recurrencia)', () => {
+    legacy()
+    const antes = b.post('data', { fresh: true }).data
+    b.post('migrarAFondosPresupuesto')
+    const despues = b.post('data', { fresh: true }).data
+    expect(despues.fondos).toEqual(antes.fondos)
+    expect(despues.fondosMeses).toEqual(antes.fondosMeses)
+    expect(despues.gastos).toEqual(antes.gastos)
+    expect(despues.cajas).toEqual(antes.cajas)
+    expect(despues.presupuestos).toEqual(antes.presupuestos)
+  })
+
   it('tras migrar, crear un fondo guarda el tipo elegido y es independiente de la recurrencia', () => {
     legacy(); b.post('migrarAFondosPresupuesto')
     const r = b.post('saveFondo', { id: 'f-ahorro', nombre: 'Ahorro viaje', monto: 500, moneda: 'PEN', recurrencia: 'mensual', tipo: 'ahorro_asignado', color: '#123456' })
@@ -2197,6 +2226,11 @@ describe('v1.26 migración Fuentes de dinero → Fondos del presupuesto (backend
     expect(b.post('saveFondo', { id: 'f-x', nombre: 'X', monto: 1, moneda: 'PEN', recurrencia: 'mensual', tipo: 'otro' }).error.code).toBe('VALIDATION')
     // editar sin enviar tipo conserva el anterior
     expect(b.post('saveFondo', { id: 'f-ahorro', nombre: 'Ahorro viaje', monto: 600, moneda: 'PEN', recurrencia: 'mensual' }).data[13]).toBe('ahorro_asignado')
+  })
+
+  it('los datos de prueba también nacen con tipo y no activan el aviso de migración', () => {
+    b.post('generarDatosPrueba')
+    expect(b.post('data', { fresh: true }).data.migracion.pendiente).toBe(false)
   })
 
   it('un libro nuevo no necesita migración', () => {
