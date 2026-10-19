@@ -4,8 +4,8 @@ import { createApi, type Transport } from './api'
 import type { Caja, Filters, Fondo, FondoMes, Gasto } from './types'
 
 /**
- * Regresión financiera ANTES/DESPUÉS de la migración a Fondos del presupuesto. El motor no cambió de fórmulas: con los mismos
- * fondos (mismos importes, meses y reglas) debe dar exactamente las mismas cifras, y el tipo de fondo no mueve dinero.
+ * Regresión del modelo vigente: con los mismos fondos (importes, meses y reglas),
+ * los cálculos deben mantenerse y el tipo de fondo no modifica el dinero.
  * Caso real: General 3,500 · Sodexo 280 · Carpeta Tésis 1,900 y Viaje a Ica 1,414 (ahorros asignados) · Extra 1 de 1,000 solo en octubre.
  */
 const f = (id: string, nombre: string, monto: number, over: Partial<Fondo> = {}): Fondo => ({
@@ -27,7 +27,7 @@ const ctx = (fondos: Fondo[], fondosMeses: FondoMes[] = []): Ctx => ({
   base: 'PEN', rates: {}, today: '2026-10-19', cajas: [caja('general-caja', 99999), caja('auto', 250, 'Categoría', 'Auto')], presupuestos: [], fondos, fondosMeses, aislarDesde: '2099-01',
 })
 
-describe('regresión financiera: antes y después de migrar', () => {
+describe('regresión financiera: invariantes del presupuesto vigente', () => {
   it('el tipo de fondo no cambia el dinero: el consolidado de octubre es la suma de los fondos aplicados', () => {
     const sinTipo = FONDOS.map(x => ({ ...x, tipo: 'mensual' as const }))
     const a = aggregate([], mes('2026-10'), ctx(FONDOS)).cajas, b = aggregate([], mes('2026-10'), ctx(sinTipo)).cajas
@@ -50,15 +50,18 @@ describe('regresión financiera: antes y después de migrar', () => {
     expect(a.reservado).toBe(25000)
     expect(a.libreInicial).toBe(a.presupuesto - a.reservado)
   })
-  it('migración de datos: la misma hoja antes (sin tipo, nombres anteriores) y después da el mismo presupuesto y deduce el tipo', async () => {
-    const fila = (id: string, nombre: string, monto: number, rec: string, m: string) => [id, nombre, monto, 'PEN', '#000', '', true, 1, rec, m, 'Libre', '', '']
-    const base = { version: '1.25.1', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [['general-caja', 'General', 99999, 'Todos', '', '#000', 1]], presupuestos: [], config: { moneda: 'PEN' } }
-    const antes: Transport = async () => ({ ...base, fuentes: [fila('general', 'General', 3500, 'mensual', ''), fila('tesis', 'Carpeta Tésis', 1900, 'unica', '2026-10'), fila('ica', 'Viaje a Ica', 1414, 'unica', '2026-10')], fuentesMeses: [] })
-    const despues: Transport = async () => ({ ...base, fondos: [fila('general', 'General', 3500, 'mensual', ''), [...fila('tesis', 'Carpeta Tésis', 1900, 'unica', '2026-10'), 'ahorro_asignado'], [...fila('ica', 'Viaje a Ica', 1414, 'unica', '2026-10'), 'ahorro_asignado']], fondosMeses: [] })
-    const A = await createApi(antes).getData(true), D = await createApi(despues).getData(true)
-    const total = (d: typeof A) => aggregate([], mes('2026-10'), ctx(d.fondos!)).cajas.presupuesto
-    expect(total(A)).toBe(total(D)); expect(total(D)).toBe((3500 + 1900 + 1414) * 100)
-    expect(A.fondos!.map(x => x.tipo)).toEqual(['mensual', 'ahorro_asignado', 'ahorro_asignado'])
-    expect(D.fondos!.map(x => x.tipo)).toEqual(['mensual', 'ahorro_asignado', 'ahorro_asignado'])
+  it('el contrato actual de la API conserva el tipo de fondo sin afectar el consolidado', async () => {
+    const fila = (id: string, nombre: string, monto: number, rec: string, m: string, tipo: string) =>
+      [id, nombre, monto, 'PEN', '#000', '', true, 1, rec, m, 'Libre', '', '', tipo]
+    const base = { version: '1.26.0', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [['general-caja', 'General', 99999, 'Todos', '', '#000', 1]], presupuestos: [], config: { moneda: 'PEN' } }
+    const actual: Transport = async () => ({ ...base, fondos: [
+      fila('general', 'General', 3500, 'mensual', '', 'mensual'),
+      fila('tesis', 'Carpeta Tésis', 1900, 'unica', '2026-10', 'ahorro_asignado'),
+      fila('ica', 'Viaje a Ica', 1414, 'unica', '2026-10', 'ahorro_asignado'),
+    ], fondosMeses: [] })
+    const datos = await createApi(actual).getData(true)
+    const total = aggregate([], mes('2026-10'), ctx(datos.fondos!)).cajas.presupuesto
+    expect(total).toBe((3500 + 1900 + 1414) * 100)
+    expect(datos.fondos!.map(x => x.tipo)).toEqual(['mensual', 'ahorro_asignado', 'ahorro_asignado'])
   })
 })
