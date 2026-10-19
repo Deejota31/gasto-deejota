@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
   Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
@@ -14,7 +14,7 @@ import type { Caja, Filters } from '../lib/types'
 import { categoriaLook, subcategoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
-import { BotonMensual, BotonNuevo, Card, Empty, ErrorBox, InfoTooltip, Segmented, Skeleton } from '../components/ui'
+import { BotonMensual, BotonNuevo, Card, Empty, ErrorBox, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
 import { CajaModal } from '../components/cajas'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
@@ -62,8 +62,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
 
       {!a ? (
         <div className="space-y-4">
-          <Skeleton className="h-64" />
-          <div className={KPI_GRID}>{Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28" />)}</div>
+          <Skeleton className="h-80" />
         </div>
       ) : (
         <>
@@ -84,27 +83,26 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             )
           })()}
 
-          {/* Primero el presupuesto consolidado y sus acordeones, luego los KPIs */}
+          {/* Todos los indicadores viven en el Presupuesto consolidado (los cuatro complementarios al final del bloque) */}
           <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
+            complementarios={[
+              { etiqueta: 'Promedio diario', valor: money(a.promedioDiario), icono: <CalendarDays />,
+                pista: a.estado === 'futuro' ? 'El período aún no comienza' : `${a.diasPeriodo} días ${a.estado === 'en-curso' ? 'transcurridos' : 'del período'}`,
+                info: <p>Total gastado ÷ días. Si el período está en curso, cuenta solo los días hasta hoy; si ya terminó, todos sus días.</p> },
+              { etiqueta: 'Promedio por movimiento', valor: money(a.promedioMovimiento), icono: <Calculator />, pista: 'Ticket promedio',
+                info: <p>Total gastado ÷ cantidad de movimientos activos con los filtros elegidos.</p> },
+              { etiqueta: 'Mayor gasto', valor: a.max ? money(a.maxCents) : '—', icono: <Trophy />,
+                pista: a.max ? `${a.max.descripcion || a.max.subcategoria || a.max.categoria} · ${formatDate(a.max.fecha, data!.config.formato_fecha)}` : undefined,
+                info: <p>El movimiento individual más alto del período con los filtros elegidos.</p> },
+              { etiqueta: 'Movimientos', valor: String(a.count), icono: <Hash />,
+                pista: a.count ? `${new Set(data!.gastos.filter(g => g.estado === 'Activo' && g.fecha >= filters.desde && g.fecha <= filters.hasta).map(g => g.fecha)).size} días con gastos` : undefined,
+                info: <p>Cantidad de gastos activos que cumplen los filtros.</p> },
+            ]}
             accion={a.cajas.origen !== 'fuentes' && a.cajas.general
               ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
               : undefined} />
           <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />
 
-          {/* Solo los KPIs que el Presupuesto consolidado no repite (Presupuesto, Gastado, Disponible y Consumido viven allí). */}
-          <div className={KPI_GRID} data-testid="kpis">
-            <Kpi tone="sky" icon={<CalendarDays />} label="Promedio diario" value={money(a.promedioDiario)}
-              hint={a.estado === 'futuro' ? 'El período aún no comienza' : `${a.diasPeriodo} días ${a.estado === 'en-curso' ? 'transcurridos' : 'del período'}`}
-              info={<p>Total gastado ÷ días. Si el período está en curso, cuenta solo los días hasta hoy; si ya terminó, todos sus días.</p>} />
-            <Kpi tone="sky" icon={<Calculator />} label="Promedio por movimiento" value={money(a.promedioMovimiento)} hint="Ticket promedio"
-              info={<p>Total gastado ÷ cantidad de movimientos activos con los filtros elegidos.</p>} />
-            <Kpi tone="coral" icon={<Trophy />} label="Mayor gasto" value={a.max ? money(a.maxCents) : '—'}
-              hint={a.max ? `${a.max.descripcion || a.max.subcategoria || a.max.categoria} · ${formatDate(a.max.fecha, data!.config.formato_fecha)}` : undefined}
-              info={<p>El movimiento individual más alto del período con los filtros elegidos.</p>} />
-            <Kpi tone="blue" icon={<Hash />} label="Movimientos" value={String(a.count)}
-              hint={a.count ? `${new Set(data!.gastos.filter(g => g.estado === 'Activo' && g.fecha >= filters.desde && g.fecha <= filters.hasta).map(g => g.fecha)).size} días con gastos` : undefined}
-              info={<p>Cantidad de gastos activos que cumplen los filtros.</p>} />
-          </div>
 
 
           {data!.gastos.length === 0 ? (
@@ -161,32 +159,6 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
       )}
 
       {editCaja && a && <CajaModal store={store} target={editCaja} cajas={a.cajas} mes={mes} money={money} onClose={() => setEditCaja(null)} />}
-    </div>
-  )
-}
-
-// Escritorio: cuatro tarjetas en una sola fila; tablet y móvil ancho: dos columnas; móvil angosto: una.
-const KPI_GRID = 'grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4'
-
-const TONES: Record<string, { tile: string }> = {
-  blue: { tile: 'bg-primary-soft text-navy' },
-  coral: { tile: 'bg-coral-soft text-coral' },
-  sky: { tile: 'bg-celeste-soft text-celeste' },
-}
-
-function Kpi({ icon, label, value, hint, info, tone }: { icon: ReactNode; label: string; value: string; hint?: string; info: ReactNode; tone: keyof typeof TONES }) {
-  const t = TONES[tone]
-  return (
-    <div className="relative flex h-full min-w-0 flex-col gap-2 rounded-2xl border border-line bg-card p-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_4px_16px_rgb(15_23_42/0.04)] transition hover:-translate-y-0.5 hover:shadow-md sm:p-4">
-      <div className="flex items-start justify-between gap-2">
-        <span className={`grid size-9 place-items-center rounded-xl [&>svg]:size-4.5 ${t.tile}`}>{icon}</span>
-        <InfoTooltip title={label}>{info}</InfoTooltip>
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-muted">{label}</p>
-        <p className="tabular truncate text-lg font-bold tracking-tight text-ink sm:text-xl" title={value}>{value}</p>
-        {hint ? <p className="truncate text-[11px] text-muted" title={hint}>{hint}</p> : <p className="text-[11px] text-transparent select-none" aria-hidden>&nbsp;</p>}
-      </div>
     </div>
   )
 }

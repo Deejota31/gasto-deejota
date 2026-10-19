@@ -31,7 +31,10 @@ const SEGMENTO: Record<ClaveSegmento, { color: string; estilo: CSSProperties }> 
   libre: { color: 'var(--success)', estilo: { background: 'color-mix(in srgb, var(--success) 40%, transparent)' } },
 }
 
-export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode }) {
+/** Métrica complementaria (nivel 4): promedio diario, promedio por movimiento, mayor gasto y movimientos. */
+export type Complementario = { etiqueta: string; valor: string; pista?: string; info: ReactNode; icono: ReactNode }
+
+export function PresupuestoConsolidado({ c, money, periodo, accion, complementarios }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode; complementarios?: Complementario[] }) {
   const P = c.presupuesto
   const def = P > 0 || c.origen === 'fuentes'
   const v = (n: number) => (def ? money(n) : '—')
@@ -103,6 +106,13 @@ export function PresupuestoConsolidado({ c, money, periodo, accion }: { c: Cajas
             info="Gastado del período ÷ presupuesto consolidado. Menos de 70 %: holgado; desde 70 %: cerca del límite; más de 100 %: presupuesto excedido."
             barra={c.pct === null ? undefined : { pct: c.pct, color: TONO_VAR[estado.tono] }} />
         </div>
+
+        {/* Nivel 4: métricas complementarias, compactas; responden a los filtros (a diferencia del presupuesto). */}
+        {complementarios && complementarios.length > 0 && (
+          <div className="grid grid-cols-2 gap-px border-t border-line bg-line lg:grid-cols-4" data-testid="kpis">
+            {complementarios.map(k => <Compacto key={k.etiqueta} {...k} />)}
+          </div>
+        )}
       </div>
 
       {c.sobreasignado && (
@@ -128,6 +138,20 @@ function Principal({ etiqueta, valor, icono, color, fondo, info, pista, testidVa
       </div>
       <p className="tabular mt-2 truncate text-lg font-bold tracking-tight sm:text-xl lg:text-2xl" style={{ color }} title={valor} data-testid={testidValor}>{valor}</p>
       {pista && <span className="mt-0.5 block truncate text-[11px] font-medium text-muted">{pista}</span>}
+    </div>
+  )
+}
+
+function Compacto({ etiqueta, valor, pista, info, icono }: Complementario) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 bg-card px-3 py-2 sm:px-4" data-testid={`kpi-${etiqueta.toLowerCase().replace(/\s+/g, '-')}`}>
+      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-bg text-muted [&>svg]:size-3.5">{icono}</span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] leading-tight text-muted">{etiqueta}</p>
+        <p className="tabular truncate text-sm leading-tight font-semibold text-ink" title={valor}>{valor}</p>
+        {pista && <p className="truncate text-[10px] leading-tight text-muted" title={pista}>{pista}</p>}
+      </div>
+      <InfoTooltip title={etiqueta}>{info}</InfoTooltip>
     </div>
   )
 }

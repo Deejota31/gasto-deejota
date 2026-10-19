@@ -36,41 +36,49 @@ const motor = (data: AppData, filters: Filters) => aggregate(data.gastos, filter
 const celda = (id: string) => norm(within(screen.getByTestId(`cons-${id}`)).getAllByText(/.*/, { selector: 'p' })[1].textContent ?? '')
 
 describe('Dashboard: Presupuesto consolidado y KPIs', () => {
-  it('solo quedan cuatro tarjetas KPI y desaparecen las cuatro duplicadas', async () => {
+  it('los cuatro KPIs viven dentro del Presupuesto consolidado, al final, y no hay sección separada', async () => {
     montar(await datos(), filtros())
+    const consolidado = screen.getByTestId('consolidado')
     const kpis = screen.getByTestId('kpis')
-    const etiquetas = [...kpis.querySelectorAll('p.text-xs')].map(p => p.textContent)
+    expect(consolidado.contains(kpis)).toBe(true)
+    expect(screen.getAllByTestId('kpis')).toHaveLength(1)
+    const etiquetas = [...kpis.children].map(t => t.querySelector('p')!.textContent)
     expect(etiquetas).toEqual(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
-    // ninguna de las duplicadas existe como tarjeta independiente (sus cifras viven en el Presupuesto consolidado)
-    for (const l of ['Presupuesto', 'Caja mensual', 'Total gastado', 'Disponible', 'Consumido']) {
-      expect(within(kpis).queryByText(l, { exact: true }), l).toBeNull()
-    }
+    // nivel 4 va después del nivel 3 (secundarios)
+    const consumido = screen.getByTestId('cons-consumido')
+    expect(!!(consumido.compareDocumentPosition(kpis) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    // ninguna duplicada como tarjeta
+    for (const l of ['Presupuesto', 'Caja mensual', 'Total gastado', 'Disponible']) expect(within(kpis).queryByText(l, { exact: true }), l).toBeNull()
     expect(screen.queryByText('Total gastado')).toBeNull()
   })
 
-  it('las cuatro tarjetas comparten estilo y el contenedor es una sola fila en escritorio', async () => {
+  it('las cuatro métricas son compactas, comparten estilo, conservan subtítulo e icono de información', async () => {
     montar(await datos(), filtros())
     const kpis = screen.getByTestId('kpis')
     expect(kpis.className).toContain('lg:grid-cols-4')
-    expect(kpis.className).toContain('min-[420px]:grid-cols-2')                          // tablet / móvil ancho: dos columnas
+    expect(kpis.className).toContain('grid-cols-2')
     const tarjetas = [...kpis.children] as HTMLElement[]
     expect(tarjetas).toHaveLength(4)
-    for (const t of tarjetas) expect(t.className).toContain('h-full')
-    expect(new Set(tarjetas.map(t => t.className)).size).toBe(1)                          // mismo estilo exacto
-    // cada una conserva su icono de información
+    expect(new Set(tarjetas.map(t => t.className)).size).toBe(1)
+    for (const t of tarjetas) {
+      expect(t.className).not.toContain('p-4')
+      expect(t.querySelectorAll('p')[1].className).toContain('text-sm')                      // valor pequeño, no compite con los principales
+    }
     for (const l of ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) {
       expect(screen.getByRole('button', { name: `Información: ${l}` }), l).toBeTruthy()
     }
+    expect(within(kpis).getByText('Ticket promedio')).toBeTruthy()
   })
 
-  it('orden: filtros → Presupuesto consolidado → Fuentes de dinero y Cajas / reservas → KPIs → gráficos', async () => {
+  it('orden: Presupuesto consolidado (con KPIs) → Fuentes de dinero y Cajas / reservas → gráficos', async () => {
     montar(await datos(), filtros())
     const orden = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
     const cons = screen.getByTestId('caja-general'), acordeones = screen.getByTestId('resumen-cajas'), kpis = screen.getByTestId('kpis')
     const grafico = screen.getByText(/^Gasto acumulado/)
+    expect(cons.contains(kpis)).toBe(true)
     expect(orden(cons, acordeones)).toBe(true)
-    expect(orden(acordeones, kpis)).toBe(true)
-    expect(orden(kpis, grafico)).toBe(true)
+    expect(orden(acordeones, grafico)).toBe(true)
+    expect(orden(kpis, acordeones)).toBe(true)
     expect(screen.getByRole('button', { name: /^Fuentes de dinero/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Cajas \/ reservas/ })).toBeTruthy()
   })

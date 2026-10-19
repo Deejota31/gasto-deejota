@@ -156,6 +156,19 @@ describe('PresupuestoConsolidado', () => {
     expect(screen.queryByTestId('barra-presupuesto')).toBeNull()
   })
 
+  it('métricas complementarias: al final del bloque, compactas y sin sumar celdas cons-*', () => {
+    const c = aggregate(SIN_EXCESO, f, ctx()).cajas
+    const comp = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'].map((etiqueta, i) => ({ etiqueta, valor: `S/ ${i}`, pista: `pista ${i}`, info: <p>info</p>, icono: <span /> }))
+    render(<PresupuestoConsolidado c={c} money={money} periodo="octubre 2026" complementarios={comp} />)
+    const bloque = screen.getByTestId('consolidado')
+    expect(within(bloque).getAllByTestId(/^cons-/)).toHaveLength(8)
+    const kpis = within(bloque).getByTestId('kpis')
+    expect(kpis.children).toHaveLength(4)
+    expect(bloque.lastElementChild).toBe(kpis)
+    expect(within(kpis).getByText('pista 2')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Información: Mayor gasto' })).toBeTruthy()
+  })
+
   it('muestra el botón de acción que le pasa el Dashboard (Ajustar caja)', () => {
     const c = aggregate(SIN_EXCESO, f, ctx()).cajas
     render(<PresupuestoConsolidado c={c} money={money} periodo="octubre 2026" accion={<button type="button">Ajustar caja</button>} />)

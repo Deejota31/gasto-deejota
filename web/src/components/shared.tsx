@@ -255,7 +255,7 @@ export function FilterBar({ filters, setFilters, catalogo, medios, today, extra,
 
   return (
     <div className="rounded-2xl border border-line bg-card p-3 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(15rem,1.3fr)_repeat(5,minmax(0,1fr))]">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(17rem,1.5fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,1.1fr)] gap-x-3">
         <PeriodPicker value={filters} today={today} onChange={p => setFilters({ ...filters, ...p })} />
         <MultiSelect label="Ámbito" icon={<Layers />} allLabel="Todos los ámbitos" value={filters.ambitos}
           options={opts.ambitos.map(a => ({ value: a, label: a, look: ambitoLook(a, catalogo) }))}
