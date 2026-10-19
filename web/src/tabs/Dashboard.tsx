@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { aislaDesde, subKey } from '../lib/engine'
 import type { PlanificacionApi } from '../components/Planificacion'
-import { formatMoney } from '../lib/money'
+import { formatMoney, ratesFromConfig } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
 import type { Caja, Filters } from '../lib/types'
@@ -37,6 +37,8 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
   // Dependencias explícitas: un cambio en vínculos o revisiones (Salud financiera) no recalcula el dashboard.
   // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
   const a = useAgregado(data, filters, today)
+  const config = data?.config
+  const rates = useMemo(() => ratesFromConfig(config ?? {}), [config])
 
   const money = (c: number) => formatMoney(c, base)
   const mes = singleMonth(filters.desde, filters.hasta)
@@ -86,15 +88,15 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           {/* Todos los indicadores viven en el Presupuesto consolidado (los cuatro complementarios al final del bloque) */}
           <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
             complementarios={[
-              { etiqueta: 'Promedio diario', valor: money(a.promedioDiario), icono: <CalendarDays />,
+              { etiqueta: 'Promedio diario', color: 'var(--color-celeste)', valor: money(a.promedioDiario), icono: <CalendarDays />,
                 pista: a.estado === 'futuro' ? 'El período aún no comienza' : `${a.diasPeriodo} días ${a.estado === 'en-curso' ? 'transcurridos' : 'del período'}`,
                 info: <p>Total gastado ÷ días. Si el período está en curso, cuenta solo los días hasta hoy; si ya terminó, todos sus días.</p> },
-              { etiqueta: 'Promedio por movimiento', valor: money(a.promedioMovimiento), icono: <Calculator />, pista: 'Ticket promedio',
+              { etiqueta: 'Promedio por movimiento', color: 'var(--color-celeste)', valor: money(a.promedioMovimiento), icono: <Calculator />, pista: 'Ticket promedio',
                 info: <p>Total gastado ÷ cantidad de movimientos activos con los filtros elegidos.</p> },
-              { etiqueta: 'Mayor gasto', valor: a.max ? money(a.maxCents) : '—', icono: <Trophy />,
+              { etiqueta: 'Mayor gasto', color: 'var(--color-coral)', valor: a.max ? money(a.maxCents) : '—', icono: <Trophy />,
                 pista: a.max ? `${a.max.descripcion || a.max.subcategoria || a.max.categoria} · ${formatDate(a.max.fecha, data!.config.formato_fecha)}` : undefined,
                 info: <p>El movimiento individual más alto del período con los filtros elegidos.</p> },
-              { etiqueta: 'Movimientos', valor: String(a.count), icono: <Hash />,
+              { etiqueta: 'Movimientos', color: 'var(--color-navy)', valor: String(a.count), icono: <Hash />,
                 pista: a.count ? `${new Set(data!.gastos.filter(g => g.estado === 'Activo' && g.fecha >= filters.desde && g.fecha <= filters.hasta).map(g => g.fecha)).size} días con gastos` : undefined,
                 info: <p>Cantidad de gastos activos que cumplen los filtros.</p> },
             ]}
@@ -114,7 +116,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               <p>La línea punteada gris (ritmo ideal) reparte la caja mensual de forma pareja hasta el último día: si la azul va por encima, gastas más rápido de lo planeado.</p>
               <p>La línea coral (proyección) solo aparece en un período en curso: extiende tu promedio diario actual hasta el cierre.</p>
               <p>Abajo, el gasto de cada día. Aplican todos los filtros.</p></> }}>
-            <AcumuladoChart a={a} currency={base} dateFormat={data!.config.formato_fecha} />
+            <AcumuladoChart a={a} currency={base} dateFormat={data!.config.formato_fecha} gastos={data!.gastos} filters={filters} rates={rates} catalogo={catalogo} />
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">

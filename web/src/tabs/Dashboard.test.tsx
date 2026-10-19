@@ -70,6 +70,22 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     expect(within(kpis).getByText('Ticket promedio')).toBeTruthy()
   })
 
+  it('los 12 indicadores del Presupuesto consolidado tienen icono a la izquierda del título', async () => {
+    montar(await datos(), filtros())
+    const ids = ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-reservado-en-cajas', 'cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido',
+      'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
+    for (const id of ids) {
+      const cel = screen.getByTestId(id)
+      const icono = cel.querySelector('span[aria-hidden="true"] > svg')
+      expect(icono, id).toBeTruthy()
+      const titulo = cel.querySelector('p')!
+      expect(!!(icono!.compareDocumentPosition(titulo) & Node.DOCUMENT_POSITION_FOLLOWING), `${id}: icono antes del título`).toBe(true)
+    }
+    for (const [id, clase] of [['cons-libre-inicial', 'lucide-wallet'], ['cons-gastado-fuera-de-reservas', 'lucide-arrow-up-right'], ['cons-saldo-libre-actual', 'lucide-scale'], ['cons-consumido', 'lucide-gauge']]) {
+      expect(screen.getByTestId(id).querySelector(`svg.${clase}`), id).toBeTruthy()
+    }
+  })
+
   it('orden: Presupuesto consolidado (con KPIs) → Fuentes de dinero y Cajas / reservas → gráficos', async () => {
     montar(await datos(), filtros())
     const orden = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)

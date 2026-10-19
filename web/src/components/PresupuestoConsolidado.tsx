@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { AlertTriangle, Boxes, CheckCircle2, Info, Lock, PiggyBank, TrendingUp, Wallet } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Boxes, CheckCircle2, Gauge, Info, Landmark, Lock, PiggyBank, Scale, TrendingUp, Wallet } from 'lucide-react'
 import type { CajasResumen } from '../lib/engine'
 import { barraPresupuesto, estadoPresupuesto, type ClaveSegmento, type TonoEstado } from '../lib/presupuestoVista'
 import { InfoTooltip } from './ui'
@@ -32,7 +32,15 @@ const SEGMENTO: Record<ClaveSegmento, { color: string; estilo: CSSProperties }> 
 }
 
 /** Métrica complementaria (nivel 4): promedio diario, promedio por movimiento, mayor gasto y movimientos. */
-export type Complementario = { etiqueta: string; valor: string; pista?: string; info: ReactNode; icono: ReactNode }
+export type Complementario = { etiqueta: string; valor: string; pista?: string; info: ReactNode; icono: ReactNode; color?: string }
+
+/** Icono de indicador: mismo recuadro tintado con el color semántico del indicador en los tres niveles (tamaños: principal 7, secundario 5, complementario 6). */
+const TILE = { principal: 'size-7 rounded-lg [&>svg]:size-4', secundario: 'size-5 rounded-md [&>svg]:size-3', complementario: 'size-6 rounded-md [&>svg]:size-3.5' } as const
+function IconoIndicador({ icono, color, nivel }: { icono: ReactNode; color: string; nivel: keyof typeof TILE }) {
+  return (
+    <span aria-hidden className={`grid shrink-0 place-items-center transition-colors ${TILE[nivel]}`} style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>{icono}</span>
+  )
+}
 
 export function PresupuestoConsolidado({ c, money, periodo, accion, complementarios }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode; complementarios?: Complementario[] }) {
   const P = c.presupuesto
@@ -76,7 +84,7 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
       <div data-testid="consolidado">
         {/* Nivel principal */}
         <div className="grid grid-cols-2 gap-2.5 p-3 sm:p-4 lg:grid-cols-4">
-          <Principal etiqueta="Presupuesto consolidado" valor={v(P)} icono={<Wallet />} color="var(--ink)" fondo="var(--bg)"
+          <Principal etiqueta="Presupuesto consolidado" valor={v(P)} icono={<Landmark />} color="var(--ink)" fondo="var(--bg)"
             info={c.origen === 'fuentes' ? 'Suma de lo que aportan las fuentes activas en el período.' : 'Presupuesto de la caja general en el período (suma los meses si abarca varios).'} />
           <Principal etiqueta="Gastado del período" valor={money(c.gastadoPeriodo)} icono={<TrendingUp />} color={COLOR_GASTO} fondo="var(--bg)"
             info="Todos los gastos activos del período, cada uno una sola vez (en cajas y fuera de ellas). No aplica filtros de ámbito, categoría, subcategoría, medio ni tipo." />
@@ -95,14 +103,14 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
 
         {/* Nivel secundario */}
         <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
-          <Secundario etiqueta="Libre inicial" valor={v(c.libreInicial)} color={def && c.libreInicial < 0 ? ESTADO.alerta : undefined}
+          <Secundario etiqueta="Libre inicial" icono={<Wallet />} valor={v(c.libreInicial)} color={def && c.libreInicial < 0 ? ESTADO.alerta : undefined} tinte="var(--color-navy)"
             info="Presupuesto consolidado − reservado en cajas: lo que queda sin asignar a ninguna caja antes de gastar." />
-          <Secundario etiqueta="Gastado fuera de reservas" valor={money(c.gastadoLibre)} color={COLOR_GASTO}
+          <Secundario etiqueta="Gastado fuera de reservas" icono={<ArrowUpRight />} valor={money(c.gastadoLibre)} color={COLOR_GASTO}
             info="Gastos que no caen en ninguna caja activa. Cada gasto cae como máximo en una caja." />
-          <Secundario etiqueta="Saldo libre actual" valor={v(c.saldoLibre)} color={tonoSaldo(c.saldoLibre)}
+          <Secundario etiqueta="Saldo libre actual" icono={<Scale />} valor={v(c.saldoLibre)} color={tonoSaldo(c.saldoLibre)} tinte={tonoSaldo(c.saldoLibre) ?? 'var(--muted)'}
             info={<><p>Libre inicial − gastado fuera de reservas − excesos de cajas (lo que una caja gastó por encima de lo asignado).</p>
               <p>Es lo que queda sin comprometer en reservas. Se diferencia del disponible consolidado porque no cuenta las reservas sin utilizar.</p></>} />
-          <Secundario etiqueta="Consumido" valor={c.pct === null ? '—' : `${c.pct}%`} color={c.pct === null ? undefined : TONO_VAR[estado.tono]}
+          <Secundario etiqueta="Consumido" icono={<Gauge />} valor={c.pct === null ? '—' : `${c.pct}%`} color={c.pct === null ? undefined : TONO_VAR[estado.tono]}
             info="Gastado del período ÷ presupuesto consolidado. Menos de 70 %: holgado; desde 70 %: cerca del límite; más de 100 %: presupuesto excedido."
             barra={c.pct === null ? undefined : { pct: c.pct, color: TONO_VAR[estado.tono] }} />
         </div>
@@ -128,11 +136,11 @@ function Principal({ etiqueta, valor, icono, color, fondo, info, pista, testidVa
   etiqueta: string; valor: string; icono: ReactNode; color: string; fondo: string; info: ReactNode; pista?: string; testidValor?: string
 }) {
   return (
-    <div className="min-w-0 rounded-2xl p-3 sm:p-3.5" style={{ background: fondo }} data-testid={idCelda(etiqueta)}>
+    <div className="min-w-0 rounded-2xl p-3 transition-shadow hover:shadow-sm sm:p-3.5" style={{ background: fondo }} data-testid={idCelda(etiqueta)}>
       <div className="flex items-center justify-between gap-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-card [&>svg]:size-4" style={{ color }}>{icono}</span>
-          <p className="truncate text-xs font-medium text-muted">{etiqueta}</p>
+          <IconoIndicador icono={icono} color={color} nivel="principal" />
+          <p className="line-clamp-2 text-xs leading-tight font-medium text-muted sm:truncate">{etiqueta}</p>
         </div>
         <InfoTooltip title={etiqueta}>{typeof info === 'string' ? <p>{info}</p> : info}</InfoTooltip>
       </div>
@@ -142,12 +150,12 @@ function Principal({ etiqueta, valor, icono, color, fondo, info, pista, testidVa
   )
 }
 
-function Compacto({ etiqueta, valor, pista, info, icono }: Complementario) {
+function Compacto({ etiqueta, valor, pista, info, icono, color }: Complementario) {
   return (
-    <div className="flex min-w-0 items-center gap-2 bg-card px-3 py-2 sm:px-4" data-testid={`kpi-${etiqueta.toLowerCase().replace(/\s+/g, '-')}`}>
-      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-bg text-muted [&>svg]:size-3.5">{icono}</span>
+    <div className="flex min-w-0 items-center gap-2 bg-card px-3 py-2 transition-colors hover:bg-bg sm:px-4" data-testid={`kpi-${etiqueta.toLowerCase().replace(/\s+/g, '-')}`}>
+      <IconoIndicador icono={icono} color={color ?? 'var(--muted)'} nivel="complementario" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[11px] leading-tight text-muted">{etiqueta}</p>
+        <p className="line-clamp-2 text-[11px] leading-tight text-muted sm:truncate">{etiqueta}</p>
         <p className="tabular truncate text-sm leading-tight font-semibold text-ink" title={valor}>{valor}</p>
         {pista && <p className="truncate text-[10px] leading-tight text-muted" title={pista}>{pista}</p>}
       </div>
@@ -156,13 +164,16 @@ function Compacto({ etiqueta, valor, pista, info, icono }: Complementario) {
   )
 }
 
-function Secundario({ etiqueta, valor, color, info, barra }: {
-  etiqueta: string; valor: string; color?: string; info: ReactNode; barra?: { pct: number; color: string }
+function Secundario({ etiqueta, icono, valor, color, tinte, info, barra }: {
+  etiqueta: string; icono: ReactNode; valor: string; color?: string; tinte?: string; info: ReactNode; barra?: { pct: number; color: string }
 }) {
   return (
-    <div className="min-w-0 bg-card px-3.5 py-2 sm:px-4" data-testid={idCelda(etiqueta)}>
+    <div className="min-w-0 bg-card px-3.5 py-2 transition-colors hover:bg-bg sm:px-4" data-testid={idCelda(etiqueta)}>
       <div className="flex items-center justify-between gap-1">
-        <p className="truncate text-[11px] text-muted">{etiqueta}</p>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <IconoIndicador icono={icono} color={tinte ?? color ?? 'var(--muted)'} nivel="secundario" />
+          <p className="line-clamp-2 text-[11px] leading-tight text-muted sm:truncate">{etiqueta}</p>
+        </div>
         <InfoTooltip title={etiqueta}>{typeof info === 'string' ? <p>{info}</p> : info}</InfoTooltip>
       </div>
       <p className="tabular -mt-0.5 truncate text-sm font-semibold" style={{ color: color ?? 'var(--ink)' }} title={valor}>{valor}</p>
