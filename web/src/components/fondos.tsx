@@ -43,7 +43,7 @@ const recurrenciaTxt = (f: Fondo) => f.recurrencia === 'unica' ? `Solo ${f.mes ?
 
 export const FONDO_GENERAL_ID = 'fondo-general'
 /** ID histórico del fondo General (datos anteriores a la migración): se reconoce, no se cambia. */
-export const FONDO_GENERAL_ID_ANTERIOR = 'fuente-general'
+export const FONDO_GENERAL_ID_ANTERIOR = 'fuente-general' // [compat-migración]
 
 export function FondosSeccion({ store, c, mes, money, periodo, hoyMes, plantillas, plan }: {
   plan: PlanificacionApi; plantillas: ReturnType<typeof usePlantillasFin>; store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
@@ -294,7 +294,7 @@ function TarjetaFondo({ r, todas, money, mes, busy, onToggle, acciones, dnd, asa
             <p className="tabular mt-1 text-[11px] text-muted">Gastado {money(r.gastado)} · disponible <b style={{ color: r.disponible < 0 ? TONO.alerta.fg : TONO.ok.fg }}>{money(r.disponible)}</b> · {r.count} mov.</p>
           </>
         )}
-        {!f.activo && <p className="mt-3 rounded-xl bg-bg px-3 py-2 text-[11px] text-muted">Inactivo: queda guardado pero no suma al presupuesto.{r.count ? ` Sus ${r.count} gasto(s) siguen descontando (ver conciliación).` : ''}</p>}
+        {!f.activo && <p className="mt-3 rounded-xl bg-bg px-3 py-2 text-[11px] text-muted">Inactivo: queda guardado pero no suma al presupuesto.{r.count ? ` Sus ${r.count} gasto(s) siguen descontando (ver gastos por revisar).` : ''}</p>}
         {busy && <p className="mt-2 text-[11px] text-muted">Guardando…</p>}
       </div>
     </li>

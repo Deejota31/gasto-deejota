@@ -693,8 +693,8 @@ function getData_(fresh) {
       return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), r[5] instanceof Date ? r[5].toISOString() : str_(r[5]), r[6] instanceof Date ? r[6].toISOString() : str_(r[6])];
     }) : [],
     // Compatibilidad: si aún no se migró, se leen las hojas con el nombre anterior (solo lectura) para no perder nada de vista.
-    fondos: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES')).map(fondoOut_) : [],
-    fondosMeses: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES')).map(function (r) {
+    fondos: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES')).map(fondoOut_) : [], // [compat-migración]
+    fondosMeses: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES')).map(function (r) { // [compat-migración]
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
     }) : [],
     plantillasFin: pfTodas_().rows.map(pfOut_),
@@ -707,7 +707,7 @@ function getData_(fresh) {
 }
 
 // Nombres anteriores a v1.26 (solo lectura mientras no se migre): leen con el esquema de su hoja nueva.
-var HOJA_ANTERIOR_ = { FUENTES: 'FONDOS_PRESUPUESTO', FUENTES_MESES: 'FONDOS_PRESUPUESTO_MESES' };
+var HOJA_ANTERIOR_ = { FUENTES: 'FONDOS_PRESUPUESTO', FUENTES_MESES: 'FONDOS_PRESUPUESTO_MESES' }; // [compat-migración]
 
 function readRows_(ss, name) {
   var sh = ss.getSheetByName(name);
@@ -1258,7 +1258,7 @@ function pfEstados_(raw) {
 function pfOut_(r) {
   var est = pfEstados_(r[15]), pub = {};
   Object.keys(est).forEach(function (m) { if (est[m] && (est[m].e === 'aplicada' || est[m].e === 'omitida')) pub[m] = { e: est[m].e, m: num_(est[m].m) }; });
-  return [str_(r[0]), str_(r[1]) === 'fuente' ? 'fondo' : str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]),
+  return [str_(r[0]), str_(r[1]) === 'fuente' ? 'fondo' : str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]), // [compat-migración]
     str_(r[9]), autoVacio_(r[10]), str_(r[11]) === 'unica' ? 'unica' : 'mensual', str_(r[12]) === '' ? true : bool_(r[12]), num_(r[13]), str_(r[14]), pub, iso_(r[16]), iso_(r[17])];
 }
 
@@ -1855,7 +1855,7 @@ function atajoGasto_(p) {
 /* ===================== Fondos del presupuesto (v1.8) ===================== */
 
 var FONDO_GENERAL_ID = 'fondo-general';
-var FONDO_GENERAL_ID_ANTERIOR_ = 'fuente-general'; // ID histórico (datos creados antes de v1.26): se reconoce, no se cambia
+var FONDO_GENERAL_ID_ANTERIOR_ = 'fuente-general'; // ID histórico (datos creados antes de v1.26): se reconoce, no se cambia // [compat-migración]
 var MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function iso_(v) { return v instanceof Date ? v.toISOString() : str_(v); }
@@ -2743,6 +2743,7 @@ function saveRevisionPresupuesto_(p) {
 
 /* ===================== Migración a Fondos del presupuesto (v1.26) ===================== */
 
+// <compat-migración>
 var MIG_PARES_ = [['FUENTES', 'FONDOS_PRESUPUESTO'], ['FUENTES_MESES', 'FONDOS_PRESUPUESTO_MESES']];
 var AHORRO_ASIGNADO_ = ['carpeta tesis', 'viaje a ica'];
 
@@ -2869,6 +2870,7 @@ function revertirMigracionAFondos_() {
 /** Ejecútala desde el editor de Apps Script para migrar. */
 function migrarAFondosPresupuesto() { return withLock_(migrarAFondosPresupuesto_); }
 function revertirMigracionAFondos() { return withLock_(revertirMigracionAFondos_); }
+// </compat-migración>
 
 /* ===================== Orden personalizado de la tabla de Gastos ===================== */
 

@@ -484,7 +484,7 @@ function PanelEvolucion({ evo, ahorro, money, fmt, per, modo, setModo, nivel, se
   const dif = evo.totalActual - evo.totalAnterior
   return (
     <>
-      <Cabecera icon={TrendingUp} titulo="Evolución y oportunidades de ahorro" texto="Qué gastos están subiendo o bajando frente al período anterior, y dónde podrías ahorrar." />
+      <Cabecera icon={TrendingUp} titulo="Evolución y posibles recortes" texto="Qué gastos están subiendo o bajando frente al período anterior, y dónde podrías ahorrar." />
       <div className="flex flex-wrap items-end gap-3 rounded-2xl bg-bg/70 p-3">
         <div className="min-w-0">
           <p className="mb-1 text-[11px] font-medium text-muted">Comparar</p>
@@ -557,15 +557,15 @@ function PanelEvolucion({ evo, ahorro, money, fmt, per, modo, setModo, nivel, se
         )}
 
         <div>
-          <Subtitulo extra={<Chip tono={TONO.info}>Simulación</Chip>}><span className="flex items-center gap-1.5"><Lightbulb className="size-3.5 text-warning" /> Oportunidades de ahorro</span></Subtitulo>
+          <Subtitulo extra={<Chip tono={TONO.info}>Simulación</Chip>}><span className="flex items-center gap-1.5"><Lightbulb className="size-3.5 text-warning" /> Posibles recortes del presupuesto</span></Subtitulo>
           {ahorro.length === 0
-            ? <Vacio icon={Lightbulb} titulo="Sin oportunidades relevantes" tono={TONO.neutro}>No hay gastos discrecionales importantes (delivery, antojos, suscripciones, salidas o compras no esenciales) en el período.</Vacio>
+            ? <Vacio icon={Lightbulb} titulo="Sin recortes relevantes" tono={TONO.neutro}>No hay gastos discrecionales importantes (delivery, antojos, suscripciones, salidas o compras no esenciales) en el período.</Vacio>
             : (
               <ul className="grid gap-2 md:grid-cols-2" data-testid="ahorro">
                 {ahorro.map(o => (
                   <li key={o.key} className="flex items-stretch gap-3 rounded-2xl border border-line p-3">
                     <div className="flex w-28 shrink-0 flex-col justify-center rounded-xl px-3 py-2" style={{ background: TONO.ok.bg }}>
-                      <p className="text-[10px] font-medium text-muted">Ahorro potencial</p>
+                      <p className="text-[10px] font-medium text-muted">Recorte posible</p>
                       <p className="tabular text-lg font-bold" style={{ color: TONO.ok.fg }}>{money(o.ahorro)}</p>
                       <p className="text-[10px] text-muted">−{Math.round(REDUCCION_SIMULADA * 100)} % simulado</p>
                     </div>

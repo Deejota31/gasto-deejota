@@ -990,7 +990,7 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
     await go(page, 'Salud financiera')
     expect(page.url()).toContain('#salud')
     await expect(page.getByRole('heading', { name: /Salud financiera/ })).toBeVisible()
-    await expect(page.getByText('Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.')).toBeVisible()
+    await expect(page.getByText('Controla tu presupuesto, revisa la calidad de tus datos y detecta gastos que podrías recortar.')).toBeVisible()
     await expect(page.getByRole('tablist', { name: 'Vistas de salud financiera' }).getByRole('tab')).toHaveCount(5)
     await expect(page.getByTestId('salud-periodo')).toHaveCount(0)               // sin fecha duplicada en el encabezado
     const picker = page.getByRole('button', { name: 'Período', exact: true })

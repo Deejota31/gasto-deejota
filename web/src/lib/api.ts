@@ -56,6 +56,7 @@ export function calentar(conn: Connection, fetchImpl: typeof fetch = fetch): voi
 
 export type Transport = (action: string, payload: unknown) => Promise<unknown>
 
+// <compat-migración>
 /**
  * Compatibilidad con un Apps Script anterior a v1.26 (aún con los nombres “fuentes”): si responde BAD_ACTION a una acción
  * nueva, se repite con el nombre anterior y los datos se traducen a los nombres actuales. Es la ÚNICA capa que conoce los nombres
@@ -83,6 +84,7 @@ function traducirDatosAnteriores(raw: unknown): unknown {
   const { fuentes, fuentesMeses, ...resto } = raw as Record<string, unknown>
   return { ...resto, fondos: fuentes, fondosMeses: fuentesMeses }
 }
+// </compat-migración>
 
 export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
   return conCompatibilidad(async (action, payload) => {
@@ -436,7 +438,7 @@ export function createApi(t: Transport) {
     },
     /** Revisión del presupuesto: SOLO agrega a REVISIONES_PRESUPUESTO (nunca fondos, gastos, cajas ni presupuestos). */
     async saveRevisionPresupuesto(i: RevisionPresInput): Promise<RevisionPres> { return toRevPres(parse(revPresRow, await t('saveRevisionPresupuesto', i))) },
-    /** Migra Fuentes de dinero → Fondos del presupuesto (con respaldo previo; idempotente). */
+    /** Migra la hoja a Fondos del presupuesto (con respaldo previo; idempotente). */
     async migrarAFondosPresupuesto(): Promise<MigracionResultado> { return parse(migracionResultado, await t('migrarAFondosPresupuesto', {})) },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })

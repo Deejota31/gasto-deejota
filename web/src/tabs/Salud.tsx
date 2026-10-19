@@ -40,7 +40,7 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
                   <p>Usa los datos ya cargados y el mismo filtro de período del Dashboard y Gastos: no hace consultas adicionales a tu hoja y nunca modifica movimientos.</p>
                 </InfoTooltip>
               </h1>
-              <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.</p>
+              <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta gastos que podrías recortar. Solo usa tus fondos y gastos registrados.</p>
             </div>
           </div>
         </div>

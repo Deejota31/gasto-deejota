@@ -10,7 +10,7 @@ const g = (over: Partial<Gasto>): Gasto => ({
   comprobanteUrl: '', id: crypto.randomUUID(), creadoEn: '', actualizadoEn: '', ...over,
 })
 const fu = (id: string, monto: number, over: Partial<Fondo> = {}): Fondo => ({
-  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '',
+  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '', tipo: 'mensual',
   creadoEn: '', actualizadoEn: '', ...over,
 })
 const caja = (id: string, presupuesto: number, filtroCampo: Caja['filtroCampo'] = 'Todos', filtroValor = '', orden = 1): Caja =>
