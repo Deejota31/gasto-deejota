@@ -26,6 +26,8 @@ class FakeSheet {
     for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i]?.some(v => v !== '' && v !== undefined)) return i + 1
     return 0
   }
+  setName(n: string) { this.ss?.sheets.delete(this.name); this.name = n; this.ss?.sheets.set(n, this) }
+  ss?: FakeSpreadsheet
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0) }
   getMaxRows() { return Math.max(1000, this.rows.length) }
   setFrozenRows(n: number) { this.frozen = n }
@@ -85,7 +87,7 @@ class FakeSpreadsheet {
   getId() { return 'ss-1' }
   getUrl() { return 'https://docs.google.com/spreadsheets/d/ss-1' }
   getSheetByName(n: string) { return this.sheets.get(n) ?? null }
-  insertSheet(n: string) { const s = new FakeSheet(n); this.sheets.set(n, s); return s }
+  insertSheet(n: string) { const s = new FakeSheet(n); s.ss = this; this.sheets.set(n, s); return s }
   getSheets() { return [...this.sheets.values()] }
   deleteSheet(s: FakeSheet) { this.sheets.delete(s.name) }
   setSpreadsheetTimeZone() {}
