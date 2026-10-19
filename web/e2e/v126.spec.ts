@@ -190,33 +190,3 @@ test.describe('v1.26 terminología e interfaz', () => {
     await expect(dialog(page).getByRole('radio', { name: 'Ahorro asignado', exact: true })).toBeChecked()
   })
 })
-
-test.describe('v1.26 migración pendiente (backend ya actualizado, hoja con nombres anteriores)', () => {
-  test('aviso visible; editar fondos se bloquea con un mensaje claro; «Migrar ahora» migra una sola vez y quita el aviso', async ({ page }) => {
-    await abrir(page, '2026-10-19T10:00:00-05:00', '/?demo=60&fondos=3&cajas=3&latencia=0&migracion=pendiente#cajas')
-    const aviso = page.getByTestId('migracion-fondos')
-    await expect(aviso).toBeVisible()
-    await expect(aviso).toContainText('Fondos del presupuesto')
-    // los fondos se siguen viendo (lectura compatible) pero no se pueden guardar hasta migrar
-    await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')).toHaveCount(3)
-    await page.getByRole('button', { name: 'Nuevo fondo' }).click()
-    const d = dialog(page)
-    await d.getByLabel('Nombre del fondo').fill('Bloqueado')
-    await d.getByLabel('Monto').fill('10')
-    await d.getByRole('button', { name: 'Crear fondo' }).click()
-    await expect(page.getByText(/Falta migrar tus datos/).first()).toBeVisible({ timeout: 15_000 })
-    await page.keyboard.press('Escape')
-    // migrar (doble clic: una sola ejecución)
-    const c0 = await calls(page)
-    await page.getByTestId('migrar-fondos').dblclick()
-    await expect(aviso).toHaveCount(0, { timeout: 15_000 })
-    const c1 = await calls(page)
-    expect((c1.migrarAFondosPresupuesto ?? 0) - (c0.migrarAFondosPresupuesto ?? 0)).toBe(1)
-    // ya migrado: guardar un fondo funciona
-    await page.getByRole('button', { name: 'Nuevo fondo' }).click()
-    await dialog(page).getByLabel('Nombre del fondo').fill('Ya migrado')
-    await dialog(page).getByLabel('Monto').fill('10')
-    await dialog(page).getByRole('button', { name: 'Crear fondo' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Ya migrado creado' })).toBeVisible({ timeout: 15_000 })
-  })
-})

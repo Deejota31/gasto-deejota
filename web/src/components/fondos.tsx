@@ -43,7 +43,6 @@ const recurrenciaTxt = (f: Fondo) => f.recurrencia === 'unica' ? `Solo ${f.mes ?
 
 export const FONDO_GENERAL_ID = 'fondo-general'
 /** ID histórico del fondo General (datos anteriores a la migración): se reconoce, no se cambia. */
-export const FONDO_GENERAL_ID_ANTERIOR = 'fuente-general' // [compat-migración]
 
 export function FondosSeccion({ store, c, mes, money, periodo, hoyMes, plantillas, plan }: {
   plan: PlanificacionApi; plantillas: ReturnType<typeof usePlantillasFin>; store: AppStore; c: CajasResumen; mes: string | null; money: (n: number) => string; periodo: string; hoyMes: string
@@ -64,7 +63,7 @@ export function FondosSeccion({ store, c, mes, money, periodo, hoyMes, plantilla
   const [borrar, setBorrar] = useState<FondoResumen | null>(null)
   const [desactivar, setDesactivar] = useState<FondoResumen | null>(null)
   const general = c.general
-  const migrada = todosLosFondos.some(r => r.fondo.id === FONDO_GENERAL_ID || r.fondo.id === FONDO_GENERAL_ID_ANTERIOR)
+  const migrada = todosLosFondos.some(r => r.fondo.id === FONDO_GENERAL_ID)
   const puedeMigrar = !!general && general.presupuesto > 0 && !migrada && !todosLosFondos.some(r => normName(r.fondo.nombre) === 'general')
   const muchas = fondos.length > 4
   const term = normName(q)

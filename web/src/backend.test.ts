@@ -2102,148 +2102,34 @@ describe('v1.26 revisión del presupuesto (backend)', () => {
   })
 })
 
-/* ===================== v1.26 migración a Fondos del presupuesto ===================== */
-describe('v1.26 migración Fuentes de dinero → Fondos del presupuesto (backend)', () => {
+/* Contrato vigente: solo fondos y revisiones del presupuesto. */
+describe('backend: contrato actual de fondos', () => {
   let b: ReturnType<typeof load>
-  const HDR_FUENTES = ['ID', 'Nombre', 'Monto', 'Moneda', 'Color', 'Icono', 'Activo', 'Orden', 'Recurrencia', 'Mes de aplicación', 'Medio de pago', 'Creado en', 'Actualizado en']
-  const HDR_MESES = ['Fuente ID', 'Mes', 'Monto', 'Modo', 'Actualizado en']
-  const f = (id: string, nombre: string, monto: number, rec = 'mensual', mes = '', medio = 'Libre') =>
-    [id, nombre, monto, 'PEN', '#1e3a8a', 'auto', true, 1, rec, mes, medio, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z']
-  /** Deja el libro como lo dejaba la versión anterior: hojas con los nombres y encabezados de “fuentes”. */
-  function legacy() {
-    b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES'); b.ss.sheets.delete('REVISIONES_PRESUPUESTO')
-    const fu = b.ss.insertSheet('FUENTES'); fu.rows = [HDR_FUENTES, f('fuente-general', 'General', 3500), f('f-sodexo', 'Sodexo', 280, 'mensual', '', 'Sodexo'),
-      f('f-tesis', 'Carpeta Tésis', 1900, 'unica', '2026-10'), f('f-ica', 'Viaje a Ica', 1414), f('f-extra', 'Extra 1', 1000, 'unica', '2026-10')]
-    const fm = b.ss.insertSheet('FUENTES_MESES'); fm.rows = [HDR_MESES, ['fuente-general', '2026-09', 3200, 'solo', ''], ['f-sodexo', '2026-10', 300, 'desde', '']]
-    const co = b.ss.insertSheet('CONCILIACIONES'); co.rows = [['ID', 'Tipo', 'Conciliación ID'], ['conc-1', 'verificacion', 'conc-1']]
-    const pf = b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!
-    pf.rows.push(['pf-1', 'fuente', 'General', 3500, 'PEN', 'Libre', '', '', '', '#1e3a8a', 'auto', 'mensual', true, 1, 'fuente-general', '{}', '', ''])
-    pf.rows.push(['pf-2', 'subcaja', 'Caja', 100, '', '', '', '', '', '', '', 'mensual', true, 2, '', '{}', '', ''])
-  }
   beforeEach(() => { b = load(); b.g.setup() })
 
-  it('con datos anteriores: las lecturas siguen funcionando y se avisa que falta migrar', () => {
-    legacy()
-    const dd = b.post('data', { fresh: true }); if (!dd.ok) console.log('DATA ERR', JSON.stringify(dd))
-    const d = dd.data
-    expect(d.fondos.map((x: unknown[]) => x[1])).toEqual(['General', 'Sodexo', 'Carpeta Tésis', 'Viaje a Ica', 'Extra 1'])
-    expect(d.fondosMeses).toHaveLength(2)
-    expect(d.migracion.pendiente).toBe(true)
-    expect(d.migracion.hojasViejas.sort()).toEqual(['CONCILIACIONES', 'FUENTES', 'FUENTES_MESES'])
-    expect(d.migracion.plantillasPorConvertir).toBe(1)
-    // el tipo se deduce aun sin migrar
-    expect(Object.fromEntries(d.fondos.map((x: unknown[]) => [x[1], x[13]]))).toEqual({ General: 'mensual', Sodexo: 'mensual', 'Carpeta Tésis': 'ahorro_asignado', 'Viaje a Ica': 'ahorro_asignado', 'Extra 1': 'extra' })
-  })
-
-  it('hasta migrar, las acciones sobre fondos se bloquean (los gastos siguen funcionando)', () => {
-    legacy()
-    expect(b.post('saveFondo', { id: 'f-nuevo', nombre: 'Nuevo', monto: 10, moneda: 'PEN', recurrencia: 'mensual' }).error.code).toBe('MIGRACION_PENDIENTE')
-    expect(b.post('saveRevisionPresupuesto', { id: 'rev-00000000-0000-4000-8000-000000000001', periodo: '2026-10', estado: 'completo' }).error.code).toBe('MIGRACION_PENDIENTE')
-    expect(b.post('saveGasto', gasto()).ok).toBe(true)
-  })
-
-  it('migra: renombra hojas conservando todas las filas e IDs, asigna tipos, convierte plantillas y archiva la conciliación', () => {
-    legacy()
-    const r = b.post('migrarAFondosPresupuesto')
+  it('entrega las colecciones actuales sin estado de migración', () => {
+    const r = b.post('data', { fresh: true })
     expect(r.ok).toBe(true)
-    expect(r.data.migrada).toBe(true)
-    expect(r.data.respaldo).toMatch(/^https:\/\/copy\//)
-    expect(b.ss.copies.length).toBeGreaterThan(0)
-    expect(r.data.antes).toEqual({ fondos: 5, meses: 2 })
-    expect(r.data.despues).toEqual({ fondos: 5, meses: 2 })
-    const keys = [...b.ss.sheets.keys()]
-    expect(keys).toContain('FONDOS_PRESUPUESTO'); expect(keys).toContain('FONDOS_PRESUPUESTO_MESES'); expect(keys).toContain('REVISIONES_PRESUPUESTO'); expect(keys).toContain('CONCILIACIONES_ANTERIOR')
-    expect(keys).not.toContain('FUENTES'); expect(keys).not.toContain('FUENTES_MESES'); expect(keys).not.toContain('CONCILIACIONES')
-    const fo = b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows
-    expect(fo[0][13]).toBe('Tipo de fondo')
-    expect(fo.slice(1).map(x => [x[0], x[2], x[13]])).toEqual([['fuente-general', 3500, 'mensual'], ['f-sodexo', 280, 'mensual'], ['f-tesis', 1900, 'ahorro_asignado'], ['f-ica', 1414, 'ahorro_asignado'], ['f-extra', 1000, 'extra']])
-    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.rows[0][0]).toBe('Fondo ID')
-    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.rows.slice(1).map(x => [x[0], x[1], x[2], x[3]])).toEqual([['fuente-general', '2026-09', 3200, 'solo'], ['f-sodexo', '2026-10', 300, 'desde']])
-    expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows.slice(1).map(x => x[1])).toEqual(['fondo', 'subcaja'])
-    expect(b.ss.getSheetByName('CONCILIACIONES_ANTERIOR')!.rows[1][0]).toBe('conc-1')
-    const d = b.post('data', { fresh: true }).data
-    expect(d.migracion.pendiente).toBe(false)
-    expect(d.fondos).toHaveLength(5)
-    expect(b.props.get('MIGRACION_FONDOS')).toBe('completa')
+    expect(r.data).toHaveProperty('fondos')
+    expect(r.data).toHaveProperty('fondosMeses')
+    expect(r.data).toHaveProperty('revisionesPresupuesto')
+    expect(r.data).not.toHaveProperty('migracion')
   })
 
-  it('es idempotente: repetirla no cambia nada ni crea otro respaldo', () => {
-    legacy()
-    b.post('migrarAFondosPresupuesto')
-    const copias = b.ss.copies.length
-    const antes = JSON.stringify([...b.ss.sheets.entries()].map(([n, s]) => [n, s.rows]))
-    const r = b.post('migrarAFondosPresupuesto')
-    expect(r.ok).toBe(true); expect(r.data.migrada).toBe(false)
-    expect(b.ss.copies.length).toBe(copias)
-    expect(JSON.stringify([...b.ss.sheets.entries()].map(([n, s]) => [n, s.rows]))).toBe(antes)
-  })
-
-  it('si quedó a medias (la hoja nueva ya existe), completa solo las filas que faltan sin duplicar', () => {
-    legacy()
-    const nuevo = b.ss.insertSheet('FONDOS_PRESUPUESTO'); nuevo.rows = [[...HDR_FUENTES, 'Tipo de fondo'], [...f('fuente-general', 'General', 3500), 'mensual']]
-    const r = b.post('migrarAFondosPresupuesto'); if (!r.ok) console.log('MIG ERR', JSON.stringify(r))
-    expect(r.ok).toBe(true)
-    const ids = b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows.slice(1).map(x => x[0])
-    expect(ids).toEqual(['fuente-general', 'f-sodexo', 'f-tesis', 'f-ica', 'f-extra'])
-    expect(b.ss.getSheetByName('FUENTES_MIGRADA')).toBeTruthy()
-    expect(b.post('data', { fresh: true }).data.migracion.pendiente).toBe(false)
-  })
-
-  it('si se interrumpe a la mitad, informa dónde está el respaldo y al repetirla termina sin perder ni duplicar filas', () => {
-    legacy()
-    const meses = b.ss.getSheetByName('FUENTES_MESES')!
-    const original = meses.setName.bind(meses)
-    meses.setName = () => { throw new Error('boom') }
-    const r1 = b.post('migrarAFondosPresupuesto')
-    expect(r1.ok).toBe(false); expect(r1.error.code).toBe('MIGRACION_ERROR'); expect(r1.error.message).toContain('https://copy/')
-    expect(b.props.get('MIGRACION_FONDOS')).toBe('error')
-    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')).toBeTruthy()             // el primer paso ya se hizo
-    meses.setName = original
-    const r2 = b.post('migrarAFondosPresupuesto')
-    expect(r2.ok).toBe(true); expect(r2.data.migrada).toBe(true)
-    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows.slice(1).filter(x => x[0])).toHaveLength(5)
-    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.rows.slice(1).filter(x => x[0])).toHaveLength(2)
-    expect(b.props.get('MIGRACION_FONDOS')).toBe('completa')
-  })
-
-  it('la migración no cambia los datos financieros: fondos e importes por mes idénticos antes y después (IDs, montos, períodos, recurrencia)', () => {
-    legacy()
-    const antes = b.post('data', { fresh: true }).data
-    b.post('migrarAFondosPresupuesto')
-    const despues = b.post('data', { fresh: true }).data
-    expect(despues.fondos).toEqual(antes.fondos)
-    expect(despues.fondosMeses).toEqual(antes.fondosMeses)
-    expect(despues.gastos).toEqual(antes.gastos)
-    expect(despues.cajas).toEqual(antes.cajas)
-    expect(despues.presupuestos).toEqual(antes.presupuestos)
-  })
-
-  it('tras migrar, crear un fondo guarda el tipo elegido y es independiente de la recurrencia', () => {
-    legacy(); b.post('migrarAFondosPresupuesto')
+  it('guarda tipos de fondo explícitos y conserva el tipo al editar sin enviarlo', () => {
     const r = b.post('saveFondo', { id: 'f-ahorro', nombre: 'Ahorro viaje', monto: 500, moneda: 'PEN', recurrencia: 'mensual', tipo: 'ahorro_asignado', color: '#123456' })
     expect(r.ok).toBe(true)
-    expect(r.data[13]).toBe('ahorro_asignado'); expect(r.data[8]).toBe('mensual')
+    expect(r.data[13]).toBe('ahorro_asignado')
+    expect(r.data[8]).toBe('mensual')
     expect(b.post('saveFondo', { id: 'f-x', nombre: 'X', monto: 1, moneda: 'PEN', recurrencia: 'mensual', tipo: 'otro' }).error.code).toBe('VALIDATION')
-    // editar sin enviar tipo conserva el anterior
     expect(b.post('saveFondo', { id: 'f-ahorro', nombre: 'Ahorro viaje', monto: 600, moneda: 'PEN', recurrencia: 'mensual' }).data[13]).toBe('ahorro_asignado')
   })
 
-  it('los datos de prueba también nacen con tipo y no activan el aviso de migración', () => {
-    b.post('generarDatosPrueba')
-    expect(b.post('data', { fresh: true }).data.migracion.pendiente).toBe(false)
-  })
-
-  it('un libro nuevo no necesita migración', () => {
-    expect(b.post('data', { fresh: true }).data.migracion.pendiente).toBe(false)
-    expect(b.post('migrarAFondosPresupuesto').data.migrada).toBe(false)
-  })
-
-  it('revertir devuelve los nombres anteriores sin perder datos', () => {
-    legacy(); b.post('migrarAFondosPresupuesto')
-    expect(b.post('revertirMigracionAFondos').ok).toBe(true)
-    expect(b.ss.getSheetByName('FUENTES')!.rows).toHaveLength(6)
-    expect(b.ss.getSheetByName('FUENTES_MESES')!.rows[0][0]).toBe('Fuente ID')
-    expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows[1][1]).toBe('fuente')
-    expect(b.ss.getSheetByName('CONCILIACIONES')!.rows[1][0]).toBe('conc-1')
+  it('la simulación crea fondos con tipo vigente', () => {
+    const r = b.post('generarDatosPrueba')
+    expect(r.ok).toBe(true)
+    const d = b.post('data', { fresh: true })
+    expect(d.ok).toBe(true)
+    expect(d.data.fondos.every((f: unknown[]) => ['mensual', 'extra', 'ahorro_asignado'].includes(String(f[13])))).toBe(true)
   })
 })
