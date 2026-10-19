@@ -692,7 +692,7 @@ function getData_(fresh) {
     fondos: readRows_(ss, 'FONDOS_PRESUPUESTO').map(fondoOut_),
     fondosMeses: readRows_(ss, 'FONDOS_PRESUPUESTO_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
-    }) : [],
+    }),
     plantillasFin: pfTodas_().rows.map(pfOut_),
     revisionesPresupuesto: ss.getSheetByName('REVISIONES_PRESUPUESTO') ? revLeer_(ss) : []
   };
