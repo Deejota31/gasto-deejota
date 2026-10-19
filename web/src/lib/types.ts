@@ -35,8 +35,6 @@ export type EstadoRevision = 'legitimo' | 'pendiente' | 'duplicado'
  */
 export type EstadoRevisionPres = 'pendiente' | 'completo' | 'con_gastos_anteriores' | 'revisado_con_observaciones'
 export interface RevisionPres { id: string; periodo: string; estado: EstadoRevisionPres; pendientes: string; observacion: string; creadoEn: string }
-/** Qué falta migrar de la hoja a “Fondos del presupuesto” (lo calcula el backend). */
-export interface MigracionEstado { pendiente: boolean; hojasViejas: string[]; plantillasPorConvertir: number; fondosSinTipo: number }
 
 export interface Revision { id: string; tipo: 'duplicado'; ids: string[]; estado: EstadoRevision; firma: string; creadoEn: string; actualizadoEn: string }
 
@@ -134,8 +132,6 @@ export interface AppData {
   revisiones?: Revision[]
   /** Revisión del presupuesto: historial de solo agregar (la vigente de un período es la última). */
   revisionesPresupuesto?: RevisionPres[]
-  /** Estado de la migración a Fondos del presupuesto (backend ≥ 1.26). `undefined` = backend anterior. */
-  migracion?: MigracionEstado
   sheetUrl: string
   version: string
 }
