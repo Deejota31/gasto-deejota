@@ -12,27 +12,36 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
 })
 
-test.describe('KPIs: solo cuatro, una sola fila en escritorio', () => {
-  test('1366×768: cuatro tarjetas en una fila, misma altura, sin segunda fila ni huecos', async ({ page }) => {
+const KPIS = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']
+const KPI_SEL = '[data-testid="kpis"] > div'
+
+test.describe('KPIs complementarios: dentro del Presupuesto consolidado, compactos', () => {
+  test('1366×768: cuatro mini-tarjetas en una fila, al final del bloque, bajas y sin sección separada', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60&fuentes=3')
-    await expect(page.getByTestId('kpis').locator('p.text-xs')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
-    const t = await cajas(page, '[data-testid="kpis"] > div')
+    await expect(page.getByTestId('kpis').locator('> div > div > p:first-child')).toHaveText(KPIS)
+    await expect(page.getByTestId('consolidado').getByTestId('kpis')).toBeVisible()
+    await expect(page.getByTestId('kpis')).toHaveCount(1)
+    const t = await cajas(page, KPI_SEL)
     expect(t).toHaveLength(4)
-    expect(new Set(t.map(c => c.y)).size).toBe(1)                          // una sola fila
-    expect(new Set(t.map(c => c.h)).size).toBe(1)                          // misma altura
-    expect(new Set(t.map(c => c.w)).size).toBeLessThanOrEqual(2)           // ancho equivalente (±1 px de redondeo)
-    const sorted = [...t].sort((a, b) => a.x - b.x)
-    for (let i = 1; i < 4; i++) expect(sorted[i].x - (sorted[i - 1].x + sorted[i - 1].w)).toBeLessThanOrEqual(16)   // sin huecos grandes
+    expect(new Set(t.map(c => c.y)).size).toBe(1)
+    expect(Math.max(...t.map(c => c.h))).toBeLessThanOrEqual(72)                       // compactas
+    const bloque = (await page.getByTestId('consolidado').boundingBox())!
+    const ultimo = (await page.getByTestId('kpis').boundingBox())!
+    expect(Math.abs(ultimo.y + ultimo.height - (bloque.y + bloque.height))).toBeLessThanOrEqual(2)   // al final del bloque
+    // más pequeñas que los indicadores principales
+    const vk = parseFloat(await page.getByTestId('kpi-promedio-diario').locator('p').nth(1).evaluate(e => getComputedStyle(e).fontSize))
+    const vp = parseFloat(await celda(page, 'presupuesto-consolidado').evaluate(e => getComputedStyle(e).fontSize))
+    expect(vk).toBeLessThan(vp)
     expect(await sinScrollH(page)).toBe(true)
   })
 
-  for (const [w, h, filas] of [[1024, 768, 1], [834, 1112, 2], [768, 1024, 2], [430, 932, 2], [390, 844, 4], [360, 740, 4]] as const) {
+  for (const [w, h, filas] of [[1024, 768, 1], [834, 1112, 2], [768, 1024, 2], [430, 932, 2], [390, 844, 2], [360, 740, 2]] as const) {
     test(`${w}×${h}: ${filas} fila(s), sin desborde ni superposición`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fuentes=3')
       await expect(page.getByTestId('kpis')).toBeVisible()
-      const t = await cajas(page, '[data-testid="kpis"] > div')
+      const t = await cajas(page, KPI_SEL)
       expect(new Set(t.map(c => c.y)).size, `${w}px`).toBe(filas)
       for (let i = 0; i < t.length; i++) for (let j = i + 1; j < t.length; j++) {
         const a = t[i], b = t[j]
@@ -42,6 +51,22 @@ test.describe('KPIs: solo cuatro, una sola fila en escritorio', () => {
       expect(await sinScrollH(page), `${w}px`).toBe(true)
     })
   }
+})
+
+test.describe('Filtros superiores', () => {
+  test('1366×768: seis filtros en una fila, altura compacta, Período y textos largos con más ancho', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 })
+    await page.goto('/?demo=60&fuentes=3')
+    const nombres = ['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago', 'Tipo de gasto']
+    const bs = await Promise.all(nombres.map(async n => (await page.getByRole('button', { name: n, exact: true }).boundingBox())!))
+    const periodo = (await page.getByRole('button', { name: /^Período/ }).first().boundingBox())!
+    expect(new Set([...bs.map(b => Math.round(b.y)), Math.round(periodo.y)]).size).toBe(1)
+    for (const b of bs) expect(b.height).toBeLessThanOrEqual(44)
+    const [amb, cat, sub, med, tipo] = bs.map(b => b.width)
+    expect(sub).toBeGreaterThan(cat); expect(cat).toBeGreaterThan(med); expect(med).toBeGreaterThan(tipo); expect(tipo).toBeGreaterThan(amb)
+    expect(periodo.width).toBeGreaterThan(amb)
+    expect(await sinScrollH(page)).toBe(true)
+  })
 })
 
 test.describe('Presupuesto consolidado', () => {
@@ -124,7 +149,7 @@ test.describe('Presupuesto consolidado', () => {
     expect(errores).toEqual([])
   })
 
-  test('los filtros no cambian el presupuesto (período completo) pero sí los KPIs inferiores', async ({ page }) => {
+  test('los filtros no cambian el presupuesto (período completo) pero sí los KPIs complementarios', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3')
     const p0 = await celda(page, 'presupuesto-consolidado').innerText(), g0 = await celda(page, 'gastado-del-período').innerText()
     const n0 = Number((await page.getByTestId('kpis').getByText(/^\d+$/).first().innerText()))

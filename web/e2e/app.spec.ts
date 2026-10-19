@@ -100,7 +100,7 @@ test('cada KPI y cada indicador del presupuesto tiene su icono de información c
   // Solo quedan cuatro tarjetas KPI (Presupuesto, Total gastado, Disponible y Consumido viven en el Presupuesto consolidado)
   for (const l of ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) await expect(kpi(page, l)).toBeVisible()
   for (const l of ['Caja mensual', 'Total gastado', 'Disponible', 'Presupuesto']) await expect(page.locator('p', { hasText: new RegExp(`^${l}$`) })).toHaveCount(0)
-  await expect(page.getByTestId('kpis').locator('p.text-xs')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
+  await expect(page.getByTestId('kpis').locator('> div > div > p:first-child')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
   const indicadores = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos',
     'Presupuesto consolidado', 'Gastado del período', 'Disponible consolidado', 'Reservado en cajas', 'Libre inicial', 'Gastado fuera de reservas', 'Saldo libre actual', 'Consumido', 'Cómo se calcula']
   for (const l of indicadores) {
@@ -1340,14 +1340,14 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
   const celdas = async (page: Page) => Object.fromEntries(await page.getByTestId('consolidado').locator('[data-testid^="cons-"]').evaluateAll(els =>
     els.map(e => [e.getAttribute('data-testid'), e.querySelectorAll('p')[1]?.textContent ?? ''])))
 
-  test('orden: filtros → Presupuesto consolidado → acordeones → KPIs → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
+  test('orden: filtros → Presupuesto consolidado (con KPIs dentro) → acordeones → gráficos; acordeones cerrados, se abren con clic y teclado y vuelven a cerrarse al volver', async ({ page }) => {
     await page.goto('/?demo=60&fuentes=3')
     const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y
     const kpiY = await y(page.getByTestId('kpis'))
     const consY = await y(page.getByTestId('caja-general'))
     const accY = await y(page.getByTestId('resumen-cajas'))
     const chartY = await y(page.getByText(/^Gasto acumulado/).first())
-    expect(consY).toBeLessThan(accY); expect(accY).toBeLessThan(kpiY); expect(kpiY).toBeLessThan(chartY)
+    expect(consY).toBeLessThan(kpiY); expect(kpiY).toBeLessThan(accY); expect(accY).toBeLessThan(chartY)
     await expect(page.getByTestId('consolidado-subtitulo')).toContainText(/3 fuentes activas · \w+ \d{4}/)
     const fuentes = page.getByRole('button', { name: /^Fuentes de dinero/ }), subcajas = page.getByRole('button', { name: /^Cajas \/ reservas/ })
     await expect(fuentes).toHaveAttribute('aria-expanded', 'false')
