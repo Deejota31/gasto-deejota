@@ -1,7 +1,7 @@
-import { mediosDeFuente } from './fuenteMedios'
+import { mediosDeFondo } from './fondoMedios'
 import { addDays, daysBetween, monthsInRange } from './dates'
 import { percent, toBaseCents } from './money'
-import type { Caja, Filters, Fuente, FuenteMes, Gasto, Presupuesto } from './types'
+import type { Caja, Filters, Fondo, FondoMes, Gasto, Presupuesto } from './types'
 
 /**
  * Motor único de agregaciones. Una pasada por los gastos por cada combinación de filtros;
@@ -14,10 +14,10 @@ import type { Caja, Filters, Fuente, FuenteMes, Gasto, Presupuesto } from './typ
  *    período: un presupuesto no se puede "filtrar" por categoría sin volverse incoherente.
  *  - Cajas: la general es el presupuesto total (P). Las subcajas son reservas dentro de P, no dinero extra.
  *    Cada gasto se imputa como máximo a una subcaja (la primera que coincide, por orden).
- *  - Fuentes (v1.8): si hay al menos una fuente, P = Σ aportes del período de las fuentes ACTIVAS (las reservas no suman).
- *    Sin fuentes, P sigue siendo el presupuesto de la caja general (compatibilidad con hojas anteriores).
- *    Cada gasto se atribuye en cascada: primero la fuente de su medio de pago, luego las fuentes libres en orden (la
- *    principal hasta su tope, después la siguiente). Una fuente solo queda en negativo si el consolidado también lo está.
+ *  - Fondos (v1.8): si hay al menos un fondo, P = Σ aportes del período de los fondos ACTIVOS (las reservas no suman).
+ *    Sin fondos, P sigue siendo el presupuesto de la caja general (compatibilidad con hojas anteriores).
+ *    Cada gasto se atribuye en cascada: primero el fondo de su medio de pago, luego los fondos libres en orden (la
+ *    principal hasta su tope, después la siguiente). Un fondo solo queda en negativo si el consolidado también lo está.
  */
 
 export interface Ctx {
@@ -26,8 +26,8 @@ export interface Ctx {
   today: string // AAAA-MM-DD en la zona horaria del usuario
   cajas: Caja[]
   presupuestos: Presupuesto[]
-  fuentes?: Fuente[]
-  fuentesMeses?: FuenteMes[]
+  fondos?: Fondo[]
+  fondosMeses?: FondoMes[]
   /** Mes de corte del aislamiento mensual (ver aislaDesde). Sin valor = comportamiento histórico. */
   aislarDesde?: string
 }
@@ -50,20 +50,20 @@ export interface CajasResumen {
   disponible: number         // P − Gs − Gl
   /** Gs + Gl: todo lo gastado del período (sin filtros de dimensión), cada movimiento una vez. */
   gastadoPeriodo: number
-  /** Σ max(0, asignado − gastado) de las subcajas activas. Conciliación: disponible = saldoLibre + reservasSinUsar. */
+  /** Σ max(0, asignado − gastado) de las subcajas activas. Cuadre: disponible = saldoLibre + reservasSinUsar. */
   reservasSinUsar: number
   pct: number | null
   sobreasignado: boolean     // R > P
   subcajas: SubcajaResumen[]
   /** Subcajas desactivadas: no reservan ni toman gastos. */
   inactivas: Caja[]
-  /** De dónde sale P: suma de fuentes activas o, sin fuentes, la caja general. */
-  origen: 'fuentes' | 'caja-general'
-  fuentes: FuentesResumen
+  /** De dónde sale P: suma de fondos activos o, sin fondos, la caja general. */
+  origen: 'fondos' | 'caja-general'
+  fondos: FondosResumen
 }
 
-export interface FuenteResumen {
-  fuente: Fuente
+export interface FondoResumen {
+  fondo: Fondo
   /** Importe del período en moneda base (aunque esté inactiva, para mostrar cuánto aportaría). */
   asignado: number
   /** Lo que suma a P: asignado si está activa y tiene tipo de cambio; si no, 0. */
@@ -74,21 +74,21 @@ export interface FuenteResumen {
   pct: number | null
   principal: boolean
   sinTipoCambio: boolean
-  /** Algún mes del período tiene un importe propio (FUENTES_MESES). */
+  /** Algún mes del período tiene un importe propio (FONDOS_PRESUPUESTO_MESES). */
   ajustado: boolean
-  /** ¿Aplicada al período (importe del mes o fuente de ese mes)? false = solo definición: no suma dinero */
+  /** ¿Aplicada al período (importe del mes o fondo de ese mes)? false = solo definición: no suma dinero */
   aplicada: boolean
 }
-export interface FuentesResumen {
-  lista: FuenteResumen[]
+export interface FondosResumen {
+  lista: FondoResumen[]
   total: number
   activas: number
-  /** Gastos pagados con el medio de una fuente inactiva: siguen descontando de P (conciliación aparte). */
+  /** Gastos pagados con el medio de un fondo inactivo: siguen descontando de P (gastos por revisar). */
   gastadoInactivas: number
   countInactivas: number
-  /** Gastos sin fuente válida (no hay fuente principal activa): también descuentan de P. */
-  gastadoSinFuente: number
-  countSinFuente: number
+  /** Gastos sin fondo válida (no hay fondo principal activo): también descuentan de P. */
+  gastadoSinFondo: number
+  countSinFondo: number
 }
 
 export interface FlowLink { medio: string; ambito: string; cents: number; count: number }
@@ -187,9 +187,9 @@ export function budgetCents(caja: Caja, periodo: string, presupuestos: Presupues
 }
 
 /**
- * Mes desde el cual fuentes y subcajas NO se trasladan solas de un mes a otro (v1.19). Antes de ese mes se conserva el
+ * Mes desde el cual fondos y subcajas NO se trasladan solas de un mes a otro (v1.19). Antes de ese mes se conserva el
  * comportamiento histórico (así los meses ya vividos no cambian ni un centavo); desde ese mes cuenta solo lo aplicado
- * explícitamente (FUENTES_MESES modo 'solo' / PRESUPUESTOS). Configurable en CONFIG → aislamiento_desde ('9999-12' = apagado).
+ * explícitamente (FONDOS_PRESUPUESTO_MESES modo 'solo' / PRESUPUESTOS). Configurable en CONFIG → aislamiento_desde ('9999-12' = apagado).
  */
 export const AISLAMIENTO_DEFECTO = '2026-11'
 export const aislaDesde = (config?: Record<string, string>): string => /^\d{4}-\d{2}$/.test(config?.aislamiento_desde ?? '') ? config!.aislamiento_desde : AISLAMIENTO_DEFECTO
@@ -203,20 +203,20 @@ export function budgetForRange(caja: Caja, desde: string, hasta: string, presupu
 }
 
 /**
- * Importe de una fuente para un mes, en su moneda: un importe "solo ese mes" manda; si no, el último "desde" vigente
- * (solo fuentes mensuales); si no, el importe habitual (mensual: desde su mes de aplicación; única: solo en su mes).
+ * Importe de un fondo para un mes, en su moneda: un importe "solo ese mes" manda; si no, el último "desde" vigente
+ * (solo fondos mensuales); si no, el importe habitual (mensual: desde su mes de aplicación; única: solo en su mes).
  */
-export function fuenteMontoMes(f: Fuente, mes: string, meses: FuenteMes[], aislar?: string): { monto: number; ajustado: boolean; aplicada: boolean } {
-  let solo: FuenteMes | undefined, desde: FuenteMes | undefined
+export function fondoMontoMes(f: Fondo, mes: string, meses: FondoMes[], aislar?: string): { monto: number; ajustado: boolean; aplicada: boolean } {
+  let solo: FondoMes | undefined, desde: FondoMes | undefined
   if (aislar && mes >= aislar) {
-    // Aislamiento mensual: solo cuenta lo aplicado a ESE mes (importe "solo ese mes") o una fuente de un único mes.
-    const s = meses.find(m => m.fuenteId === f.id && m.modo === 'solo' && m.mes === mes)
+    // Aislamiento mensual: solo cuenta lo aplicado a ESE mes (importe "solo ese mes") o un fondo de un único mes.
+    const s = meses.find(m => m.fondoId === f.id && m.modo === 'solo' && m.mes === mes)
     if (s) return { monto: s.monto, ajustado: true, aplicada: true }
     const propia = f.recurrencia === 'unica' && mes === f.mes
     return { monto: propia ? f.monto : 0, ajustado: false, aplicada: propia }
   }
   for (const m of meses) {
-    if (m.fuenteId !== f.id) continue
+    if (m.fondoId !== f.id) continue
     if (m.modo === 'solo' && m.mes === mes) solo = m
     else if (m.modo === 'desde' && m.mes <= mes && (!desde || m.mes > desde.mes)) desde = m
   }
@@ -226,7 +226,7 @@ export function fuenteMontoMes(f: Fuente, mes: string, meses: FuenteMes[], aisla
   return { monto: !f.mes || mes >= f.mes ? f.monto : 0, ajustado: false, aplicada: true }
 }
 
-export const ordenFuentes = (fs: Fuente[]) => [...fs].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
+export const ordenFondos = (fs: Fondo[]) => [...fs].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
 
 /** Días que cuentan para el promedio diario: hasta hoy si el período está en curso, completo si ya pasó, 0 si es futuro. */
 export function diasDelPeriodo(desde: string, hasta: string, today: string): number {
@@ -256,30 +256,30 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const subCount = new Array<number>(subcajas.length).fill(0)
   let total = 0, count = 0, maxCents = 0, max: Gasto | null = null, excluidos = 0, totalPeriodo = 0, gastadoLibre = 0
 
-  // Fuentes: importe del período por fuente y a qué fuente se atribuye cada gasto (una sola).
-  const fuentes = ordenFuentes(ctx.fuentes ?? [])
+  // Fondos: importe del período por fondo y a qué fondo se atribuye cada gasto (una sola).
+  const fondos = ordenFondos(ctx.fondos ?? [])
   const meses = monthsInRange(f.desde, f.hasta)
-  const fMeses = ctx.fuentesMeses ?? []
-  const fResumen: FuenteResumen[] = fuentes.map(fu => {
+  const fMeses = ctx.fondosMeses ?? []
+  const fResumen: FondoResumen[] = fondos.map(fu => {
     let monto = 0, ajustado = false, aplicada = false
-    for (const m of meses) { const x = fuenteMontoMes(fu, m, fMeses, ctx.aislarDesde); monto += x.monto; ajustado ||= x.ajustado; aplicada ||= x.aplicada }
+    for (const m of meses) { const x = fondoMontoMes(fu, m, fMeses, ctx.aislarDesde); monto += x.monto; ajustado ||= x.ajustado; aplicada ||= x.aplicada }
     const cents = toBaseCents(monto, fu.moneda, ctx.base, ctx.rates)
     const asignado = cents ?? 0
-    return { fuente: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado, aplicada }
+    return { fondo: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado, aplicada }
   })
-  // Una fuente puede tener 0, 1 o varios medios y varias fuentes pueden compartir un medio: el grupo de un medio son
-  // sus fuentes en el orden definido por el usuario (el medio no es una clave).
-  const porMedio = new Map<string, FuenteResumen[]>()
+  // Un fondo puede tener 0, 1 o varios medios y varios fondos pueden compartir un medio: el grupo de un medio son
+  // sus fondos en el orden definido por el usuario (el medio no es una clave).
+  const porMedio = new Map<string, FondoResumen[]>()
   for (const r of fResumen) {
-    for (const m of mediosDeFuente(r.fuente.medioPago)) {
+    for (const m of mediosDeFondo(r.fondo.medioPago)) {
       const k = nrm(m)
       porMedio.set(k, [...(porMedio.get(k) ?? []), r])
     }
   }
-  const libres = fResumen.filter(r => r.fuente.activo && !mediosDeFuente(r.fuente.medioPago).length)
+  const libres = fResumen.filter(r => r.fondo.activo && !mediosDeFondo(r.fondo.medioPago).length)
   const principal = libres.find(r => r.aporta > 0) ?? libres[0] ?? null
   if (principal) principal.principal = true
-  let gastadoInactivas = 0, countInactivas = 0, gastadoSinFuente = 0, countSinFuente = 0
+  let gastadoInactivas = 0, countInactivas = 0, gastadoSinFondo = 0, countSinFondo = 0
   const elegibles: { g: Gasto; cents: number }[] = []
 
   for (const g of gastos) {
@@ -324,29 +324,29 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     if (!ultimaFecha || g.fecha > ultimaFecha) ultimaFecha = g.fecha
   }
 
-  // Cascada de fuentes (v1.10). En orden cronológico, cada gasto toma primero la fuente de su medio de pago (Sodexo…) y,
-  // si no tiene o ya se agotó, las fuentes libres en orden: la principal hasta su tope, luego la siguiente. Un gasto que
-  // cruza un tope se reparte (cuenta como movimiento en la primera fuente que lo recibe). Lo que sobra tras agotar todo
-  // queda en la última fuente libre: una fuente solo muestra saldo negativo si el presupuesto consolidado también lo es.
-  // El resultado por fuente no depende del orden de los gastos; solo cambia cuántos movimientos cuenta cada una.
+  // Cascada de fondos (v1.10). En orden cronológico, cada gasto toma primero el fondo de su medio de pago (Sodexo…) y,
+  // si no tiene o ya se agotó, los fondos libres en orden: la principal hasta su tope, luego la siguiente. Un gasto que
+  // cruza un tope se reparte (cuenta como movimiento en el primer fondo que lo recibe). Lo que sobra tras agotar todo
+  // queda en la última fondo libre: un fondo solo muestra saldo negativo si el presupuesto consolidado también lo es.
+  // El resultado por fondo no depende del orden de los gastos; solo cambia cuántos movimientos cuenta cada una.
   if (fResumen.length) {
     const libresOrden = principal ? [principal, ...libres.filter(r => r !== principal)] : []
     const cupo = new Map(fResumen.map(r => [r, Math.max(0, r.aporta)]))
     const cronologico = elegibles.sort((a, b) => a.g.fecha.localeCompare(b.g.fecha) || a.g.creadoEn.localeCompare(b.g.creadoEn) || a.g.id.localeCompare(b.g.id))
     for (const { g, cents } of cronologico) {
       const grupo = porMedio.get(nrm(g.medioPago)) ?? []
-      const activas = grupo.filter(r => r.fuente.activo)
-      // Todas las fuentes de ese medio están inactivas: el gasto va al cubo de "inactivas" (a la primera del grupo).
+      const activas = grupo.filter(r => r.fondo.activo)
+      // Todos los fondos de ese medio están inactivas: el gasto va al cubo de "inactivas" (a la primera del grupo).
       if (grupo.length && !activas.length) { gastadoInactivas += cents; countInactivas++; grupo[0].gastado += cents; grupo[0].count++; continue }
       let resto = cents, contado = false
-      const poner = (r: FuenteResumen, monto: number) => {
+      const poner = (r: FondoResumen, monto: number) => {
         if (monto <= 0) return
         r.gastado += monto
         cupo.set(r, (cupo.get(r) ?? 0) - monto)
         if (!contado) { r.count++; contado = true }
         resto -= monto
       }
-      // Cada centavo se coloca una sola vez: primero las fuentes de su medio (en orden), luego las libres.
+      // Cada centavo se coloca una sola vez: primero los fondos de su medio (en orden), luego las libres.
       for (const r of activas) {
         if (resto <= 0) break
         poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
@@ -358,16 +358,16 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
       if (resto > 0) {
         const ultimo = libresOrden[libresOrden.length - 1] ?? activas[activas.length - 1]
         if (ultimo) poner(ultimo, resto)
-        else { gastadoSinFuente += resto; countSinFuente++ }
+        else { gastadoSinFondo += resto; countSinFondo++ }
       }
     }
   }
 
   // Cajas (P, R, Gs, Gl). El exceso de una subcaja sobre su asignación se descuenta del saldo libre.
-  const origen = fResumen.length ? 'fuentes' as const : 'caja-general' as const
+  const origen = fResumen.length ? 'fondos' as const : 'caja-general' as const
   for (const r of fResumen) { r.disponible = r.aporta - r.gastado; r.pct = percent(r.gastado, r.aporta) }
-  const totalFuentes = fResumen.reduce((s, r) => s + r.aporta, 0)
-  const P = origen === 'fuentes' ? totalFuentes : general ? budgetForRange(general, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde) : 0
+  const totalFondos = fResumen.reduce((s, r) => s + r.aporta, 0)
+  const P = origen === 'fondos' ? totalFondos : general ? budgetForRange(general, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde) : 0
   const subResumen: SubcajaResumen[] = subcajas.map((caja, i) => {
     const asignado = budgetForRange(caja, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde)
     const gastado = subGastado[i]
@@ -381,7 +381,7 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     saldoLibre: P - R - gastadoLibre - exceso, disponible: P - Gs - gastadoLibre,
     gastadoPeriodo: Gs + gastadoLibre, reservasSinUsar: subResumen.reduce((s, x) => s + Math.max(0, x.asignado - x.gastado), 0), pct: percent(Gs + gastadoLibre, P),
     sobreasignado: R > P, subcajas: subResumen, inactivas, origen,
-    fuentes: { lista: fResumen, total: totalFuentes, activas: fResumen.filter(r => r.fuente.activo).length, gastadoInactivas, countInactivas, gastadoSinFuente, countSinFuente },
+    fondos: { lista: fResumen, total: totalFondos, activas: fResumen.filter(r => r.fondo.activo).length, gastadoInactivas, countInactivas, gastadoSinFondo, countSinFondo },
   }
 
   // Serie diaria: real hasta hoy (o el último gasto si hay fechas futuras), ritmo ideal y proyección solo si está en curso.

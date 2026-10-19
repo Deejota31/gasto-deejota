@@ -38,10 +38,10 @@ describe('planificación mensual: fechas y recordatorios', () => {
   })
   it('estado por etapas: omitida no cuenta como ejecutada; completada solo si ninguna queda pendiente', () => {
     const p = leerEstadoPlan({ 'plan_est_2026-11': 'e|120|' }, '2026-11')
-    expect(p.etapas).toEqual({ fuentes: 1, subcajas: 2, gastos: 0 }); expect(p.estado).toBe('en_progreso')
-    expect(estadoDesdeEtapas({ fuentes: 1, subcajas: 2, gastos: 0 })).toBe('en_progreso')
-    expect(estadoDesdeEtapas({ fuentes: 1, subcajas: 2, gastos: 2 })).toBe('completada')
-    expect(estadoDesdeEtapas({ fuentes: 0, subcajas: 0, gastos: 0 })).toBe('pendiente')
+    expect(p.etapas).toEqual({ fondos: 1, subcajas: 2, gastos: 0 }); expect(p.estado).toBe('en_progreso')
+    expect(estadoDesdeEtapas({ fondos: 1, subcajas: 2, gastos: 0 })).toBe('en_progreso')
+    expect(estadoDesdeEtapas({ fondos: 1, subcajas: 2, gastos: 2 })).toBe('completada')
+    expect(estadoDesdeEtapas({ fondos: 0, subcajas: 0, gastos: 0 })).toBe('pendiente')
     expect(serializarEstadoPlan(p)).toBe('e|120|')
   })
   it('próximas fechas parten de hoy y saltan meses desactivados', () => {

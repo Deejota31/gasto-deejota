@@ -5,7 +5,7 @@ import { MoreHorizontal } from 'lucide-react'
 export interface AccionMenu { key: string; label: string; icon: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; title?: string }
 
 /**
- * Menú ⋯ de las tarjetas (Fuentes y Subcajas). Se dibuja en un portal con position: fixed: las tarjetas tienen
+ * Menú ⋯ de las tarjetas (Fondos y Subcajas). Se dibuja en un portal con position: fixed: las tarjetas tienen
  * overflow-hidden y un menú absoluto quedaba cortado. Se abre hacia arriba si abajo no cabe y se cierra con Esc,
  * al tocar fuera, al desplazar o al cambiar el tamaño de la ventana.
  */

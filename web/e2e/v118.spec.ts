@@ -24,7 +24,7 @@ for (const tema of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: tema })
       await page.addInitScript(t => { try { localStorage.setItem('deejota.tema', t); localStorage.setItem('theme', t) } catch { /* */ } }, tema)
       await page.setViewportSize({ width: 1366, height: 768 })
-      await page.goto('/?demo=60&fuentes=3')
+      await page.goto('/?demo=60&fondos=3')
       await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
       if (tema === 'dark') {
         await go(page, 'Configuración')
@@ -58,17 +58,17 @@ for (const tema of ['light', 'dark'] as const) {
       if (offs.size) expect([...offs]).toEqual([off])
     })
 
-    test('botones Nuevo gasto / Nueva fuente / Nueva caja idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
+    test('botones Nuevo gasto / Nuevo fondo / Nueva caja idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
       const nuevo: Record<string, unknown> = {}, mensual: Record<string, unknown> = {}
       nuevo.gasto = await estilo(page.getByRole('button', { name: 'Nuevo gasto' }).first())
       mensual.gasto = await estilo(page.getByRole('button', { name: 'Gastos mensuales' }).first())
       await go(page, 'Cajas')
-      nuevo.fuente = await estilo(page.getByRole('button', { name: 'Nueva fuente' }).first())
-      mensual.fuente = await estilo(page.getByRole('button', { name: 'Fuentes mensuales' }).first())
+      nuevo.fondo = await estilo(page.getByRole('button', { name: 'Nuevo fondo' }).first())
+      mensual.fondo = await estilo(page.getByRole('button', { name: 'Fondos mensuales' }).first())
       nuevo.subcaja = await estilo(page.getByRole('button', { name: 'Nueva caja' }).first())
       mensual.subcaja = await estilo(page.getByRole('button', { name: 'Cajas mensuales' }).first())
-      expect(nuevo.fuente).toEqual(nuevo.gasto); expect(nuevo.subcaja).toEqual(nuevo.gasto)
-      expect(mensual.fuente).toEqual(mensual.gasto); expect(mensual.subcaja).toEqual(mensual.gasto)
+      expect(nuevo.fondo).toEqual(nuevo.gasto); expect(nuevo.subcaja).toEqual(nuevo.gasto)
+      expect(mensual.fondo).toEqual(mensual.gasto); expect(mensual.subcaja).toEqual(mensual.gasto)
       expect(nuevo.gasto).not.toEqual(mensual.gasto)
     })
 
@@ -79,13 +79,13 @@ for (const tema of ['light', 'dark'] as const) {
       }
       await orden('Nuevo gasto', 'Gastos mensuales')
       await go(page, 'Gastos'); await orden('Nuevo gasto', 'Gastos mensuales')
-      await go(page, 'Cajas'); await orden('Nueva fuente', 'Fuentes mensuales'); await orden('Nueva caja', 'Cajas mensuales')
+      await go(page, 'Cajas'); await orden('Nuevo fondo', 'Fondos mensuales'); await orden('Nueva caja', 'Cajas mensuales')
     })
 
     test('menú ⋯: orden canónico, iconos de 16px y Eliminar con el rojo semántico', async ({ page }) => {
       await go(page, 'Cajas')
       const danger = await token(page, '--danger')
-      await page.getByRole('button', { name: /^Más acciones de la fuente / }).first().click()
+      await page.getByRole('button', { name: /^Más acciones del fondo / }).first().click()
       const items = page.getByRole('menuitem')
       expect((await items.allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
       expect((await estilo(items.last())).fg).toBe(danger)
@@ -101,13 +101,13 @@ for (const tema of ['light', 'dark'] as const) {
       expect((await estilo(page.getByRole('menuitem').last())).fg).toBe(danger)
     })
 
-    test('Editar: mismo estilo en fuentes y subcajas; botón Eliminar de confirmación usa Danger', async ({ page }) => {
+    test('Editar: mismo estilo en fondos y subcajas; botón Eliminar de confirmación usa Danger', async ({ page }) => {
       await go(page, 'Cajas')
-      const ef = await estilo(page.getByRole('button', { name: /^Editar fuente / }).first())
+      const ef = await estilo(page.getByRole('button', { name: /^Editar fondo / }).first())
       const ec = await estilo(page.locator('button[title="Editar"]:visible').last())
       expect(ec).toEqual(ef)
       // Eliminar (confirmación) = variante Danger: se crea una plantilla de prueba y se elimina
-      await page.getByRole('button', { name: 'Fuentes mensuales' }).first().click()
+      await page.getByRole('button', { name: 'Fondos mensuales' }).first().click()
       await page.getByRole('dialog').getByRole('button', { name: /Nueva plantilla/ }).click()
       await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
       await page.locator('#pf-nombre').fill('Temporal'); await page.locator('#pf-monto').fill('1')
@@ -135,14 +135,14 @@ test.describe('Design System: catálogo y responsive', () => {
   for (const [w, h] of [[1920, 1080], [1440, 900], [1366, 768], [1024, 768], [768, 1024], [430, 932], [390, 844], [375, 667], [320, 568]] as const) {
     test(`${w}×${h}: sin desborde y botones de módulo en orden`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
-      await page.goto('/?demo=60&fuentes=3')
+      await page.goto('/?demo=60&fondos=3')
       await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
       for (const tab of ['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración']) {
         await go(page, tab); await page.waitForTimeout(200)
         expect(await sinScrollH(page), `${tab} a ${w}px`).toBe(true)
       }
       await go(page, 'Cajas')
-      const nf = await page.getByRole('button', { name: 'Nueva fuente' }).first().boundingBox(), mf = await page.getByRole('button', { name: 'Fuentes mensuales' }).first().boundingBox()
+      const nf = await page.getByRole('button', { name: 'Nuevo fondo' }).first().boundingBox(), mf = await page.getByRole('button', { name: 'Fondos mensuales' }).first().boundingBox()
       expect(nf!.x + nf!.y * 2000).toBeLessThan(mf!.x + mf!.y * 2000)
       expect(nf!.x + nf!.width).toBeLessThanOrEqual(w + 1)
       expect(mf!.x + mf!.width).toBeLessThanOrEqual(w + 1)

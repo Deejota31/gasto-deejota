@@ -11,17 +11,17 @@ import { Empty, ErrorBox, InfoTooltip, Skeleton } from '../components/ui'
  * Pestaña Salud financiera. Usa los mismos datos en memoria y el mismo filtro global que Dashboard y Gastos
  * (no hay estados duplicados ni lecturas nuevas). Sus cálculos solo corren mientras esta pestaña está abierta.
  */
-export default function Salud({ store, filters, setFilters, today, onRevisarGasto, onGastosMensuales, onConcRevisarGastos, onConcNuevoGasto, onConcIrFuentes }: {
+export default function Salud({ store, filters, setFilters, today, onRevisarGasto, onGastosMensuales, onRevisionRevisarGastos, onRevisionNuevoGasto }: {
   store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
-  /** Conciliación de saldos: abren Gastos / Nuevo gasto / Fuentes con el período y corte de la conciliación. */
-  onConcRevisarGastos: (desde: string, hasta: string) => void; onConcNuevoGasto: (fecha: string) => void; onConcIrFuentes: () => void
+  /** Revisión del presupuesto: abren Gastos / Nuevo gasto con el período revisado. */
+  onRevisionRevisarGastos: (desde: string, hasta: string) => void; onRevisionNuevoGasto: (fecha: string) => void
 }) {
   const data = store.data
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
   const gastos = data?.gastos
-  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  // Mismo motor y mismo contexto (fondos, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
   const a = useAgregado(data, filters, today)
   const activos = [...filters.ambitos, ...filters.categorias, ...filters.subcategorias.map(x => x.split(' › ').at(-1) ?? x), ...filters.medios, ...filters.tipos]
 
@@ -40,7 +40,7 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
                   <p>Usa los datos ya cargados y el mismo filtro de período del Dashboard y Gastos: no hace consultas adicionales a tu hoja y nunca modifica movimientos.</p>
                 </InfoTooltip>
               </h1>
-              <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta oportunidades de ahorro.</p>
+              <p className="mt-0.5 text-sm text-muted">Controla tu presupuesto, revisa la calidad de tus datos y detecta gastos que podrías recortar. Solo usa tus fondos y gastos registrados.</p>
             </div>
           </div>
         </div>
@@ -54,13 +54,13 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
       </div>
       <FilterBar filters={filters} setFilters={setFilters} catalogo={catalogo} medios={medios} today={today} gastos={gastos} />
       {store.error && !data && <ErrorBox message={store.error} onRetry={store.refresh} />}
-      {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 && !(data?.fuentes?.length) && !(data?.conciliaciones?.length) ? (
+      {!a ? <Skeleton className="h-96" /> : (data?.gastos.length ?? 0) === 0 && !(data?.fondos?.length) && !(data?.revisionesPresupuesto?.length) ? (
         <div className="rounded-2xl border border-line bg-card" data-testid="salud-sin-datos">
           <Empty icon={<HeartPulse className="size-5" />} title="Todavía no hay información disponible">Registra gastos para que se calcule tu salud financiera.</Empty>
         </div>
       ) : (
         <SaludFinanciera store={store} a={a} filters={filters} today={today} onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales}
-          onConcRevisarGastos={onConcRevisarGastos} onConcNuevoGasto={onConcNuevoGasto} onConcIrFuentes={onConcIrFuentes} />
+          onRevisionRevisarGastos={onRevisionRevisarGastos} onRevisionNuevoGasto={onRevisionNuevoGasto} />
       )}
     </div>
   )

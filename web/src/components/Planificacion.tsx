@@ -9,13 +9,13 @@ import type { AppStore } from '../lib/store'
 import { Button, ErrorBox, Modal } from './ui'
 
 /**
- * Planificación mensual (v1.19). Guía para preparar cada mes con SUS fuentes, subcajas y gastos: nada se arrastra solo.
+ * Planificación mensual (v1.19). Guía para preparar cada mes con SUS fondos, subcajas y gastos: nada se arrastra solo.
  * Las selecciones viven en memoria hasta "Aplicar planificación": avanzar de etapa no escribe nada y los gastos nunca se
  * registran por avanzar. El estado de cada mes (y de cada etapa) se guarda en CONFIG, así se ve igual en cualquier dispositivo.
  */
 
 const ETAPA_TXT: Record<Etapa, { titulo: string; icon: typeof Wallet }> = {
-  fuentes: { titulo: 'Fuentes', icon: CircleDollarSign }, subcajas: { titulo: 'Cajas', icon: Wallet }, gastos: { titulo: 'Gastos', icon: ClipboardList },
+  fondos: { titulo: 'Fondos', icon: CircleDollarSign }, subcajas: { titulo: 'Cajas', icon: Wallet }, gastos: { titulo: 'Gastos', icon: ClipboardList },
 }
 export const ESTADO_TXT: Record<EstadoPlan, string> = { pendiente: 'Pendiente', en_progreso: 'En progreso', completada: 'Completada', descartada: 'Descartada' }
 const ESTADO_TONO: Record<EstadoPlan, string> = {
@@ -46,7 +46,7 @@ export function usePlanificacion(store: AppStore, o: PlanificacionOpts) {
       {wiz && <Asistente key={wiz.key} store={store} mes={wiz.mes} etapaInicial={wiz.etapa} o={o} onClose={() => setWiz(null)} />}
       {ant && <UsarMesAnterior key={ant.key} store={store} tipo={ant.tipo} mes={ant.mes} onClose={() => setAnt(null)} />}
       {res && (
-        <Modal open onClose={() => setRes(null)} size="md" title="Planificación mensual" subtitle="Cada mes tiene sus propias fuentes, cajas y gastos." icon={<CalendarCheck2 className="size-5" />}
+        <Modal open onClose={() => setRes(null)} size="md" title="Planificación mensual" subtitle="Cada mes tiene sus propias fondos, cajas y gastos." icon={<CalendarCheck2 className="size-5" />}
           footer={<Button variant="outline" onClick={() => setRes(null)}>Cerrar</Button>}>
           <ResumenPlan store={store} hoy={o.hoy} onPreparar={() => { setRes(null); abrir() }} onConfigurar={() => { setRes(null); o.onConfigurar() }} />
         </Modal>
@@ -98,7 +98,7 @@ function Campana({ store, hoy, onPreparar, onResumen }: { store: AppStore; hoy: 
                   <div className="flex items-center justify-between gap-2">
                     <p className="min-w-0 truncate text-sm font-semibold text-ink">Prepara {nombreMes(r.mes)}</p><Insignia estado={r.plan.estado} />
                   </div>
-                  <p className="mt-0.5 text-[11px] text-muted">Aviso del {formatDate(r.fecha, data.config.formato_fecha)}. Elige las fuentes, cajas y gastos de este mes.</p>
+                  <p className="mt-0.5 text-[11px] text-muted">Aviso del {formatDate(r.fecha, data.config.formato_fecha)}. Elige los fondos, cajas y gastos de este mes.</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <Button className="h-8 text-xs" onClick={() => { setAbierto(false); onPreparar(r.mes) }}>Preparar ahora</Button>
                     <Button variant="outline" className="h-8 text-xs" disabled={store.pending.has(`plan:${r.mes}`)} onClick={() => guardar(r.mes, { posponerHasta: mananaDe(hoy) }, 'Te lo recordaremos mañana.')}>Recordar después</Button>
@@ -133,7 +133,7 @@ export function ResumenPlan({ store, hoy, onPreparar, onConfigurar, compacto }: 
         {fila('Estado', guardando
           ? <span className="inline-flex items-center gap-1.5 text-navy" data-testid="plan-guardando"><Loader2 className="size-3.5 animate-spin" /> Guardando planificación…</span>
           : <Insignia estado={plan.estado} posp={posp && plan.estado !== 'completada'} />)}
-        {fila('Fuentes configuradas', aplica ? `${r.fuentes} de ${r.fuentesTotal}` : 'Mes anterior al aislamiento (todas)')}
+        {fila('Fondos configurados', aplica ? `${r.fondos} de ${r.fondosTotal}` : 'Mes anterior al aislamiento (todos)')}
         {fila('Cajas configuradas', aplica ? `${r.subcajas} de ${r.cajasTotal}` : 'Mes anterior al aislamiento (todas)')}
         {fila('Gastos registrados', r.gastos)}
         {fila('Próximo recordatorio', prox ? `${formatDate(prox.fecha, data.config.formato_fecha)} · ${nombreMes(prox.mes)}` : 'Sin recordatorios programados')}
@@ -146,16 +146,16 @@ export function ResumenPlan({ store, hoy, onPreparar, onConfigurar, compacto }: 
   )
 }
 
-/* ============================== Selección de fuentes / subcajas ============================== */
+/* ============================== Selección de fondos / subcajas ============================== */
 
 interface Sel { on: boolean; monto: string }
 const aSel = (cs: Candidato[]): Record<string, Sel> => Object.fromEntries(cs.map(c => [c.id, { on: c.aplicada, monto: String(c.monto) }]))
 const montoNum = (s: string) => Number(s.replace(',', '.'))
 
 function ListaSel({ cands, sel, setSel, tipo }: { cands: Candidato[]; sel: Record<string, Sel>; setSel: (s: Record<string, Sel>) => void; tipo: TipoEntidad }) {
-  if (!cands.length) return <p className="rounded-xl bg-bg px-3 py-4 text-sm text-muted">{tipo === 'fuente' ? 'Aún no tienes fuentes mensuales. Créalas desde Cajas → Nueva fuente.' : 'Aún no tienes cajas activas. Créalas desde Cajas → Nueva caja.'}</p>
+  if (!cands.length) return <p className="rounded-xl bg-bg px-3 py-4 text-sm text-muted">{tipo === 'fondo' ? 'Aún no tienes fondos mensuales. Créalos desde Cajas → Nuevo fondo.' : 'Aún no tienes cajas activas. Créalas desde Cajas → Nueva caja.'}</p>
   return (
-    <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label={tipo === 'fuente' ? 'Fuentes del mes' : 'Cajas del mes'}>
+    <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label={tipo === 'fondo' ? 'Fondos del mes' : 'Cajas del mes'}>
       {cands.map(c => {
         const s = sel[c.id] ?? { on: false, monto: '' }, malo = s.on && !MONTO_RE.test(s.monto.trim())
         return (
@@ -174,7 +174,7 @@ function ListaSel({ cands, sel, setSel, tipo }: { cands: Candidato[]; sel: Recor
   )
 }
 
-/** Fuentes/subcajas que realmente se escribirían (marcadas y con monto válido). Las ya aplicadas solo si cambió el monto. */
+/** Fondos/subcajas que realmente se escribirían (marcadas y con monto válido). Las ya aplicadas solo si cambió el monto. */
 function itemsAAplicar(cands: Candidato[], sel: Record<string, Sel>): { id: string; monto: number }[] {
   return cands.filter(c => sel[c.id]?.on && MONTO_RE.test(sel[c.id].monto.trim()))
     .map(c => ({ id: c.id, monto: montoNum(sel[c.id].monto) })).filter(i => { const c = cands.find(x => x.id === i.id)!; return !c.aplicada || Math.abs(i.monto - c.monto) > 0.004 })
@@ -191,10 +191,10 @@ export function UsarMesAnterior({ store, tipo, mes, onClose }: { store: AppStore
   const lista = propios.map(c => ({ ...c, aplicada: false, monto: c.previo! }))
   const items = itemsAAplicar(lista, sel)
   const invalido = lista.some(c => sel[c.id]?.on && !MONTO_RE.test(sel[c.id].monto.trim()))
-  const noun = tipo === 'fuente' ? 'fuentes' : 'cajas'
+  const noun = tipo === 'fondo' ? 'fondos' : 'cajas'
   const aplicar = () => {
     if (!items.length || invalido) return
-    const ok = store.track(`plan-ant:${tipo}:${mes}`, { pending: `Aplicando ${noun} a ${nombreMes(mes)}…`, ok: `${items.length} ${items.length === 1 ? (tipo === 'fuente' ? 'fuente aplicada' : 'caja aplicada') : `${noun} aplicadas`} a ${nombreMes(mes)}.`, error: `No se pudieron aplicar las ${noun}.` },
+    const ok = store.track(`plan-ant:${tipo}:${mes}`, { pending: `Aplicando ${noun} a ${nombreMes(mes)}…`, ok: `${items.length} ${items.length === 1 ? (tipo === 'fondo' ? 'fondo aplicado' : 'caja aplicada') : `${noun} aplicadas`} a ${nombreMes(mes)}.`, error: `No se pudieron aplicar las ${noun}.` },
       () => store.actions.aplicarEntidadesMes(tipo, mes, items))
     if (ok) onClose()
   }
@@ -220,7 +220,7 @@ export function UsarMesAnterior({ store, tipo, mes, onClose }: { store: AppStore
 
 /**
  * «Prepara tu mes» (v1.20): asistente continuo. Reglas:
- *  - El asistente NUNCA se cierra para abrir un módulo hijo (Fuentes/Subcajas/Gastos mensuales): se queda montado y oculto,
+ *  - El asistente NUNCA se cierra para abrir un módulo hijo (Fondos/Subcajas/Gastos mensuales): se queda montado y oculto,
  *    así conserva período, etapa, selecciones y estados. El hijo avisa al terminar (ContextoPlan) y el asistente reaparece.
  *  - Una etapa solo pasa a «Completada» cuando el backend confirmó y la relectura de Sheets lo verificó. Se guarda en CONFIG.
  *  - Omitir/retomar también se guardan al instante (por mes), así el progreso sobrevive a cerrar, recargar o cambiar de dispositivo.
@@ -234,8 +234,8 @@ const VISUAL: Record<EstadoVisual, { txt: string; cls: string }> = {
   omitida: { txt: 'Omitida', cls: 'border-line bg-bg text-muted' },
   error: { txt: 'Error', cls: 'border-danger/40 bg-danger-soft text-danger' },
 }
-const ETAPA_SIG: Record<Etapa, string> = { fuentes: 'Configurar fuentes', subcajas: 'Configurar cajas', gastos: 'Registrar gastos mensuales' }
-const ETAPA_OK: Record<Etapa, string> = { fuentes: 'Fuentes configuradas correctamente', subcajas: 'Cajas configuradas correctamente', gastos: 'Gastos mensuales registrados correctamente' }
+const ETAPA_SIG: Record<Etapa, string> = { fondos: 'Configurar fondos', subcajas: 'Configurar cajas', gastos: 'Registrar gastos mensuales' }
+const ETAPA_OK: Record<Etapa, string> = { fondos: 'Fondos configurados correctamente', subcajas: 'Cajas configuradas correctamente', gastos: 'Gastos mensuales registrados correctamente' }
 const money = (c: number, m: string) => formatMoney(c, m)
 
 function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; mes: string; etapaInicial: Etapa | null; o: PlanificacionOpts; onClose: () => void }) {
@@ -246,9 +246,9 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const localRef = useRef<Partial<Record<Etapa, EstadoEtapa>>>({})
   const etapasConLocal = (e?: Etapa, valor?: EstadoEtapa) => { if (e && valor !== undefined) localRef.current = { ...localRef.current, [e]: valor }; return { ...planRef.current.etapas, ...localRef.current } as Record<Etapa, EstadoEtapa> }
   const sinLocal = (e: Etapa) => { const x = { ...localRef.current }; delete x[e]; localRef.current = x }
-  const cf = useMemo(() => candidatos(data, 'fuente', mes), [data, mes])
+  const cf = useMemo(() => candidatos(data, 'fondo', mes), [data, mes])
   const cs = useMemo(() => candidatos(data, 'subcaja', mes), [data, mes])
-  const primera = etapaInicial ?? ETAPAS.find(e => plan.etapas[e] === 0) ?? 'fuentes'
+  const primera = etapaInicial ?? ETAPAS.find(e => plan.etapas[e] === 0) ?? 'fondos'
   const [paso, setPaso] = useState<number>(ETAPAS.indexOf(primera))   // 0..2 etapas · 3 resumen
   const [selF, setSelF] = useState(() => aSel(cf))
   const [selS, setSelS] = useState(() => aSel(cs))
@@ -263,7 +263,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const keyFinal = `plan:${mes}`
   const ocupado = (e: Etapa | 'final') => store.pending.has(e === 'final' ? keyFinal : `plan:${mes}:${e}`)
   /** Operación de esta etapa en curso: la lanzada desde un módulo hijo (aunque el asistente se haya cerrado y reabierto) o la del propio asistente. */
-  const claveBg: Record<Etapa, string> = { fuentes: `pf:aplicar:fuente:${mes}:aplicar`, subcajas: `pf:aplicar:subcaja:${mes}:aplicar`, gastos: 'lote:' }
+  const claveBg: Record<Etapa, string> = { fondos: `pf:aplicar:fondo:${mes}:aplicar`, subcajas: `pf:aplicar:subcaja:${mes}:aplicar`, gastos: 'lote:' }
   const enCurso = (e: Etapa) => !!bg[e] || [...store.pending].some(k => k.startsWith(claveBg[e]))
   const hayBg = ETAPAS.some(e => enCurso(e))
   const real = useMemo(() => resumenReal(data, mes), [data, mes])
@@ -272,7 +272,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   /** Estado visual de una etapa: sale de lo guardado (CONFIG + datos releídos), no de que se haya pulsado un botón. */
   const visual = (e: Etapa): EstadoVisual => {
     if (fallo[e]) return 'error'
-    const pend = e === 'fuentes' ? itF.length : e === 'subcajas' ? itS.length : 0
+    const pend = e === 'fondos' ? itF.length : e === 'subcajas' ? itS.length : 0
     if (ocupado(e) || enCurso(e) || pend > 0) return 'en_progreso'
     return plan.etapas[e] === 1 ? 'completada' : plan.etapas[e] === 2 ? 'omitida' : 'pendiente'
   }
@@ -280,7 +280,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
     for (let i = desde + 1; i < 3; i++) { const v = visual(ETAPAS[i]); if (v !== 'omitida' && v !== 'completada') return i }
     return 3
   }
-  const bloqueado = etapa === 'fuentes' ? invalidoF : etapa === 'subcajas' ? invalidoS : false
+  const bloqueado = etapa === 'fondos' ? invalidoF : etapa === 'subcajas' ? invalidoS : false
 
   /** Guarda el estado de UNA etapa en CONFIG (solo configuración del asistente: no toca dinero ni gastos). */
   const persistir = (e: Etapa, valor: EstadoEtapa, textos: { pending: string; ok: string }, despues?: () => void, silencioso = false) => {
@@ -315,14 +315,14 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   })
   const abrirHijo = (e: Etapa) => {
     setHijo(e)
-    if (e === 'gastos') o.onGastosMensuales(ctxPara(e)); else o.onPlantillas(e === 'fuentes' ? 'fuente' : 'subcaja', ctxPara(e))
+    if (e === 'gastos') o.onGastosMensuales(ctxPara(e)); else o.onPlantillas(e === 'fondos' ? 'fondo' : 'subcaja', ctxPara(e))
   }
 
   /** Aplica las selecciones hechas dentro del asistente (si las hay), las verifica y marca la etapa. */
-  const aplicarSeleccion = (e: 'fuentes' | 'subcajas') => {
-    const tipo: TipoEntidad = e === 'fuentes' ? 'fuente' : 'subcaja', items = e === 'fuentes' ? itF : itS
+  const aplicarSeleccion = (e: 'fondos' | 'subcajas') => {
+    const tipo: TipoEntidad = e === 'fondos' ? 'fondo' : 'subcaja', items = e === 'fondos' ? itF : itS
     if (!items.length) return
-    const ejecutar = () => store.track(`plan:${mes}:${e}`, { pending: `Aplicando ${e === 'fuentes' ? 'fuentes' : 'cajas'} a ${nombreMes(mes)}…`, ok: `${ETAPA_OK[e]} en ${nombreMes(mes)}.`, error: `No se pudieron aplicar las ${e}.` },
+    const ejecutar = () => store.track(`plan:${mes}:${e}`, { pending: `Aplicando ${e === 'fondos' ? 'fondos' : 'cajas'} a ${nombreMes(mes)}…`, ok: `${ETAPA_OK[e]} en ${nombreMes(mes)}.`, error: `No se pudieron aplicar las ${e}.` },
       async () => {
         const fresco = await store.actions.aplicarEntidadesMes(tipo, mes, items)
         const problemas = verificarEntidadesAplicadas({ ...data, ...fresco }, tipo, mes, items)
@@ -348,7 +348,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
       async () => {
         let d = data
         const et = etapasConLocal()
-        if (itF.length) { const fr = await store.actions.aplicarEntidadesMes('fuente', mes, itF); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'fuente', mes, itF); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.fuentes = 1 }
+        if (itF.length) { const fr = await store.actions.aplicarEntidadesMes('fondo', mes, itF); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'fondo', mes, itF); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.fondos = 1 }
         if (itS.length) { const fr = await store.actions.aplicarEntidadesMes('subcaja', mes, itS); d = { ...d, ...fr }; const p = verificarEntidadesAplicadas(d, 'subcaja', mes, itS); if (p.length) throw new Error(`No se pudo verificar lo guardado en Google Sheets. ${p.join(' ')}`); et.subcajas = 1 }
         await store.actions.saveConfig(`plan_est_${mes}`, serializarEstadoPlan({ mes, etapas: et, estado: estadoDesdeEtapas(et), posponerHasta: '' }))
       })   // sin onDone: al terminar solo se actualiza el estado y se avisa; el asistente ya está cerrado y no se reabre
@@ -362,11 +362,11 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const nCompletadas = ETAPAS.filter(e => plan.etapas[e] === 1).length, nOmitidas = ETAPAS.filter(e => plan.etapas[e] === 2).length
   const finalizada = plan.estado === 'completada'
   const totalesTxt = (t: Record<string, number>) => { const k = Object.keys(t); return k.length ? k.map(m => money(t[m], m)).join(' + ') : '—' }
-  const libre = (() => { const k = Object.keys(real.fuentes.totales); return k.length <= 1 && (k[0] ?? monedaBase) === monedaBase ? money((real.fuentes.totales[monedaBase] ?? 0) - real.subcajas.reservado, monedaBase) : '—' })()
+  const libre = (() => { const k = Object.keys(real.fondos.totales); return k.length <= 1 && (k[0] ?? monedaBase) === monedaBase ? money((real.fondos.totales[monedaBase] ?? 0) - real.subcajas.reservado, monedaBase) : '—' })()
 
   const Guardando = ({ e }: { e: Etapa }) => enCurso(e) ? (
     <div className="flex items-center gap-2 rounded-xl border border-navy/30 bg-primary-soft px-3 py-2 text-xs font-medium text-navy" role="status" data-testid={`bg-${e}`}>
-      <Loader2 className="size-3.5 animate-spin" /> Guardando {e === 'fuentes' ? 'las fuentes' : e === 'subcajas' ? 'las cajas' : 'los gastos'} en segundo plano… Puedes seguir navegando; esta pasará a «Completada» cuando Google Sheets lo confirme.
+      <Loader2 className="size-3.5 animate-spin" /> Guardando {e === 'fondos' ? 'los fondos' : e === 'subcajas' ? 'las cajas' : 'los gastos'} en segundo plano… Puedes seguir navegando; esta pasará a «Completada» cuando Google Sheets lo confirme.
     </div>
   ) : null
   const Aviso = ({ e }: { e: Etapa | 'final' }) => fallo[e] ? (
@@ -379,8 +379,8 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const Continuar = ({ e }: { e: Etapa }) => {
     if (plan.etapas[e] !== 1 || visual(e) !== 'completada') return null
     const s = sigTxt(e)
-    const n = e === 'fuentes' ? real.fuentes.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
-    const unidad = e === 'fuentes' ? `${n} fuente${n === 1 ? '' : 's'}` : e === 'subcajas' ? `${n} caja${n === 1 ? '' : 's'}` : `${n} gasto${n === 1 ? '' : 's'}`
+    const n = e === 'fondos' ? real.fondos.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
+    const unidad = e === 'fondos' ? `${n} fondo${n === 1 ? '' : 's'}` : e === 'subcajas' ? `${n} caja${n === 1 ? '' : 's'}` : `${n} gasto${n === 1 ? '' : 's'}`
     return (
       <div className="rounded-2xl border border-success/30 bg-success-soft p-3" data-testid={`ok-${e}`}>
         <p className="flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="size-4" /> {ETAPA_OK[e]}</p>
@@ -392,7 +392,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   }
 
   return (
-    <Modal open onClose={onClose} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fuentes, cajas y gastos de este mes. Cada etapa se guarda cuando la confirmas." icon={<CalendarCheck2 className="size-5" />}
+    <Modal open onClose={onClose} size="lg" title={`Prepara tu mes · ${nombreMes(mes)}`} subtitle="Fondos, cajas y gastos de este mes. Cada etapa se guarda cuando la confirmas." icon={<CalendarCheck2 className="size-5" />}
       footer={<>
         <Button variant="outline" onClick={() => setPaso(p => Math.max(0, p - 1))} disabled={paso === 0}><ChevronLeft className="size-4" /> Anterior</Button>
         {etapa && (plan.etapas[etapa] === 2
@@ -414,20 +414,20 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
         </ol>
         {antesCorte && <ErrorBox tone="warning" message={`${nombreMes(mes)} es anterior al aislamiento mensual (${nombreMes(aisl)}): conserva su comportamiento histórico y no necesita preparación.`} />}
 
-        {etapa === 'fuentes' && (
+        {etapa === 'fondos' && (
           <div className="space-y-2.5">
-            <Continuar e="fuentes" />
-            <Guardando e="fuentes" />
+            <Continuar e="fondos" />
+            <Guardando e="fondos" />
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-ink">¿Qué fuentes de dinero tendrás en {nombreMes(mes)}?</p>
+              <p className="text-sm font-semibold text-ink">¿Qué fondos del presupuesto tendrás en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
                 <Button variant="outline" className="h-8 text-xs" onClick={() => setSelF(s => ({ ...s, ...Object.fromEntries(cf.filter(c => !c.aplicada && c.previo !== null).map(c => [c.id, { on: true, monto: String(c.previo) }])) }))}><Copy className="size-3.5" /> Usar mes anterior</Button>
-                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('fuentes')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
+                <Button variant="outline" className="h-8 text-xs" onClick={() => abrirHijo('fondos')}><FileClock className="size-3.5" /> Plantillas mensuales</Button>
               </div>
             </div>
-            <ListaSel cands={cf} sel={selF} setSel={setSelF} tipo="fuente" />
-            <Aviso e="fuentes" />
-            {itF.length > 0 && <Button className="h-9 text-xs" disabled={invalidoF || ocupado('fuentes')} onClick={() => aplicarSeleccion('fuentes')} data-testid="aplicar-fuentes">{ocupado('fuentes') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itF.length} fuente{itF.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
+            <ListaSel cands={cf} sel={selF} setSel={setSelF} tipo="fondo" />
+            <Aviso e="fondos" />
+            {itF.length > 0 && <Button className="h-9 text-xs" disabled={invalidoF || ocupado('fondos')} onClick={() => aplicarSeleccion('fondos')} data-testid="aplicar-fondos">{ocupado('fondos') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itF.length} fondo{itF.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
           </div>
         )}
         {etapa === 'subcajas' && (
@@ -467,8 +467,8 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
           <div className="space-y-3" data-testid="plan-resumen-final">
             <p className="text-sm font-semibold text-ink">Planificación de {nombreMes(mes)}</p>
             <ul className="space-y-1.5 text-sm">
-              {ETAPAS.map(e => { const v = visual(e), n = e === 'fuentes' ? real.fuentes.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
-                const detalle = v === 'omitida' ? 'Omitida (no se ejecutó)' : e === 'fuentes' ? `${n} configurada${n === 1 ? '' : 's'} · Total ${totalesTxt(real.fuentes.totales)}`
+              {ETAPAS.map(e => { const v = visual(e), n = e === 'fondos' ? real.fondos.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
+                const detalle = v === 'omitida' ? 'Omitida (no se ejecutó)' : e === 'fondos' ? `${n} configurado${n === 1 ? '' : 's'} · Total ${totalesTxt(real.fondos.totales)}`
                   : e === 'subcajas' ? `${n} configurada${n === 1 ? '' : 's'} · Total reservado ${money(real.subcajas.reservado, monedaBase)}` : `${n} registrado${n === 1 ? '' : 's'} · Total ${totalesTxt(real.gastos.totales)}`
                 return (
                   <li key={e} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl bg-bg px-3 py-2" data-testid={`resumen-${e}`}>
@@ -478,7 +478,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
                   </li>) })}
             </ul>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-xl border border-line p-3 text-xs sm:grid-cols-3" data-testid="plan-indicadores">
-              <div><dt className="text-muted">Presupuesto consolidado</dt><dd className="font-semibold text-ink">{totalesTxt(real.fuentes.totales)}</dd></div>
+              <div><dt className="text-muted">Presupuesto consolidado</dt><dd className="font-semibold text-ink">{totalesTxt(real.fondos.totales)}</dd></div>
               <div><dt className="text-muted">Total reservado</dt><dd className="font-semibold text-ink">{money(real.subcajas.reservado, monedaBase)}</dd></div>
               <div><dt className="text-muted">Presupuesto libre</dt><dd className="font-semibold text-ink">{libre}</dd></div>
               <div><dt className="text-muted">Gastos registrados</dt><dd className="font-semibold text-ink">{real.gastos.n}</dd></div>
@@ -486,7 +486,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               <div><dt className="text-muted">Etapas omitidas</dt><dd className="font-semibold text-ink">{nOmitidas}</dd></div>
             </dl>
             <Aviso e="final" />
-            <p className="text-[11px] text-muted">Estado: <b>{ESTADO_TXT[plan.estado]}</b>{itF.length + itS.length > 0 ? ` · Al finalizar se aplicarán ${itF.length} fuente(s) y ${itS.length} caja(s) que elegiste.` : ''}. Finalizar solo guarda el estado: no vuelve a crear fuentes, reservas ni gastos. Las etapas pendientes se pueden retomar desde la campana.</p>
+            <p className="text-[11px] text-muted">Estado: <b>{ESTADO_TXT[plan.estado]}</b>{itF.length + itS.length > 0 ? ` · Al finalizar se aplicarán ${itF.length} fondo(s) y ${itS.length} caja(s) que elegiste.` : ''}. Finalizar solo guarda el estado: no vuelve a crear fondos, reservas ni gastos. Las etapas pendientes se pueden retomar desde la campana.</p>
           </div>
         )}
       </div>
@@ -496,13 +496,14 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
 
 /* ============================== Vacíos por mes ============================== */
 
-/** Estado vacío de un mes sin fuentes/subcajas aplicadas, con las tres acciones de la planificación. */
+/** Estado vacío de un mes sin fondos/subcajas aplicadas, con las tres acciones de la planificación. */
 export function VacioMes({ tipo, mes, nOcultas, onConfigurar, onPlantillas, onAnterior }: { tipo: TipoEntidad; mes: string; nOcultas: number; onConfigurar: () => void; onPlantillas: () => void; onAnterior: () => void }) {
-  const noun = tipo === 'fuente' ? 'fuentes' : 'cajas'
+  const noun = tipo === 'fondo' ? 'fondos' : 'cajas'
+  const [cfg, propias, creadas] = tipo === 'fondo' ? ['configurados', 'propios', 'creados'] : ['configuradas', 'propias', 'creadas']
   return (
     <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center" data-testid={`vacio-mes-${tipo}`}>
-      <p className="text-sm font-semibold text-ink">No tienes {noun} configuradas para {nombreMes(mes).split(' ')[0].toLowerCase()}</p>
-      <p className="mx-auto mt-1 max-w-md text-xs text-muted">Cada mes tiene sus propias {noun}: nada se arrastra solo del mes anterior. {nOcultas > 0 ? `Tienes ${nOcultas} ${noun} creadas que aún no se aplicaron a ${nombreMes(mes)}.` : ''} Tus gastos de {nombreMes(mes)} se conservan.</p>
+      <p className="text-sm font-semibold text-ink">No tienes {noun} {cfg} para {nombreMes(mes).split(' ')[0].toLowerCase()}</p>
+      <p className="mx-auto mt-1 max-w-md text-xs text-muted">Cada mes tiene sus {propias} {noun}: nada se arrastra solo del mes anterior. {nOcultas > 0 ? `Tienes ${nOcultas} ${noun} ${creadas} que aún no se aplicaron a ${nombreMes(mes)}.` : ''} Tus gastos de {nombreMes(mes)} se conservan.</p>
       <div className="mt-3 flex flex-wrap justify-center gap-2">
         <Button className="h-9 text-xs" onClick={onConfigurar}>Configurar {noun} del mes</Button>
         <Button variant="outline" className="h-9 text-xs" onClick={onPlantillas}>Usar plantillas mensuales</Button>
@@ -521,7 +522,7 @@ export function BarraPlan({ store, hoy, mes, plan }: { store: AppStore; hoy: str
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-line bg-card px-4 py-2.5" data-testid="barra-plan">
       <CalendarCheck2 className="size-4 shrink-0 text-navy" />
-      <p className="min-w-0 flex-1 text-xs text-muted"><span className="font-semibold text-ink">Planificación de {nombreMes(mes)}</span> · {r.fuentes} fuente{r.fuentes === 1 ? '' : 's'} · {r.subcajas} caja{r.subcajas === 1 ? '' : 's'}</p>
+      <p className="min-w-0 flex-1 text-xs text-muted"><span className="font-semibold text-ink">Planificación de {nombreMes(mes)}</span> · {r.fondos} fondo{r.fondos === 1 ? '' : 's'} · {r.subcajas} caja{r.subcajas === 1 ? '' : 's'}</p>
       {store.pending.has(`plan:${mes}`)
         ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-navy" data-testid="plan-guardando"><Loader2 className="size-3.5 animate-spin" /> Guardando planificación…</span>
         : <Insignia estado={p.estado} posp={posp && p.estado !== 'completada'} />}

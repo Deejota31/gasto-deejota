@@ -54,7 +54,7 @@ function MedioForm({ store, medio, existentes, onClose }: { store: AppStore; med
   function save() {
     const n = nombre.trim()
     if (!n) return setError('Escribe un nombre')
-    if (n.toLowerCase() === 'libre') return setError('“Libre” está reservado para las fuentes sin medio de pago')
+    if (n.toLowerCase() === 'libre') return setError('“Libre” está reservado para los fondos sin medio de pago')
     if (!medio && existentes.some(x => x.nombre.trim().toLowerCase() === n.toLowerCase())) return setError('Ya existe un medio con ese nombre')
     setError('')
     const ok = store.track(`medio:${n.toLowerCase()}`,
@@ -64,7 +64,7 @@ function MedioForm({ store, medio, existentes, onClose }: { store: AppStore; med
   }
   return (
     <Modal open onClose={onClose} size="md" title={medio ? `Personalizar ${medio.nombre}` : 'Nuevo medio de pago'} icon={<Wallet className="size-5" />}
-      subtitle="Su icono y color se ven igual en gastos, filtros, fuentes y cajas, y se guardan en tu hoja."
+      subtitle="Su icono y color se ven igual en gastos, filtros, fondos y cajas, y se guardan en tu hoja."
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{medio ? 'Guardar cambios' : 'Crear medio de pago'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }} data-testid="medio-vista-previa">

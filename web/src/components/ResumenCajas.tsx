@@ -1,21 +1,21 @@
-import { mediosDeFuente } from '../lib/fuenteMedios'
+import { mediosDeFondo } from '../lib/fondoMedios'
 import { useId, useState, type ReactNode } from 'react'
 import { Boxes, ChevronDown, ChevronRight, CircleDollarSign } from 'lucide-react'
 import type { CajasResumen } from '../lib/engine'
 import type { CatalogoItem } from '../lib/types'
-import { cajaLook, fuenteLook, soft, type Look } from '../lib/visual'
+import { cajaLook, fondoLook, soft, type Look } from '../lib/visual'
 import { ESTADO } from './PresupuestoConsolidado'
 
 /**
- * Dos acordeones compactos bajo el Presupuesto consolidado del Dashboard: Fuentes de dinero y Subcajas / reservas.
+ * Dos acordeones compactos bajo el Presupuesto consolidado del Dashboard: Fondos del presupuesto y Subcajas / reservas.
  * Empiezan cerrados cada vez que entras al Dashboard; no editan nada (eso vive en Cajas) ni hacen consultas propias.
  */
 export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasResumen; money: (n: number) => string; catalogo?: CatalogoItem[]; onIrCajas?: () => void }) {
-  const [abierto, setAbierto] = useState<{ fuentes: boolean; subcajas: boolean }>({ fuentes: false, subcajas: false })
-  const fuentesAct = c.fuentes.lista.filter(r => r.fuente.activo)
-  const resumenFuentes = c.origen === 'fuentes'
-    ? `${fuentesAct.length} activa${fuentesAct.length === 1 ? '' : 's'} · ${money(c.fuentes.total)}`
-    : `Sin fuentes · ${c.general?.nombre ?? 'caja general'} ${c.presupuesto ? money(c.presupuesto) : ''}`.trim()
+  const [abierto, setAbierto] = useState<{ fondos: boolean; subcajas: boolean }>({ fondos: false, subcajas: false })
+  const fondosAct = c.fondos.lista.filter(r => r.fondo.activo)
+  const resumenFondos = c.origen === 'fondos'
+    ? `${fondosAct.length} activo${fondosAct.length === 1 ? '' : 's'} · ${money(c.fondos.total)}`
+    : `Sin fondos · ${c.general?.nombre ?? 'caja general'} ${c.presupuesto ? money(c.presupuesto) : ''}`.trim()
   const link = onIrCajas && (
     <button type="button" onClick={onIrCajas} className="inline-flex items-center gap-1 text-xs font-semibold text-navy hover:underline">
       Administrar en Cajas <ChevronRight className="size-3.5" />
@@ -23,18 +23,18 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
   )
   return (
     <div className="grid items-start gap-3 lg:grid-cols-2" data-testid="resumen-cajas">
-      <Acordeon icon={<CircleDollarSign className="size-4" />} color="var(--success)" titulo="Fuentes de dinero" resumen={resumenFuentes}
-        open={abierto.fuentes} onToggle={() => setAbierto(x => ({ ...x, fuentes: !x.fuentes }))}>
-        {c.fuentes.lista.length ? (
-          <ul className="divide-y divide-line/70" aria-label="Fuentes del período">
-            {c.fuentes.lista.map(r => (
-              <Fila key={r.fuente.id} look={fuenteLook(r.fuente, c.fuentes.lista.map(x => x.fuente))} nombre={r.fuente.nombre}
-                detalle={r.fuente.activo ? (mediosDeFuente(r.fuente.medioPago).length ? `${mediosDeFuente(r.fuente.medioPago).length > 1 ? 'Medios' : 'Medio'} ${mediosDeFuente(r.fuente.medioPago).join(', ')}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
-                apagada={!r.fuente.activo}
-                cols={[['Asignado', money(r.asignado)], ['Gastado', money(r.gastado)], ['Disponible', r.fuente.activo ? money(r.disponible) : '—', r.disponible < 0 && r.fuente.activo ? ESTADO.alerta : undefined]]} />
+      <Acordeon icon={<CircleDollarSign className="size-4" />} color="var(--success)" titulo="Fondos del presupuesto" resumen={resumenFondos}
+        open={abierto.fondos} onToggle={() => setAbierto(x => ({ ...x, fondos: !x.fondos }))}>
+        {c.fondos.lista.length ? (
+          <ul className="divide-y divide-line/70" aria-label="Fondos del período">
+            {c.fondos.lista.map(r => (
+              <Fila key={r.fondo.id} look={fondoLook(r.fondo, c.fondos.lista.map(x => x.fondo))} nombre={r.fondo.nombre}
+                detalle={r.fondo.activo ? (mediosDeFondo(r.fondo.medioPago).length ? `${mediosDeFondo(r.fondo.medioPago).length > 1 ? 'Medios' : 'Medio'} ${mediosDeFondo(r.fondo.medioPago).join(', ')}` : r.principal ? 'Principal' : 'Libre') : 'Inactiva · no suma'}
+                apagada={!r.fondo.activo}
+                cols={[['Asignado', money(r.asignado)], ['Gastado', money(r.gastado)], ['Disponible', r.fondo.activo ? money(r.disponible) : '—', r.disponible < 0 && r.fondo.activo ? ESTADO.alerta : undefined]]} />
             ))}
           </ul>
-        ) : <p className="py-2 text-xs text-muted">Aún no tienes fuentes: el presupuesto sale de la caja general.</p>}
+        ) : <p className="py-2 text-xs text-muted">Aún no tienes fondos: el presupuesto sale de la caja general.</p>}
         <div className="mt-2 flex justify-end">{link}</div>
       </Acordeon>
       <Acordeon icon={<Boxes className="size-4" />} color="#6D5DD3" titulo="Cajas / reservas"

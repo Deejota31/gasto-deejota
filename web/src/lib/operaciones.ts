@@ -1,5 +1,5 @@
-import type { Api, FuenteInput, GastoInput, PlantillaFinInput } from './api'
-import type { AppData, Caja, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, PlantillaFin, Presupuesto } from './types'
+import type { Api, FondoInput, GastoInput, PlantillaFinInput } from './api'
+import type { AppData, Caja, CatalogoItem, Fondo, FondoMes, Gasto, Medio, PlantillaFin, Presupuesto } from './types'
 
 /**
  * Escrituras optimistas (v1.23). Cada operación tiene:
@@ -159,32 +159,32 @@ export const OPS = {
     deshacer: (d, prev, p) => ({ ...d, presupuestos: restaurar(d.presupuestos, prev, x => x.periodo === p.periodo && x.cajaId === p.cajaId) }),
   }),
 
-  saveFuente: def<[FuenteInput], Fuente | undefined, Fuente>({
-    capturar: (d, f) => (d.fuentes ?? []).find(x => x.id === f.id),
+  saveFondo: def<[FondoInput], Fondo | undefined, Fondo>({
+    capturar: (d, f) => (d.fondos ?? []).find(x => x.id === f.id),
     local: (d, ts, f) => {
-      const prev = (d.fuentes ?? []).find(x => x.id === f.id)
-      return { ...d, fuentes: poner(d.fuentes, { ...prev, ...f, creadoEn: prev?.creadoEn ?? ts, actualizadoEn: ts }, x => x.id === f.id) }
+      const prev = (d.fondos ?? []).find(x => x.id === f.id)
+      return { ...d, fondos: poner(d.fondos, { ...prev, ...f, creadoEn: prev?.creadoEn ?? ts, actualizadoEn: ts }, x => x.id === f.id) }
     },
-    remoto: (api, f) => api.saveFuente(f),
-    confirmar: (d, s) => ({ ...d, fuentes: poner(d.fuentes, s, x => x.id === s.id) }),
-    deshacer: (d, prev, f) => ({ ...d, fuentes: restaurar(d.fuentes, prev, x => x.id === f.id) }),
+    remoto: (api, f) => api.saveFondo(f),
+    confirmar: (d, s) => ({ ...d, fondos: poner(d.fondos, s, x => x.id === s.id) }),
+    deshacer: (d, prev, f) => ({ ...d, fondos: restaurar(d.fondos, prev, x => x.id === f.id) }),
   }),
 
-  deleteFuente: def<[string], { f?: Fuente; meses: FuenteMes[] }, unknown>({
-    capturar: (d, id) => ({ f: (d.fuentes ?? []).find(x => x.id === id), meses: (d.fuentesMeses ?? []).filter(x => x.fuenteId === id) }),
-    local: (d, _ts, id) => ({ ...d, fuentes: (d.fuentes ?? []).filter(x => x.id !== id), fuentesMeses: (d.fuentesMeses ?? []).filter(x => x.fuenteId !== id) }),
-    remoto: (api, id) => api.deleteFuente(id),
+  deleteFondo: def<[string], { f?: Fondo; meses: FondoMes[] }, unknown>({
+    capturar: (d, id) => ({ f: (d.fondos ?? []).find(x => x.id === id), meses: (d.fondosMeses ?? []).filter(x => x.fondoId === id) }),
+    local: (d, _ts, id) => ({ ...d, fondos: (d.fondos ?? []).filter(x => x.id !== id), fondosMeses: (d.fondosMeses ?? []).filter(x => x.fondoId !== id) }),
+    remoto: (api, id) => api.deleteFondo(id),
     deshacer: (d, prev, id) => ({
-      ...d, fuentes: restaurar(d.fuentes, prev.f, x => x.id === id),
-      fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => x.fuenteId !== id), ...prev.meses],
+      ...d, fondos: restaurar(d.fondos, prev.f, x => x.id === id),
+      fondosMeses: [...(d.fondosMeses ?? []).filter(x => x.fondoId !== id), ...prev.meses],
     }),
   }),
 
-  saveFuenteMes: def<[FuenteMes, boolean], FuenteMes[], unknown>({
-    capturar: (d, m) => (d.fuentesMeses ?? []).filter(x => x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo),
-    local: (d, _ts, m, quitar) => ({ ...d, fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => !(x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo)), ...(quitar ? [] : [m])] }),
-    remoto: (api, m, quitar) => api.saveFuenteMes(m, quitar),
-    deshacer: (d, prev, m) => ({ ...d, fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => !(x.fuenteId === m.fuenteId && x.mes === m.mes && x.modo === m.modo)), ...prev] }),
+  saveFondoMes: def<[FondoMes, boolean], FondoMes[], unknown>({
+    capturar: (d, m) => (d.fondosMeses ?? []).filter(x => x.fondoId === m.fondoId && x.mes === m.mes && x.modo === m.modo),
+    local: (d, _ts, m, quitar) => ({ ...d, fondosMeses: [...(d.fondosMeses ?? []).filter(x => !(x.fondoId === m.fondoId && x.mes === m.mes && x.modo === m.modo)), ...(quitar ? [] : [m])] }),
+    remoto: (api, m, quitar) => api.saveFondoMes(m, quitar),
+    deshacer: (d, prev, m) => ({ ...d, fondosMeses: [...(d.fondosMeses ?? []).filter(x => !(x.fondoId === m.fondoId && x.mes === m.mes && x.modo === m.modo)), ...prev] }),
   }),
 
   savePlantillaFin: def<[PlantillaFinInput], PlantillaFin | undefined, PlantillaFin>({

@@ -417,7 +417,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
               <p className="tabular mt-1 text-lg font-bold">{formatMoney(confirmLote.reduce((t, g) => t + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0), cfg.moneda || 'PEN')}</p>
               {confirmLote.some(g => g.moneda !== (cfg.moneda || 'PEN')) && <p className="text-[11px] text-muted">El total solo suma los gastos en {cfg.moneda || 'PEN'}.</p>}
             </div>
-            <p className="text-muted">Dejarán de contar en totales, gráficos, fuentes y cajas. No se borran de la hoja: quedan en <b>Eliminados</b> y puedes restaurarlos cuando quieras. Si falla el guardado, no se elimina ninguno.</p>
+            <p className="text-muted">Dejarán de contar en totales, gráficos, fondos y cajas. No se borran de la hoja: quedan en <b>Eliminados</b> y puedes restaurarlos cuando quieras. Si falla el guardado, no se elimina ninguno.</p>
           </div>
         )}
       </Modal>

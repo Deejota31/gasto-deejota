@@ -1,6 +1,6 @@
-import { mediosDeFuente } from './fuenteMedios'
+import { mediosDeFondo } from './fondoMedios'
 import { ArrowLeftRight, Banknote, CreditCard, Smartphone, Ticket, Wallet, type LucideIcon } from 'lucide-react'
-import type { Caja, CatalogoItem, Fuente } from './types'
+import type { Caja, CatalogoItem, Fondo } from './types'
 import { ICONOS, ICONS, sugerirIconos } from './iconos'
 
 export { ICONS }
@@ -8,7 +8,7 @@ export { ICONS }
 /**
  * Sistema de color (v1.9). Dos familias que no se mezclan:
  *  - ESTADOS: verde = bien, ámbar = atención, rojo = alerta/exceso, azul = información/acción. Solo para estados.
- *  - CLASIFICACIÓN: paleta reducida para ámbitos, categorías y fuentes, sin rojos ni ámbar puros para no confundirse
+ *  - CLASIFICACIÓN: paleta reducida para ámbitos, categorías y fondos, sin rojos ni ámbar puros para no confundirse
  *    con alertas. Ámbito = identidad fuerte y estable; categoría = su propio tono (el mismo en todas las pantallas);
  *    subcategoría = el color de su categoría (variación por opacidad), con icono propio.
  * Los colores e iconos guardados en CATALOGO siempre mandan sobre estos predeterminados.
@@ -172,9 +172,9 @@ export const soft = (hex: string, alpha = '1A') => `${hex}${alpha}`
 
 
 /* ---------------------------------------------------------------------------------------------------------------
- * Coherencia visual (v1.10): un medio de pago, una fuente o una caja se ven igual en TODA la web.
+ * Coherencia visual (v1.10): un medio de pago, un fondo o una caja se ven igual en TODA la web.
  *  - Medio de pago: su icono y color propios (arriba).
- *  - Fuente: lo que elijas (icono + color); si no eliges nada ("automático"), hereda el de su medio de pago
+ *  - Fondo: lo que elijas (icono + color); si no eliges nada ("automático"), hereda el de su medio de pago
  *    y, si no tiene medio, uno según su nombre.
  *  - Caja: lo que elijas; si no, el de su alcance (medio de pago, ámbito, categoría o subcategoría).
  * "Elegido" = la fila tiene icono guardado; mientras no lo tenga, el color guardado se ignora y manda el automático.
@@ -185,26 +185,26 @@ const CLAVE_DE = new Map<LucideIcon, string>()
 for (const i of ICONOS) if (!CLAVE_DE.has(i.Icon)) CLAVE_DE.set(i.Icon, i.key)
 export const claveDeIcono = (Icon: LucideIcon): string => CLAVE_DE.get(Icon) ?? 'tag'
 
-/** Aspecto de la fuente General (y de toda fuente libre sin icono propio): billete en azul marino. */
+/** Aspecto del fondo General (y de toda fondo libre sin icono propio): billete en azul marino. */
 const LIBRE_BASE: Look = { Icon: ICONS.banknote, color: '#1E3A8A' }
-const esGeneral = (f: Pick<Fuente, 'nombre' | 'medioPago'>) => !mediosDeFuente(f.medioPago).length && f.nombre.trim().toLowerCase() === 'general'
+const esGeneral = (f: Pick<Fondo, 'nombre' | 'medioPago'>) => !mediosDeFondo(f.medioPago).length && f.nombre.trim().toLowerCase() === 'general'
 
-/** Aspecto de la fuente que elegiste (icono guardado) o, si no, el automático de ese caso. */
-function propio(f: Pick<Fuente, 'icono' | 'color'>): Look | null {
+/** Aspecto del fondo que elegiste (icono guardado) o, si no, el automático de ese caso. */
+function propio(f: Pick<Fondo, 'icono' | 'color'>): Look | null {
   return f.icono && ICONS[f.icono] ? { Icon: ICONS[f.icono], color: pick(f.color, LIBRE_BASE.color) } : null
 }
 
 /**
- * Estilo de una fuente de dinero:
+ * Estilo de un fondo del presupuesto:
  *  1. lo que elegiste (icono + color);
  *  2. si tiene medio de pago, el de ese medio (Yape se ve como Yape en todas partes);
- *  3. si es libre, el de la fuente General (la que tengas llamada así, con lo que haya elegido; si no, el base).
+ *  3. si es libre, el del fondo General (la que tengas llamada así, con lo que haya elegido; si no, el base).
  * `todas` permite encontrar a General; sin ella se usa el aspecto base.
  */
-export function fuenteLook(f: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>, todas: Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'>[] = []): Look {
+export function fondoLook(f: Pick<Fondo, 'nombre' | 'medioPago' | 'icono' | 'color'>, todas: Pick<Fondo, 'nombre' | 'medioPago' | 'icono' | 'color'>[] = []): Look {
   const mio = propio(f)
   if (mio) return mio
-  const ms = mediosDeFuente(f.medioPago)
+  const ms = mediosDeFondo(f.medioPago)
   if (ms.length) return medioLook(ms[0])
   const general = todas.find(esGeneral)
   return (general && propio(general)) || LIBRE_BASE

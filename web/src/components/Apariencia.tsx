@@ -62,7 +62,7 @@ export function ColorPicker({ value, onChange, label = 'Color' }: { value: strin
 }
 
 /**
- * Estado de la apariencia de una fuente o caja. `auto` es lo que se vería sin elegir nada (el del medio de pago o del
+ * Estado de la apariencia de un fondo o caja. `auto` es lo que se vería sin elegir nada (el del medio de pago o del
  * alcance): mientras no elijas un icono, se guarda vacío y manda el automático. Al elegir un icono o un color, se
  * guarda lo que estabas viendo más tu cambio, así el otro no salta.
  */
@@ -76,7 +76,7 @@ export function useApariencia(inicial: { icono: string; color: string }, auto: L
   return { icono: esAuto ? '' : v.icono, color: look.color, look, esAuto, elegir, restablecer }
 }
 
-/** Icono + color con la opción de volver al automático. Se usa en Nueva/Editar fuente y Nueva/Editar caja. */
+/** Icono + color con la opción de volver al automático. Se usa en Nueva/Editar fondo y Nueva/Editar caja. */
 export function AparienciaCampos({ ap, nombre, contexto, autoTexto }: {
   ap: ReturnType<typeof useApariencia>; nombre: string; contexto: string[]; autoTexto: string
 }) {

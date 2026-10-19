@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { aggregate, fuenteMontoMes, type Ctx } from './engine'
+import { aggregate, fondoMontoMes, type Ctx } from './engine'
 import { calcularCompromisos, calcularPresupuesto } from './salud'
-import type { Caja, Filters, Fuente, FuenteMes, Gasto } from './types'
+import type { Caja, Filters, Fondo, FondoMes, Gasto } from './types'
 
-// Pruebas matemáticas de fuentes de dinero (v1.8): el caso real de la especificación y sus variantes.
+// Pruebas matemáticas de fondos del presupuesto (v1.8): el caso real de la especificación y sus variantes.
 const g = (over: Partial<Gasto>): Gasto => ({
   fecha: '2026-10-05', monto: 10, moneda: 'PEN', categoria: 'Alimentación', subcategoria: 'Almuerzo', descripcion: '',
   medioPago: 'Yape', tipoGasto: 'Variable', ambito: 'Personal', esRecurrente: false, estado: 'Activo', origen: 'web',
   comprobanteUrl: '', id: crypto.randomUUID(), creadoEn: '', actualizadoEn: '', ...over,
 })
-const fu = (id: string, monto: number, over: Partial<Fuente> = {}): Fuente => ({
-  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '',
+const fu = (id: string, monto: number, over: Partial<Fondo> = {}): Fondo => ({
+  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '', tipo: 'mensual',
   creadoEn: '', actualizadoEn: '', ...over,
 })
 const caja = (id: string, presupuesto: number, filtroCampo: Caja['filtroCampo'] = 'Todos', filtroValor = '', orden = 1): Caja =>
@@ -22,18 +22,18 @@ const dic: Filters = { ...oct, desde: '2026-12-01', hasta: '2026-12-31' }
 const GENERAL = fu('general', 3500, { orden: 1 })
 const SODEXO = fu('sodexo', 280, { orden: 2, medioPago: 'Sodexo' })
 const EXTRA1 = fu('extra1', 1000, { orden: 3, recurrencia: 'unica', mes: '2026-10' })
-const ctx = (fuentes: Fuente[], over: Partial<Ctx> = {}): Ctx => ({
+const ctx = (fondos: Fondo[], over: Partial<Ctx> = {}): Ctx => ({
   base: 'PEN', rates: { USD: 3.8 }, today: '2026-10-10', cajas: [caja('general-caja', 9999), caja('auto', 250, 'Categoría', 'Auto', 2), caja('bebe', 700, 'Categoría', 'Bebé', 3)],
-  presupuestos: [], fuentes, fuentesMeses: [], ...over,
+  presupuestos: [], fondos, fondosMeses: [], ...over,
 })
 
-describe('fuentes de dinero: presupuesto consolidado', () => {
-  it('General 3500 + Sodexo 280 = 3780; con Extra 1 (1000) = 4780; sin fuentes sigue la caja general', () => {
+describe('fondos del presupuesto: presupuesto consolidado', () => {
+  it('General 3500 + Sodexo 280 = 3780; con Extra 1 (1000) = 4780; sin fondos sigue la caja general', () => {
     expect(aggregate([], oct, ctx([GENERAL, SODEXO])).cajas.presupuesto).toBe(378000)
     const c = aggregate([], oct, ctx([GENERAL, SODEXO, EXTRA1])).cajas
     expect(c.presupuesto).toBe(478000)
-    expect(c.origen).toBe('fuentes')
-    expect(c.fuentes.lista.map(x => x.aporta)).toEqual([350000, 28000, 100000])
+    expect(c.origen).toBe('fondos')
+    expect(c.fondos.lista.map(x => x.aporta)).toEqual([350000, 28000, 100000])
     const sin = aggregate([], oct, ctx([])).cajas
     expect(sin.origen).toBe('caja-general')
     expect(sin.presupuesto).toBe(999900)
@@ -42,18 +42,18 @@ describe('fuentes de dinero: presupuesto consolidado', () => {
   it('desactivar Extra 1 → 3780 (queda guardada, muestra lo que aportaría); reactivar → 4780', () => {
     const off = aggregate([], oct, ctx([GENERAL, SODEXO, { ...EXTRA1, activo: false }])).cajas
     expect(off.presupuesto).toBe(378000)
-    expect(off.fuentes.lista).toHaveLength(3)
-    expect(off.fuentes.lista[2]).toMatchObject({ asignado: 100000, aporta: 0 })
-    expect(off.fuentes.activas).toBe(2)
+    expect(off.fondos.lista).toHaveLength(3)
+    expect(off.fondos.lista[2]).toMatchObject({ asignado: 100000, aporta: 0 })
+    expect(off.fondos.activas).toBe(2)
     expect(aggregate([], oct, ctx([GENERAL, SODEXO, EXTRA1])).cajas.presupuesto).toBe(478000)
   })
 
-  it('todas las fuentes inactivas → presupuesto 0 (no vuelve en silencio a la caja general)', () => {
+  it('todos los fondos inactivos → presupuesto 0 (no vuelve en silencio a la caja general)', () => {
     const c = aggregate([g({ monto: 50 })], oct, ctx([{ ...GENERAL, activo: false }])).cajas
     expect(c.presupuesto).toBe(0)
-    expect(c.origen).toBe('fuentes')
+    expect(c.origen).toBe('fondos')
     expect(c.disponible).toBe(-5000)
-    expect(c.fuentes.gastadoSinFuente).toBe(5000)
+    expect(c.fondos.gastadoSinFondo).toBe(5000)
   })
 
   it('gasto de 500 → disponible 4280; reservas Auto 250 + Bebé 700 = 950 no cambian los 4780', () => {
@@ -70,80 +70,80 @@ describe('fuentes de dinero: presupuesto consolidado', () => {
   })
 
   it('por mes: Extra 1 solo en octubre; nov 0; dic 500 con importe propio; no se arrastra ni pisa otros meses', () => {
-    const meses: FuenteMes[] = [{ fuenteId: 'extra1', mes: '2026-12', monto: 500, modo: 'solo' }]
+    const meses: FondoMes[] = [{ fondoId: 'extra1', mes: '2026-12', monto: 500, modo: 'solo' }]
     const all = [GENERAL, SODEXO, EXTRA1]
-    expect(aggregate([], oct, ctx(all, { fuentesMeses: meses })).cajas.presupuesto).toBe(478000)
-    expect(aggregate([], nov, ctx(all, { fuentesMeses: meses })).cajas.presupuesto).toBe(378000)
-    expect(aggregate([], dic, ctx(all, { fuentesMeses: meses })).cajas.presupuesto).toBe(428000)
+    expect(aggregate([], oct, ctx(all, { fondosMeses: meses })).cajas.presupuesto).toBe(478000)
+    expect(aggregate([], nov, ctx(all, { fondosMeses: meses })).cajas.presupuesto).toBe(378000)
+    expect(aggregate([], dic, ctx(all, { fondosMeses: meses })).cajas.presupuesto).toBe(428000)
     // rango de 3 meses = suma de cada mes, sin doble conteo
-    expect(aggregate([], { ...oct, hasta: '2026-12-31' }, ctx(all, { fuentesMeses: meses })).cajas.presupuesto).toBe(478000 + 378000 + 428000)
+    expect(aggregate([], { ...oct, hasta: '2026-12-31' }, ctx(all, { fondosMeses: meses })).cajas.presupuesto).toBe(478000 + 378000 + 428000)
   })
 
   it('importe "desde un mes": cambia ese mes y los siguientes, no los anteriores; "solo" manda sobre "desde"', () => {
-    const meses: FuenteMes[] = [{ fuenteId: 'general', mes: '2026-11', monto: 3800, modo: 'desde' }, { fuenteId: 'general', mes: '2027-01', monto: 3000, modo: 'solo' }]
-    const m = (mes: string) => fuenteMontoMes(GENERAL, mes, meses).monto
+    const meses: FondoMes[] = [{ fondoId: 'general', mes: '2026-11', monto: 3800, modo: 'desde' }, { fondoId: 'general', mes: '2027-01', monto: 3000, modo: 'solo' }]
+    const m = (mes: string) => fondoMontoMes(GENERAL, mes, meses).monto
     expect([m('2026-10'), m('2026-11'), m('2026-12'), m('2027-01'), m('2027-02')]).toEqual([3500, 3800, 3800, 3000, 3800])
-    // fuente mensual con mes de aplicación: no aporta antes
+    // fondo mensual con mes de aplicación: no aporta antes
     const desdeNov = fu('bono', 200, { mes: '2026-11' })
-    expect([fuenteMontoMes(desdeNov, '2026-10', []).monto, fuenteMontoMes(desdeNov, '2027-05', []).monto]).toEqual([0, 200])
-    // una fuente única ignora "desde": un ingreso extraordinario nunca se vuelve recurrente
-    expect(fuenteMontoMes(EXTRA1, '2026-11', [{ fuenteId: 'extra1', mes: '2026-10', monto: 9, modo: 'desde' }]).monto).toBe(0)
+    expect([fondoMontoMes(desdeNov, '2026-10', []).monto, fondoMontoMes(desdeNov, '2027-05', []).monto]).toEqual([0, 200])
+    // un fondo único ignora "desde": un ingreso extraordinario nunca se vuelve recurrente
+    expect(fondoMontoMes(EXTRA1, '2026-11', [{ fondoId: 'extra1', mes: '2026-10', monto: 9, modo: 'desde' }]).monto).toBe(0)
   })
 
-  it('cada gasto se atribuye a UNA fuente: Sodexo por medio de pago, el resto a la principal; total sin duplicar', () => {
+  it('cada gasto se atribuye a UN fondo: Sodexo por medio de pago, el resto a la principal; total sin duplicar', () => {
     const gastos = [g({ monto: 100, medioPago: 'Sodexo' }), g({ monto: 40, medioPago: 'sodexo ' }), g({ monto: 60, medioPago: 'Yape' }), g({ monto: 30, medioPago: 'Plin' })]
     const c = aggregate(gastos, oct, ctx([GENERAL, SODEXO, EXTRA1])).cajas
-    const por = Object.fromEntries(c.fuentes.lista.map(x => [x.fuente.id, x.gastado]))
+    const por = Object.fromEntries(c.fondos.lista.map(x => [x.fondo.id, x.gastado]))
     expect(por).toEqual({ general: 9000, sodexo: 14000, extra1: 0 })
-    expect(c.fuentes.lista.reduce((s, x) => s + x.gastado, 0)).toBe(23000)
+    expect(c.fondos.lista.reduce((s, x) => s + x.gastado, 0)).toBe(23000)
     expect(c.gastadoSubcajas + c.gastadoLibre).toBe(23000)
-    expect(c.fuentes.lista.find(x => x.principal)!.fuente.id).toBe('general')
+    expect(c.fondos.lista.find(x => x.principal)!.fondo.id).toBe('general')
   })
 
-  it('cascada: lo que excede a General pasa a la siguiente fuente libre; nadie queda en negativo mientras el consolidado no lo esté', () => {
+  it('cascada: lo que excede a General pasa a la siguiente fondo libre; nadie queda en negativo mientras el consolidado no lo esté', () => {
     // Caso real: General 3109.75 + Viaje a Ica 1000. Se gasta más que General por Yape/Plin.
     const general = fu('general', 3109.75, { orden: 1 })
     const ica = fu('ica', 1000, { orden: 2, recurrencia: 'unica', mes: '2026-10' })
     const gastos = [g({ monto: 3000, fecha: '2026-10-02' }), g({ monto: 100, medioPago: 'Plin', fecha: '2026-10-05' }), g({ monto: 63.87, fecha: '2026-10-14' })]
     const c = aggregate(gastos, oct, ctx([general, ica])).cajas
-    const por = Object.fromEntries(c.fuentes.lista.map(x => [x.fuente.id, [x.gastado, x.disponible]]))
+    const por = Object.fromEntries(c.fondos.lista.map(x => [x.fondo.id, [x.gastado, x.disponible]]))
     expect(por.general).toEqual([310975, 0])
     expect(por.ica).toEqual([5412, 94588])
-    expect(c.fuentes.lista.reduce((s, x) => s + x.disponible, 0)).toBe(c.disponible)
-    expect(c.fuentes.lista.reduce((s, x) => s + x.gastado, 0)).toBe(c.gastadoPeriodo)
+    expect(c.fondos.lista.reduce((s, x) => s + x.disponible, 0)).toBe(c.disponible)
+    expect(c.fondos.lista.reduce((s, x) => s + x.gastado, 0)).toBe(c.gastadoPeriodo)
   })
 
-  it('cascada: un gasto que cruza el tope se reparte entre fuentes y cuenta una sola vez como movimiento', () => {
+  it('cascada: un gasto que cruza el tope se reparte entre fondos y cuenta una sola vez como movimiento', () => {
     const a = fu('a', 100, { orden: 1 }), b = fu('b', 100, { orden: 2 })
     const c = aggregate([g({ monto: 80, fecha: '2026-10-01' }), g({ monto: 50, fecha: '2026-10-02' })], oct, ctx([a, b])).cajas
-    const por = Object.fromEntries(c.fuentes.lista.map(x => [x.fuente.id, [x.gastado, x.count]]))
+    const por = Object.fromEntries(c.fondos.lista.map(x => [x.fondo.id, [x.gastado, x.count]]))
     expect(por).toEqual({ a: [10000, 2], b: [3000, 0] })
-    expect(c.fuentes.lista.reduce((s, x) => s + x.count, 0)).toBe(2)
+    expect(c.fondos.lista.reduce((s, x) => s + x.count, 0)).toBe(2)
   })
 
   it('cascada: el exceso de Sodexo también pasa a las libres; solo hay negativo si el consolidado es negativo', () => {
     const c1 = aggregate([g({ monto: 300, medioPago: 'Sodexo' })], oct, ctx([GENERAL, SODEXO])).cajas
-    const por = Object.fromEntries(c1.fuentes.lista.map(x => [x.fuente.id, x.disponible]))
+    const por = Object.fromEntries(c1.fondos.lista.map(x => [x.fondo.id, x.disponible]))
     expect(por).toEqual({ general: 350000 - 2000, sodexo: 0 })
-    // consolidado negativo: el sobrante queda en la última fuente libre
+    // consolidado negativo: el sobrante queda en la última fondo libre
     const c2 = aggregate([g({ monto: 5000 })], oct, ctx([GENERAL, EXTRA1])).cajas
     expect(c2.disponible).toBe(450000 - 500000)
-    expect(c2.fuentes.lista.map(x => x.disponible)).toEqual([0, 100000 - 150000])
+    expect(c2.fondos.lista.map(x => x.disponible)).toEqual([0, 100000 - 150000])
   })
 
-  it('cascada: sin fuentes libres el sobrante de Sodexo queda en su propia fuente; invariantes con 200 escenarios al azar', () => {
+  it('cascada: sin fondos libres el sobrante de Sodexo queda en su propio fondo; invariantes con 200 escenarios al azar', () => {
     const c = aggregate([g({ monto: 400, medioPago: 'Sodexo' })], oct, ctx([SODEXO])).cajas
-    expect(c.fuentes.lista[0].disponible).toBe(28000 - 40000)
+    expect(c.fondos.lista[0].disponible).toBe(28000 - 40000)
     let seed = 11
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     for (let k = 0; k < 200; k++) {
       const fs = Array.from({ length: 1 + Math.floor(rnd() * 5) }, (_, i) => fu(`f${i}`, Math.round(rnd() * 100000) / 100, { orden: i, medioPago: i > 0 && rnd() > 0.6 ? ['Sodexo', 'Plin'][i % 2] : '', activo: rnd() > 0.15 }))
       const gastos = Array.from({ length: Math.floor(rnd() * 30) }, () => g({ monto: Math.round(rnd() * 30000) / 100, medioPago: ['Yape', 'Sodexo', 'Plin'][Math.floor(rnd() * 3)], fecha: `2026-10-${String(1 + Math.floor(rnd() * 28)).padStart(2, '0')}` }))
-      const r = aggregate(gastos, oct, ctx(fs)).cajas.fuentes
-      // todo lo gastado queda atribuido (a una fuente, a una inactiva o sin fuente)
-      expect(r.lista.reduce((s, x) => s + x.gastado, 0) + r.gastadoSinFuente).toBe(gastos.reduce((s, x) => s + Math.round(x.monto * 100), 0))
-      // una fuente libre solo queda en negativo cuando el conjunto de fuentes libres ya no alcanza (el saldo de Sodexo solo cubre pagos con Sodexo)
-      const libres = r.lista.filter(x => x.fuente.activo && !x.fuente.medioPago)
+      const r = aggregate(gastos, oct, ctx(fs)).cajas.fondos
+      // todo lo gastado queda atribuido (a un fondo, a una inactiva o sin fondo)
+      expect(r.lista.reduce((s, x) => s + x.gastado, 0) + r.gastadoSinFondo).toBe(gastos.reduce((s, x) => s + Math.round(x.monto * 100), 0))
+      // un fondo libre solo queda en negativo cuando el conjunto de fondos libres ya no alcanza (el saldo de Sodexo solo cubre pagos con Sodexo)
+      const libres = r.lista.filter(x => x.fondo.activo && !x.fondo.medioPago)
       const cupoLibres = libres.reduce((s, x) => s + x.aporta, 0), gastoLibres = libres.reduce((s, x) => s + x.gastado, 0)
       if (gastoLibres <= cupoLibres) for (const x of libres) expect(x.disponible).toBeGreaterThanOrEqual(0)
       else expect(libres.filter(x => x.disponible < 0)).toHaveLength(1)
@@ -155,20 +155,20 @@ describe('fuentes de dinero: presupuesto consolidado', () => {
     const c = aggregate(gastos, oct, ctx([GENERAL, { ...SODEXO, activo: false }])).cajas
     expect(c.presupuesto).toBe(350000)
     expect(c.disponible).toBe(350000 - 16000)
-    expect(c.fuentes.gastadoInactivas).toBe(10000)
-    expect(c.fuentes.countInactivas).toBe(1)
-    expect(c.fuentes.lista.find(x => x.fuente.id === 'general')!.gastado).toBe(6000)
+    expect(c.fondos.gastadoInactivas).toBe(10000)
+    expect(c.fondos.countInactivas).toBe(1)
+    expect(c.fondos.lista.find(x => x.fondo.id === 'general')!.gastado).toBe(6000)
   })
 
-  it('fuente en USD se convierte; sin tipo de cambio no aporta y se marca', () => {
+  it('fondo en USD se convierte; sin tipo de cambio no aporta y se marca', () => {
     const usd = fu('usd', 100, { moneda: 'USD', orden: 4 })
     expect(aggregate([], oct, ctx([GENERAL, usd])).cajas.presupuesto).toBe(350000 + 38000)
     const sin = aggregate([], oct, ctx([GENERAL, usd], { rates: {} })).cajas
     expect(sin.presupuesto).toBe(350000)
-    expect(sin.fuentes.lista[1].sinTipoCambio).toBe(true)
+    expect(sin.fondos.lista[1].sinTipoCambio).toBe(true)
   })
 
-  it('20 fuentes: el total es la suma exacta de las activas', () => {
+  it('20 fondos: el total es la suma exacta de las activas', () => {
     const muchas = Array.from({ length: 20 }, (_, i) => fu(`f${i}`, 10 * (i + 1), { orden: i, activo: i % 5 !== 0 }))
     const esperado = muchas.filter(x => x.activo).reduce((s, x) => s + x.monto * 100, 0)
     expect(aggregate([], oct, ctx(muchas)).cajas.presupuesto).toBe(esperado)
@@ -190,7 +190,7 @@ describe('invariantes del presupuesto consolidado (mismas cifras en todas las pe
     expect(c.libreInicial).toBe(c.presupuesto - c.reservado)
     expect(c.gastadoPeriodo).toBe(c.gastadoSubcajas + c.gastadoLibre)
     expect(c.saldoLibre).toBe(c.libreInicial - c.gastadoLibre - c.excesoSubcajas)
-    // conciliación: lo disponible es lo libre más lo reservado que aún no se usó
+    // cuadre: lo disponible es lo libre más lo reservado que aún no se usó
     expect(c.disponible).toBe(c.saldoLibre + c.reservasSinUsar)
     expect(c.reservado).toBe(c.subcajas.reduce((s, x) => s + x.asignado, 0))
     for (const x of c.subcajas) expect(x.disponible).toBe(x.asignado - x.gastado)
@@ -205,7 +205,7 @@ describe('invariantes del presupuesto consolidado (mismas cifras en todas las pe
     inv(c)
   })
 
-  it('aleatorio: 200 escenarios con reservas excedidas, solapes, USD, anulados y fuentes apagadas cumplen las identidades', () => {
+  it('aleatorio: 200 escenarios con reservas excedidas, solapes, USD, anulados y fondos apagadas cumplen las identidades', () => {
     let seed = 7
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     const cats = ['Auto', 'Bebé', 'Alimentación', 'Salud', 'Plan Nube']
@@ -241,7 +241,7 @@ describe('ranking Top 5', () => {
 })
 
 describe('rendimiento del motor', () => {
-  it('20,000 movimientos con 20 fuentes y 13 cajas: una pasada en < 400 ms', () => {
+  it('20,000 movimientos con 20 fondos y 13 cajas: una pasada en < 400 ms', () => {
     const cats = ['Auto', 'Bebé', 'Alimentación', 'Salud', 'Plan Nube', 'Servicios']
     const gastos = Array.from({ length: 20000 }, (_, i) => g({ id: String(i), fecha: `2026-10-${String(1 + (i % 28)).padStart(2, '0')}`, monto: (i % 97) + 0.5, categoria: cats[i % 6], subcategoria: `S${i % 13}`, medioPago: i % 5 ? 'Yape' : 'Sodexo' }))
     const fs = Array.from({ length: 20 }, (_, i) => fu(`f${i}`, 100 + i, { orden: i, medioPago: i === 1 ? 'Sodexo' : '' }))

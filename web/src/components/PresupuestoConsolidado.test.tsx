@@ -73,7 +73,7 @@ describe('PresupuestoConsolidado', () => {
     }
   })
 
-  it('encabezado: título, cantidad de fuentes o caja general, período e icono de información', () => {
+  it('encabezado: título, cantidad de fondos o caja general, período e icono de información', () => {
     montaje(SIN_EXCESO)
     expect(screen.getByRole('heading', { name: 'Presupuesto consolidado' })).toBeTruthy()
     expect(screen.getByTestId('consolidado-subtitulo').textContent).toMatch(/octubre 2026/)
@@ -137,7 +137,7 @@ describe('PresupuestoConsolidado', () => {
     montaje(SIN_EXCESO)
     fireEvent.click(screen.getByRole('button', { name: 'Información: Cómo se calcula' }))
     const t = screen.getByRole('tooltip').textContent!
-    for (const frag of ['fuentes activas', 'Gastado', 'Reservado en cajas', 'Disponible consolidado', 'Saldo libre', 'Consumido']) expect(t, frag).toContain(frag)
+    for (const frag of ['fondos activos', 'Gastado', 'Reservado en cajas', 'Disponible consolidado', 'Saldo libre', 'Consumido']) expect(t, frag).toContain(frag)
   })
 
   it('barra: un segmento por tramo con importe, tooltip al enfocar y leyenda; los tramos suman el presupuesto', () => {

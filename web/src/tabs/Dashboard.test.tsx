@@ -31,7 +31,7 @@ const montar = (data: AppData, filters: Filters) => {
 }
 const motor = (data: AppData, filters: Filters) => aggregate(data.gastos, filters, {
   base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today: TODAY, cajas: data.cajas, presupuestos: data.presupuestos,
-  fuentes: data.fuentes ?? [], fuentesMeses: data.fuentesMeses ?? [], aislarDesde: aislaDesde(data.config),
+  fondos: data.fondos ?? [], fondosMeses: data.fondosMeses ?? [], aislarDesde: aislaDesde(data.config),
 })
 const celda = (id: string) => norm(within(screen.getByTestId(`cons-${id}`)).getAllByText(/.*/, { selector: 'p' })[1].textContent ?? '')
 
@@ -89,7 +89,7 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     }
   })
 
-  it('orden: Presupuesto consolidado (con KPIs) → Fuentes de dinero y Cajas / reservas → gráficos', async () => {
+  it('orden: Presupuesto consolidado (con KPIs) → Fondos del presupuesto y Cajas / reservas → gráficos', async () => {
     montar(await datos(), filtros())
     const orden = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
     const cons = screen.getByTestId('caja-general'), acordeones = screen.getByTestId('resumen-cajas'), kpis = screen.getByTestId('kpis')
@@ -98,7 +98,7 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     expect(orden(cons, acordeones)).toBe(true)
     expect(orden(acordeones, grafico)).toBe(true)
     expect(orden(kpis, acordeones)).toBe(true)
-    expect(screen.getByRole('button', { name: /^Fuentes de dinero/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Fondos del presupuesto/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Cajas \/ reservas/ })).toBeTruthy()
   })
 

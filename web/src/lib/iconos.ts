@@ -170,7 +170,7 @@ export const ICONOS: IconoDef[] = [
   D('cloud-rain', CloudRain, 'Viajes y naturaleza', 'lluvia clima'), D('waves', Waves, 'Viajes y naturaleza', 'mar playa olas'),
   D('turtle', Turtle, 'Mascotas', 'tortuga mascota'), D('bug', Bug, 'Mascotas', 'insectos fumigacion plagas'),
   D('trending-up', TrendingUp, 'Dinero', 'inversion crecimiento ganancia'), D('chart-line', ChartLine, 'Dinero', 'inversiones bolsa grafico'),
-  D('circle-dollar', CircleDollarSign, 'Dinero', 'ingreso dinero sueldo fuente'),
+  D('circle-dollar', CircleDollarSign, 'Dinero', 'ingreso dinero sueldo fondo'),
   // Otros
   D('tag', Tag, 'Otros', 'etiqueta otros general'), D('shapes', Shapes, 'Otros', 'otros varios'),
 ]

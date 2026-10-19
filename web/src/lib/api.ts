@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, type AppData, type Caja, type CatalogoItem, type ConcFila, type EstadoRevision, type Fuente, type FuenteMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
+import { TIPOS_GASTO, TIPOS_FONDO, type EstadoRevisionPres, type RevisionPres, type TipoFondo, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fondo, type FondoMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -56,8 +56,38 @@ export function calentar(conn: Connection, fetchImpl: typeof fetch = fetch): voi
 
 export type Transport = (action: string, payload: unknown) => Promise<unknown>
 
-export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
+// <compat-migración>
+/**
+ * Compatibilidad con un Apps Script anterior a v1.26 (aún con los nombres “fuentes”): si responde BAD_ACTION a una acción
+ * nueva, se repite con el nombre anterior y los datos se traducen a los nombres actuales. Es la ÚNICA capa que conoce los nombres
+ * anteriores; en cuanto el backend se actualiza y migra, deja de usarse.
+ */
+const ACCION_ANTERIOR: Record<string, string> = {
+  saveFondo: 'saveFuente', saveFondoMes: 'saveFuenteMes', deleteFondo: 'deleteFuente', reorderFondos: 'reorderFuentes', migrarGeneralAFondo: 'migrarGeneralAFuente',
+}
+const aNombresAnteriores = (v: unknown): unknown => {
+  if (Array.isArray(v)) return v.map(aNombresAnteriores)
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k === 'fondoId' ? 'fuenteId' : k, k === 'tipo' && x === 'fondo' ? 'fuente' : aNombresAnteriores(x)]))
+  return v
+}
+export function conCompatibilidad(t: Transport): Transport {
   return async (action, payload) => {
+    try { return await t(action, payload) } catch (e) {
+      const anterior = ACCION_ANTERIOR[action] ?? (action === 'savePlantillaFin' || action === 'aplicarEntidadesMes' || action === 'reorderPlantillasFin' ? action : '')
+      if (!(e instanceof ApiError) || e.code !== 'BAD_ACTION' || !anterior) throw e
+      return t(anterior, aNombresAnteriores(payload))
+    }
+  }
+}
+function traducirDatosAnteriores(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || !('fuentes' in raw)) return raw
+  const { fuentes, fuentesMeses, ...resto } = raw as Record<string, unknown>
+  return { ...resto, fondos: fuentes, fondosMeses: fuentesMeses }
+}
+// </compat-migración>
+
+export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
+  return conCompatibilidad(async (action, payload) => {
     let lastError: ApiError | null = null
     // Todas las acciones son idempotentes (el alta lleva su UUID), así que reintentar es seguro. Máximo 4 intentos (1 s, 3 s, 7 s entre ellos).
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -70,7 +100,7 @@ export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch,
       }
     }
     throw lastError!
-  }
+  })
 }
 
 async function once(conn: Connection, action: string, payload: unknown, fetchImpl: typeof fetch): Promise<unknown> {
@@ -165,33 +195,35 @@ const loteSchema = z.object({
 // [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?, icono?] — antes de v1.7 llegan solo 7; antes de v1.10 sin icono.
 const cajaRow = z.tuple([str, str, z.number(), str, str, str, z.number()]).rest(z.union([str, z.number(), z.boolean()]))
 
-// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn]
-const fuenteRow = z.tuple([str, str, z.number(), str, str, str, z.boolean(), z.number(), str, str, str, str, str])
-const fuenteMesRow = z.tuple([str, str, z.number(), str])
-const toFuente = (r: z.infer<typeof fuenteRow>): Fuente => ({
-  id: r[0], nombre: r[1], monto: r[2], moneda: r[3] || 'PEN', color: r[4] || '#1e3a8a', icono: r[5], activo: r[6], orden: r[7],
+// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn, tipo?] (backend anterior: sin tipo)
+const fondoRow = z.tuple([str, str, z.number(), str, str, str, z.boolean(), z.number(), str, str, str, str, str]).rest(str)
+const fondoMesRow = z.tuple([str, str, z.number(), str])
+const tipoFondo = (t: unknown, nombre: string, recurrencia: string): TipoFondo =>
+  (TIPOS_FONDO as readonly unknown[]).includes(t) ? t as TipoFondo : /^(carpeta t[ée]sis|viaje a ica)/i.test(nombre) ? 'ahorro_asignado' : recurrencia === 'unica' ? 'extra' : 'mensual'
+const toFondo = (r: z.infer<typeof fondoRow>): Fondo => ({
+  tipo: tipoFondo(r[13], r[1], r[8]), id: r[0], nombre: r[1], monto: r[2], moneda: r[3] || 'PEN', color: r[4] || '#1e3a8a', icono: r[5], activo: r[6], orden: r[7],
   recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12],
 })
-const toFuenteMes = (r: z.infer<typeof fuenteMesRow>): FuenteMes => ({ fuenteId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
+const toFondoMes = (r: z.infer<typeof fondoMesRow>): FondoMes => ({ fondoId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
 // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
 const plantillaFinRow = z.tuple([str, str, str, z.number(), str, str, str, str, str, str, str, str, z.boolean(), z.number(), str, z.record(z.string(), z.object({ e: z.enum(['aplicada', 'omitida']), m: z.number() })), str, str])
 const toPlantillaFin = (r: z.infer<typeof plantillaFinRow>): PlantillaFin => ({
-  id: r[0], tipo: r[1] === 'subcaja' ? 'subcaja' : 'fuente', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], campo: r[6], valor: r[7], descripcion: r[8],
+  id: r[0], tipo: r[1] === 'subcaja' ? 'subcaja' : 'fondo', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], campo: r[6], valor: r[7], descripcion: r[8],
   color: r[9] || '#1e3a8a', icono: r[10], recurrencia: r[11] === 'unica' ? 'unica' : 'mensual', activo: r[12], orden: r[13], origenId: r[14], estados: r[15], creadoEn: r[16], actualizadoEn: r[17],
 })
 export type PlantillaFinInput = Omit<PlantillaFin, 'creadoEn' | 'actualizadoEn' | 'estados' | 'orden'> & { orden?: number }
 export interface AplicarItem { id: string; accion: 'aplicar' | 'omitir' | 'pendiente'; monto?: number }
 export interface CarpetaRespaldo { id: string; nombre: string; url: string; personalizada: boolean }
-export type FuenteInput = Omit<Fuente, 'creadoEn' | 'actualizadoEn'>
+export type FondoInput = Omit<Fondo, 'creadoEn' | 'actualizadoEn'>
 
-const concRow = z.tuple([str, str, str, str, str, str, str, str, z.number().nullable(), z.number().nullable(), z.number().nullable(), str, str, str, str, str, str])
-const toConc = ([id, tipo, conciliacionId, periodo, corte, grupoId, grupo, moneda, calculado, real, diferencia, estado, causa, observacion, reemplazaA, referencia, creadoEn]: z.infer<typeof concRow>): ConcFila => ({
-  id, tipo: tipo === 'seguimiento' || tipo === 'grupo' ? tipo : 'verificacion', conciliacionId, periodo, corte, grupoId, grupo, moneda,
-  calculado, real, diferencia, estado, causa, observacion, reemplazaA, referencia, creadoEn,
-})
-export interface ConcVerificacionInput { id: string; periodo: string; corte: string; grupoId: string; grupo: string; moneda: string; calculado: number; real: number; observacion: string; referencia: string; reemplazaA?: string }
-export interface ConcSeguimientoInput { id: string; conciliacionId: string; estado: 'pendiente' | 'en_revision' | 'cerrada_justificada'; causa: string; observacion: string }
-export interface ConcGrupoInput { id: string; grupoId: string; nombre: string; fuenteIds: string[]; activo: boolean }
+const revPresRow = z.tuple([str, str, str, str, str, str, str])
+const ESTADOS_REV_PRES: readonly string[] = ['pendiente', 'completo', 'con_gastos_anteriores', 'revisado_con_observaciones']
+const toRevPres = ([id, periodo, estado, pendientes, observacion, , creadoEn]: z.infer<typeof revPresRow>): RevisionPres =>
+  ({ id, periodo, estado: (ESTADOS_REV_PRES.includes(estado) ? estado : 'pendiente') as EstadoRevisionPres, pendientes, observacion, creadoEn })
+export interface RevisionPresInput { id: string; periodo: string; estado: EstadoRevisionPres; pendientes: string; observacion: string }
+const migracionResultado = z.object({ migrada: z.boolean(), motivo: str.optional(), respaldo: str.optional() }).passthrough()
+export type MigracionResultado = z.infer<typeof migracionResultado>
+const migracionSchema = z.object({ pendiente: z.boolean(), hojasViejas: z.array(str), plantillasPorConvertir: z.number(), fondosSinTipo: z.number() })
 
 const dataSchema = z.object({
   version: str,
@@ -205,9 +237,10 @@ const dataSchema = z.object({
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
   vinculos: z.array(z.tuple([str, str])).optional(),
   revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
-  conciliaciones: z.array(concRow).optional(),
-  fuentes: z.array(fuenteRow).optional(),
-  fuentesMeses: z.array(fuenteMesRow).optional(),
+  revisionesPresupuesto: z.array(revPresRow).optional(),
+  migracion: migracionSchema.optional(),
+  fondos: z.array(fondoRow).optional(),
+  fondosMeses: z.array(fondoMesRow).optional(),
   plantillasFin: z.array(plantillaFinRow).optional(),
 })
 
@@ -266,7 +299,7 @@ export function createApi(t: Transport) {
     /** Una sola lectura de todo; llamadas simultáneas comparten la misma petición. */
     getData(fresh = false): Promise<AppData> {
       inflight ??= t('data', { fresh }).then(raw => {
-        const d = parse(dataSchema, raw)
+        const d = parse(dataSchema, traducirDatosAnteriores(raw))
         return {
           version: d.version, sheetUrl: d.sheetUrl, config: d.config,
           gastos: marcarIds(d.gastos.map(rowToGasto)),
@@ -277,9 +310,10 @@ export function createApi(t: Transport) {
           ordenGastos: d.ordenGastos ?? [],
           vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
-          conciliaciones: (d.conciliaciones ?? []).map(toConc),
-          fuentes: (d.fuentes ?? []).map(toFuente),
-          fuentesMeses: (d.fuentesMeses ?? []).map(toFuenteMes),
+          revisionesPresupuesto: (d.revisionesPresupuesto ?? []).map(toRevPres),
+          migracion: d.migracion,
+          fondos: (d.fondos ?? []).map(toFondo),
+          fondosMeses: (d.fondosMeses ?? []).map(toFondoMes),
           plantillasFin: (d.plantillasFin ?? []).map(toPlantillaFin),
         }
       }).finally(() => { inflight = null })
@@ -335,15 +369,15 @@ export function createApi(t: Transport) {
       const [periodo, cajaId, monto] = parse(z.tuple([str, str, z.number()]), await t('savePresupuesto', p))
       return { periodo, cajaId, monto }
     },
-    /** Crea o edita una fuente (upsert por ID: reintentar o doble clic no duplica). */
-    async saveFuente(f: FuenteInput): Promise<Fuente> {
-      return toFuente(parse(fuenteRow, await t('saveFuente', f)))
+    /** Crea o edita un fondo (upsert por ID: reintentar o doble clic no duplica). */
+    async saveFondo(f: FondoInput): Promise<Fondo> {
+      return toFondo(parse(fondoRow, await t('saveFondo', f)))
     },
-    /** Importe de una fuente para un mes (o desde un mes). quitar = vuelve al importe habitual. */
-    async saveFuenteMes(m: FuenteMes, quitar = false): Promise<void> {
-      await t('saveFuenteMes', { ...m, ...(quitar ? { quitar: true } : {}) })
+    /** Importe de un fondo para un mes (o desde un mes). quitar = vuelve al importe habitual. */
+    async saveFondoMes(m: FondoMes, quitar = false): Promise<void> {
+      await t('saveFondoMes', { ...m, ...(quitar ? { quitar: true } : {}) })
     },
-    /** Plantillas de fuentes/subcajas: definiciones reutilizables (upsert por ID; no crea dinero ni entidades). */
+    /** Plantillas de fondos/subcajas: definiciones reutilizables (upsert por ID; no crea dinero ni entidades). */
     async savePlantillaFin(p: PlantillaFinInput): Promise<PlantillaFin> {
       return toPlantillaFin(parse(plantillaFinRow, await t('savePlantillaFin', p)))
     },
@@ -353,24 +387,24 @@ export function createApi(t: Transport) {
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]): Promise<PlantillaFin[]> {
       return parse(z.object({ plantillas: z.array(plantillaFinRow) }), await t('aplicarPlantillasFin', { mes, items })).plantillas.map(toPlantillaFin)
     },
-    /** Aplica fuentes o subcajas existentes a UN mes (copiar mes anterior, nueva fuente/subcaja del mes). Idempotente. */
-    async aplicarEntidadesMes(tipo: 'fuente' | 'subcaja', mes: string, items: { id: string; monto: number }[]): Promise<void> {
+    /** Aplica fondos o subcajas existentes a UN mes (copiar mes anterior, nuevo fondo/subcaja del mes). Idempotente. */
+    async aplicarEntidadesMes(tipo: 'fondo' | 'subcaja', mes: string, items: { id: string; monto: number }[]): Promise<void> {
       await t('aplicarEntidadesMes', { tipo, mes, items })
     },
-    async deleteFuente(id: string): Promise<void> {
-      await t('deleteFuente', { id })
+    async deleteFondo(id: string): Promise<void> {
+      await t('deleteFondo', { id })
     },
-    async reorderFuentes(ids: string[]): Promise<void> {
-      await t('reorderFuentes', { ids })
+    async reorderFondos(ids: string[]): Promise<void> {
+      await t('reorderFondos', { ids })
     },
-    /** Crea la fuente General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
+    /** Crea el fondo General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
     /** Rellena celdas vacías de la hoja (Activo, Icono, Medio, Orden…). `catalogo` trae el icono/color a escribir en cada fila vacía. */
     async completarVacios(catalogo: { ambito: string; categoria: string; subcategoria: string; icono: string; color: string }[]) {
-      return parse(z.object({ cajas: z.number(), fuentes: z.number(), catalogo: z.number(), config: z.number(), medios: z.number().optional() }), await t('completarVacios', { catalogo }))
+      return parse(z.object({ cajas: z.number(), fondos: z.number(), catalogo: z.number(), config: z.number(), medios: z.number().optional() }), await t('completarVacios', { catalogo }))
     },
-    async migrarGeneralAFuente() {
-      const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fuente: fuenteRow.optional(), ajustes: z.array(fuenteMesRow).optional() }), await t('migrarGeneralAFuente', {}))
-      return { creada: r.creada, meses: r.meses, fuente: r.fuente ? toFuente(r.fuente) : null, ajustes: (r.ajustes ?? []).map(toFuenteMes) }
+    async migrarGeneralAFondo() {
+      const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fondo: fondoRow.optional(), ajustes: z.array(fondoMesRow).optional() }), await t('migrarGeneralAFondo', {}))
+      return { creada: r.creada, meses: r.meses, fondo: r.fondo ? toFondo(r.fondo) : null, ajustes: (r.ajustes ?? []).map(toFondoMes) }
     },
     async saveConfig(clave: string, valor: string): Promise<void> {
       await t('saveConfig', { clave, valor })
@@ -402,10 +436,10 @@ export function createApi(t: Transport) {
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>): Promise<Revision> {
       return toRevision(parse(revisionRow, await t('saveRevision', { ...r, tipo: 'duplicado' })))
     },
-    /** Conciliación de saldos: SOLO escribe la hoja CONCILIACIONES (nunca fuentes, gastos, cajas ni presupuestos). */
-    async saveConciliacion(i: ConcVerificacionInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveConciliacion', i))) },
-    async saveSeguimientoConciliacion(i: ConcSeguimientoInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveSeguimientoConciliacion', i))) },
-    async saveGrupoConciliacion(i: ConcGrupoInput): Promise<ConcFila> { return toConc(parse(concRow, await t('saveGrupoConciliacion', i))) },
+    /** Revisión del presupuesto: SOLO agrega a REVISIONES_PRESUPUESTO (nunca fondos, gastos, cajas ni presupuestos). */
+    async saveRevisionPresupuesto(i: RevisionPresInput): Promise<RevisionPres> { return toRevPres(parse(revPresRow, await t('saveRevisionPresupuesto', i))) },
+    /** Migra la hoja a Fondos del presupuesto (con respaldo previo; idempotente). */
+    async migrarAFondosPresupuesto(): Promise<MigracionResultado> { return parse(migracionResultado, await t('migrarAFondosPresupuesto', {})) },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })
     },

@@ -16,59 +16,59 @@ const dialog = (page: Page) => page.getByRole('dialog').filter({ visible: true }
 const sinScrollH = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
 /** Acciones de escritura de gastos hechas desde que se abrió la app (el demo las cuenta). */
 const escriturasGastos = (page: Page) => page.evaluate(() => Object.entries((globalThis as unknown as { __gdDemoCalls?: Record<string, number> }).__gdDemoCalls ?? {}).filter(([k]) => /gasto|batch/i.test(k) && !/^(data|plantillas)$/.test(k)).reduce((s, [, v]) => s + v, 0))
-const fuentesAplicadas = async (page: Page) => Number(await page.getByTestId('n-fuentes').innerText())
+const fondosAplicadas = async (page: Page) => Number(await page.getByTestId('n-fondos').innerText())
 
-async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?demo=60&fuentes=3&cajas=3#cajas') {
+async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?demo=60&fondos=3&cajas=3#cajas') {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
   await page.clock.setFixedTime(new Date(hoy))
   await page.goto(ruta)
-  await expect(page.getByRole('heading', { name: /Fuentes de dinero/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
 }
 
 test.describe('v1.19 aislamiento por mes', () => {
-  test('noviembre arranca sin fuentes ni subcajas; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
+  test('noviembre arranca sin fondos ni subcajas; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
     await abrir(page, OCT)
-    await expect(page.getByTestId('vacio-mes-fuente')).toHaveCount(0)             // octubre (anterior al corte): comportamiento histórico
-    await expect(page.getByRole('list', { name: 'Lista de fuentes' })).toBeVisible()
+    await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)             // octubre (anterior al corte): comportamiento histórico
+    await expect(page.getByRole('list', { name: 'Lista de fondos' })).toBeVisible()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByTestId('vacio-mes-fuente')).toContainText('No tienes fuentes configuradas para noviembre')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para noviembre')
     await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes cajas configuradas para noviembre')
-    await expect(page.getByTestId('n-fuentes')).toHaveText(/\d+/)
+    await expect(page.getByTestId('n-fondos')).toHaveText(/\d+/)
     // Dashboard: mensajes guiados, sin porcentajes engañosos.
     await go(page, 'Dashboard')
     const av = page.getByTestId('aviso-mes-sin-config')
-    await expect(av).toContainText('Todavía no has configurado fuentes de dinero para este mes.')
+    await expect(av).toContainText('Todavía no has configurado fondos del presupuesto para este mes.')
     await expect(av).toContainText('Todavía no has reservado presupuesto para este mes.')
-    await expect(av.getByRole('button', { name: 'Preparar fuentes mensuales' })).toBeVisible()
+    await expect(av.getByRole('button', { name: 'Preparar fondos mensuales' })).toBeVisible()
     await expect(av.getByRole('button', { name: 'Preparar cajas mensuales' })).toBeVisible()
     await expect(page.getByText(/NaN|Infinity/)).toHaveCount(0)
     // Diciembre y enero (cambio de año) también empiezan vacíos.
     await go(page, 'Cajas')
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByRole('heading', { name: /Fuentes de dinero/ })).toBeVisible()
-    await expect(page.getByTestId('vacio-mes-fuente')).toContainText('No tienes fuentes configuradas para diciembre')
+    await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para diciembre')
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByTestId('vacio-mes-fuente')).toContainText('No tienes fuentes configuradas para enero')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para enero')
   })
 
   test('copiar del mes anterior: vista previa editable, sin duplicar y sin tocar octubre', async ({ page }) => {
     await abrir(page, OCT)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await page.getByTestId('vacio-mes-fuente').getByRole('button', { name: 'Copiar configuración del mes anterior' }).click()
+    await page.getByTestId('vacio-mes-fondo').getByRole('button', { name: 'Copiar configuración del mes anterior' }).click()
     const d = dialog(page)
-    await expect(d).toContainText('Usar fuentes del mes anterior')
+    await expect(d).toContainText('Usar fondos del mes anterior')
     const montos = d.getByRole('textbox', { name: /^Monto de / })
     const n = await montos.count()
     expect(n).toBeGreaterThan(0)
     await montos.first().fill('1234.5')
     await d.getByRole('button', { name: /^Aplicar \d+ a noviembre/i }).click()
     await expect(d).toHaveCount(0)
-    await expect(page.getByTestId('vacio-mes-fuente')).toHaveCount(0)
-    await expect(page.getByTestId('n-fuentes')).toHaveText(String(n))
+    await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)
+    await expect(page.getByTestId('n-fondos')).toHaveText(String(n))
     // Repetir: no queda nada por copiar (no se duplica ni se sobrescribe).
     // Octubre sigue igual.
     await page.getByRole('button', { name: 'Mes anterior' }).first().click()
-    await expect(page.getByTestId('vacio-mes-fuente')).toHaveCount(0)
+    await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)
   })
 
   test('nueva subcaja se aplica al mes seleccionado con "Mes de aplicación" visible', async ({ page }) => {
@@ -92,9 +92,9 @@ test.describe('v1.19 aislamiento por mes', () => {
 })
 
 test.describe('v1.19 asistente y campana', () => {
-  test('campana con aviso: preparar ahora → fuentes (mes anterior) → omitir subcajas → gastos → resumen → aplicar; no registra gastos', async ({ page }) => {
+  test('campana con aviso: preparar ahora → fondos (mes anterior) → omitir subcajas → gastos → resumen → aplicar; no registra gastos', async ({ page }) => {
     await abrir(page)
-    const antesF = await fuentesAplicadas(page)
+    const antesF = await fondosAplicadas(page)
     await expect(page.getByTestId('campana-badge')).toHaveText('1')
     await page.getByTestId('campana-plan').click()
     const panel = page.getByTestId('panel-plan')
@@ -117,20 +117,20 @@ test.describe('v1.19 asistente y campana', () => {
     // v1.21: finalizar cierra el asistente al instante y guarda en segundo plano.
     await expect(page.getByTestId('asistente-plan')).toHaveCount(0)
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
-    expect(await fuentesAplicadas(page)).toBeGreaterThan(antesF)             // las fuentes del mes anterior quedaron aplicadas
+    expect(await fondosAplicadas(page)).toBeGreaterThan(antesF)             // los fondos del mes anterior quedaron aplicadas
     await expect(page.getByTestId('vacio-mes-subcaja')).toBeVisible()           // las subcajas se omitieron
     expect(await escriturasGastos(page)).toBe(0)                                // avanzar el asistente nunca registra gastos
   })
 
   test('cancelar el asistente no escribe nada; Recordar después y Descartar actualizan el aviso', async ({ page }) => {
     await abrir(page)
-    const antesF = await fuentesAplicadas(page)
+    const antesF = await fondosAplicadas(page)
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Preparar ahora' }).click()
     await page.getByRole('dialog').filter({ visible: true }).last().getByRole('button', { name: 'Usar mes anterior' }).click()
     await page.keyboard.press('Escape')
     await expect(page.getByTestId('asistente-plan')).toHaveCount(0)
-    expect(await fuentesAplicadas(page)).toBe(antesF)                           // nada aplicado
+    expect(await fondosAplicadas(page)).toBe(antesF)                           // nada aplicado
     expect((await page.evaluate(() => (globalThis as unknown as { __gdDemoCalls?: Record<string, number> }).__gdDemoCalls?.aplicarEntidadesMes ?? 0))).toBe(0)
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Recordar después' }).click()
@@ -155,16 +155,16 @@ test.describe('v1.19 asistente y campana', () => {
   })
 
   test('falla el backend al aplicar: error visible, la planificación no queda marcada como aplicada', async ({ page }) => {
-    await abrir(page, '2026-11-05T10:00:00-05:00', '/?demo=60&fuentes=3&cajas=3&falla=1#cajas')
+    await abrir(page, '2026-11-05T10:00:00-05:00', '/?demo=60&fondos=3&cajas=3&falla=1#cajas')
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Preparar ahora' }).click()
-    const antesF = await fuentesAplicadas(page)
+    const antesF = await fondosAplicadas(page)
     const dlg = page.getByRole('dialog').filter({ visible: true }).last()
     await dlg.getByRole('button', { name: 'Usar mes anterior' }).click()
-    await dlg.getByTestId('aplicar-fuentes').click()
-    await expect(page.getByTestId('error-fuentes')).toBeVisible()
-    await expect(page.getByTestId('etapa-fuentes-estado')).toHaveText('Error')
-    expect(await fuentesAplicadas(page)).toBe(antesF)
+    await dlg.getByTestId('aplicar-fondos').click()
+    await expect(page.getByTestId('error-fondos')).toBeVisible()
+    await expect(page.getByTestId('etapa-fondos-estado')).toHaveText('Error')
+    expect(await fondosAplicadas(page)).toBe(antesF)
     await expect(page.getByTestId('campana-badge')).toHaveText('1')              // el aviso sigue pendiente
   })
 })
@@ -267,7 +267,7 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
   const errores = (page: Page) => page.getByText(/ID de caja supera|No se pudo confirmar/)
 
   test('aplicar una sola plantilla y luego todas: sin error, sin duplicar', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fuentes=3#cajas')
+    await abrir(page, OCT, '/?demo=60&fondos=3#cajas')
     await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await crearPlantilla(page, 'Mascotas', '300', 0)
     await crearPlantilla(page, 'Viajes', '150', 1)
@@ -294,7 +294,7 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
   })
 
   test('con el backend caído el error es visible, con Reintentar, y no queda nada aplicado', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fuentes=3&falla=1#cajas')
+    await abrir(page, OCT, '/?demo=60&fondos=3&falla=1#cajas')
     await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
     await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()

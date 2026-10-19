@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { ICONOS, ICONS } from './iconos'
-import { ambitoLook, cajaLook, categoriaLook, claveDeIcono, COLORS, fuenteLook, medioLook, PALETA, subcategoriaLook } from './visual'
+import { ambitoLook, cajaLook, categoriaLook, claveDeIcono, COLORS, fondoLook, medioLook, PALETA, subcategoriaLook } from './visual'
 import { COLORES_RAPIDOS } from '../components/Apariencia'
 import { useApariencia } from '../components/Apariencia'
-import type { Caja, Fuente } from './types'
+import type { Caja, Fondo } from './types'
 
-const fu = (over: Partial<Fuente>): Pick<Fuente, 'nombre' | 'medioPago' | 'icono' | 'color'> => ({ nombre: 'X', medioPago: '', icono: '', color: '', ...over })
+const fu = (over: Partial<Fondo>): Pick<Fondo, 'nombre' | 'medioPago' | 'icono' | 'color'> => ({ nombre: 'X', medioPago: '', icono: '', color: '', ...over })
 const cj = (over: Partial<Caja>): Pick<Caja, 'filtroCampo' | 'filtroValor' | 'color' | 'icono'> => ({ filtroCampo: 'Categoría', filtroValor: 'Auto', color: '#123456', icono: '', ...over })
 
 describe('paleta e iconos (v1.10)', () => {
@@ -36,32 +36,32 @@ describe('paleta e iconos (v1.10)', () => {
 })
 
 describe('coherencia visual: un mismo medio / alcance se ve igual en toda la web', () => {
-  it('fuente con medio de pago y sin icono elegido = exactamente el look del medio (aunque guarde otro color)', () => {
+  it('fondo con medio de pago y sin icono elegido = exactamente el look del medio (aunque guarde otro color)', () => {
     for (const m of ['Yape', 'Plin', 'Sodexo', 'Transferencia', 'Efectivo']) {
-      const l = fuenteLook(fu({ nombre: 'Lo que sea', medioPago: m, color: '#ABCDEF' }))
+      const l = fondoLook(fu({ nombre: 'Lo que sea', medioPago: m, color: '#ABCDEF' }))
       expect(l).toEqual(medioLook(m))
     }
   })
-  it('fuente con icono elegido usa su icono y su color; sin medio ni icono, uno según el nombre', () => {
-    const l = fuenteLook(fu({ nombre: 'Sodexo', medioPago: 'Sodexo', icono: 'gift', color: '#C2569B' }))
+  it('fondo con icono elegido usa su icono y su color; sin medio ni icono, uno según el nombre', () => {
+    const l = fondoLook(fu({ nombre: 'Sodexo', medioPago: 'Sodexo', icono: 'gift', color: '#C2569B' }))
     expect(l.Icon).toBe(ICONS.gift)
     expect(l.color).toBe('#C2569B')
-    expect(fuenteLook(fu({ nombre: 'General', color: '#1E3A8A' })).Icon).toBe(ICONS.banknote)
-    expect(fuenteLook(fu({ nombre: 'Algo raro', color: 'rojo' })).color).toBe('#1E3A8A') // color inválido → predeterminado
+    expect(fondoLook(fu({ nombre: 'General', color: '#1E3A8A' })).Icon).toBe(ICONS.banknote)
+    expect(fondoLook(fu({ nombre: 'Algo raro', color: 'rojo' })).color).toBe('#1E3A8A') // color inválido → predeterminado
   })
-  it('fuente libre sin icono propio = el mismo aspecto que General (el elegido en General si lo cambió)', () => {
+  it('fondo libre sin icono propio = el mismo aspecto que General (el elegido en General si lo cambió)', () => {
     const general = fu({ nombre: 'General' })
     const ica = fu({ nombre: 'Viaje a Ica', color: '#B4693C' })        // el color guardado se ignora mientras sea automática
-    expect(fuenteLook(ica, [general, ica])).toEqual(fuenteLook(general, [general, ica]))
-    expect(fuenteLook(ica, [general, ica]).Icon).toBe(ICONS.banknote)
-    expect(fuenteLook(fu({ nombre: 'Carpeta Tesis' }), [general]).Icon).toBe(ICONS.banknote)
+    expect(fondoLook(ica, [general, ica])).toEqual(fondoLook(general, [general, ica]))
+    expect(fondoLook(ica, [general, ica]).Icon).toBe(ICONS.banknote)
+    expect(fondoLook(fu({ nombre: 'Carpeta Tesis' }), [general]).Icon).toBe(ICONS.banknote)
     const generalElegida = fu({ nombre: 'General', icono: 'rocket', color: '#E5484D' })
-    expect(fuenteLook(ica, [generalElegida, ica])).toEqual({ Icon: ICONS.rocket, color: '#E5484D' })
+    expect(fondoLook(ica, [generalElegida, ica])).toEqual({ Icon: ICONS.rocket, color: '#E5484D' })
     // con medio de pago manda el medio; con icono propio, el propio
-    expect(fuenteLook(fu({ nombre: 'Vales', medioPago: 'Yape' }), [generalElegida])).toEqual(medioLook('Yape'))
-    expect(fuenteLook(fu({ nombre: 'Ica', icono: 'gift', color: '#C2569B' }), [generalElegida])).toEqual({ Icon: ICONS.gift, color: '#C2569B' })
+    expect(fondoLook(fu({ nombre: 'Vales', medioPago: 'Yape' }), [generalElegida])).toEqual(medioLook('Yape'))
+    expect(fondoLook(fu({ nombre: 'Ica', icono: 'gift', color: '#C2569B' }), [generalElegida])).toEqual({ Icon: ICONS.gift, color: '#C2569B' })
     // sin General en la lista: aspecto base
-    expect(fuenteLook(ica, [])).toEqual(fuenteLook(general, []))
+    expect(fondoLook(ica, [])).toEqual(fondoLook(general, []))
   })
   it('caja automática: hereda el look de su alcance (medio, ámbito, categoría, subcategoría)', () => {
     expect(cajaLook(cj({ filtroCampo: 'Medio de pago', filtroValor: 'Sodexo' }))).toEqual(medioLook('Sodexo'))
