@@ -38,7 +38,6 @@ const TXT = {
 } as const
 
 /** Estado de una plantilla en un mes: Pendiente (sin decisión), Aplicada o No aplica este mes. */
-export const estadoEnMes = (p: PlantillaFin, mes: string): 'pendiente' | 'aplicada' | 'omitida' => p.estados[mes]?.e ?? 'pendiente'
 
 /**
  * Punto de entrada para el resto de la app: abrir el módulo y "Guardar como plantilla" desde un registro existente.

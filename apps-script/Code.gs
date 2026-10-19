@@ -689,10 +689,11 @@ function getData_(fresh) {
     revisiones: ss.getSheetByName('REVISIONES_CALIDAD') ? readRows_(ss, 'REVISIONES_CALIDAD').map(function (r) {
       return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), r[5] instanceof Date ? r[5].toISOString() : str_(r[5]), r[6] instanceof Date ? r[6].toISOString() : str_(r[6])];
     }) : [],
-    fondos: readRows_(ss, 'FONDOS_PRESUPUESTO').map(fondoOut_),
-    fondosMeses: readRows_(ss, 'FONDOS_PRESUPUESTO_MESES').map(function (r) {
+    // Las hojas de fondos se crean al guardar el primer fondo: en una base nueva o restaurada aún pueden no existir (no es un error).
+    fondos: ss.getSheetByName('FONDOS_PRESUPUESTO') ? readRows_(ss, 'FONDOS_PRESUPUESTO').map(fondoOut_) : [],
+    fondosMeses: ss.getSheetByName('FONDOS_PRESUPUESTO_MESES') ? readRows_(ss, 'FONDOS_PRESUPUESTO_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
-    }),
+    }) : [],
     plantillasFin: pfTodas_().rows.map(pfOut_),
     revisionesPresupuesto: ss.getSheetByName('REVISIONES_PRESUPUESTO') ? revLeer_(ss) : []
   };
@@ -1000,7 +1001,6 @@ function saveCatalogo_(p) {
 // ---- Categorías: orden manual y eliminación segura (v1.15) ----
 // El orden de una categoría vive en la columna Orden de CATALOGO (ámbito×10000 + categoría×100 + subcategoría):
 // reordenar solo reescribe esa columna de las filas del ámbito. Nunca toca GASTOS, IDs ni relaciones.
-function filasDeAmbito_(rows, ambito) { return rows.filter(function (r) { return norm_(r[0]) === norm_(ambito); }); }
 
 function reorderCategorias_(p) {
   var ambito = text_(p.ambito, 'Ámbito', 40, true);

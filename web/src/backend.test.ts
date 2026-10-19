@@ -2133,3 +2133,105 @@ describe('backend: contrato actual de fondos', () => {
     expect(d.data.fondos.every((f: unknown[]) => ['mensual', 'extra', 'ahorro_asignado'].includes(String(f[13])))).toBe(true)
   })
 })
+
+/**
+ * Integración Web ↔ Code.gs ↔ Sheets con el esquema y los datos del Sheet de producción (leído en solo lectura el 2026-10-19).
+ * La capa web real (createApi + zod) habla con el Code.gs real; la comprobación de persistencia se hace sobre las filas crudas de la hoja.
+ */
+describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción', () => {
+  let b: ReturnType<typeof load>
+  const api = () => createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw Object.assign(new Error(x.error.message), { code: x.error.code }); return x.data })
+  const filas = (n: string) => b.ss.sheets.get(n)!.rows.slice(1).filter(r => r.some(v => v !== '' && v !== undefined))
+  const FONDOS_PROD = [
+    ['f-pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4', 'General', 3000, 'PEN', '#1e3a8a', 'auto', true, 1, 'mensual', '2026-10', 'Libre', '2026-10-15T20:59:26.873Z', '2026-10-15T20:59:26.873Z', 'mensual'],
+    ['f-pf-ff3df993-1c66-4937-b70a-58fe76f74c8a', 'Aporte Pareja', 200, 'PEN', '#0B9EA8', 'auto', true, 2, 'mensual', '2026-10', 'Plin', '2026-10-15T20:59:32.641Z', '2026-10-19T21:00:31.399Z', 'mensual'],
+    ['f-pf-d00c07b1-5fce-4228-b4ec-72bcaa0a0eec', 'Sodexo', 280, 'PEN', '#1e3a8a', 'auto', true, 3, 'mensual', '2026-10', 'Sodexo', '2026-10-15T20:59:38.128Z', '2026-10-15T20:59:38.128Z', 'mensual'],
+    ['f-340b9ebe-953b-45c9-ab40-c52e2bb3974b', 'Carpeta Tésis', 1900, 'PEN', '#3B6FD9', 'auto', true, 4, 'unica', '2026-10', 'Transferencia', '2026-10-15T22:28:55.919Z', '2026-10-15T22:28:55.919Z', 'ahorro_asignado'],
+    ['f-eda22309-23f1-4fb8-934e-85022ba5d799', 'Viaje a Ica', 1414, 'PEN', '#1E3A8A', 'auto', true, 5, 'unica', '2026-10', 'Libre', '2026-10-16T02:14:57.515Z', '2026-10-19T18:38:30.607Z', 'ahorro_asignado'],
+  ]
+  const CTX = (d: Awaited<ReturnType<ReturnType<typeof api>['getData']>>) => ({ base: 'PEN', rates: { USD: 4.07 }, today: '2026-10-19', cajas: d.cajas, presupuestos: d.presupuestos, fondos: d.fondos, fondosMeses: d.fondosMeses })
+  const oct = { preset: 'custom' as const, desde: '2026-10-01', hasta: '2026-10-31', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
+
+  beforeEach(() => {
+    b = load(); b.g.setup()
+    const sh = b.ss.sheets.get('FONDOS_PRESUPUESTO')!
+    FONDOS_PROD.forEach((r, i) => { sh.rows[i + 1] = [...r] })
+    b.ss.sheets.get('REVISIONES_PRESUPUESTO')!.rows[1] = ['rev-b4f10e20-002c-4c60-92cc-f85b78594319', '2026-10', 'revisado_con_observaciones', '', 'excedente por cuentas de meses atrás', '', '2026-10-19T21:49:35.524Z']
+  })
+
+  it('lee el esquema de producción: 5 fondos con tipos, la revisión existente, y octubre suma 3000+200+280+1900+1414', async () => {
+    const d = await api().getData(true)
+    expect(d.fondos.map(f => [f.nombre, f.tipo])).toEqual([['General', 'mensual'], ['Aporte Pareja', 'mensual'], ['Sodexo', 'mensual'], ['Carpeta Tésis', 'ahorro_asignado'], ['Viaje a Ica', 'ahorro_asignado']])
+    expect(d.revisionesPresupuesto).toHaveLength(1)
+    expect(d.revisionesPresupuesto[0]).toMatchObject({ periodo: '2026-10', estado: 'revisado_con_observaciones' })
+    expect(aggregate([], oct, CTX(d)).cajas.presupuesto).toBe((3000 + 200 + 280 + 1900 + 1414) * 100)
+  })
+
+  it('crear → editar → anular → restaurar un gasto persiste en la hoja y se refleja en el cálculo, sin duplicar', async () => {
+    const a = api()
+    const g = { ...gasto({ id: 'aaaaaaaa-1111-4222-8333-444444444444', monto: 100, categoria: 'Alimentación', subcategoria: 'Almuerzo' }), mode: undefined } as never
+    const creado = await a.saveGasto(g, 'create')
+    expect(filas('GASTOS')).toHaveLength(1)
+    await a.saveGasto(g, 'create')                                                          // reintento tras respuesta perdida: idempotente
+    expect(filas('GASTOS')).toHaveLength(1)
+    await a.saveGasto({ ...creado, monto: 150 } as never, 'update')
+    expect(filas('GASTOS')[0][1]).toBe(150)
+    let d = await a.getData(true)
+    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe((6794 - 150) * 100)
+    await a.setEstado(creado.id, 'Anulado')
+    d = await a.getData(true)
+    expect(filas('GASTOS')[0][10]).toBe('Anulado')
+    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe(6794 * 100)
+    await a.setEstado(creado.id, 'Activo')
+    d = await a.getData(true)
+    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe((6794 - 150) * 100)
+  })
+
+  it('fondos: crear, editar, desactivar y modificar el importe de un mes persisten sin tocar los demás', async () => {
+    const a = api()
+    const antes = JSON.stringify(filas('FONDOS_PRESUPUESTO').slice(0, 5))
+    const nuevo = await a.saveFondo({ id: 'f-nuevo', nombre: 'Extra prueba', monto: 100, moneda: 'PEN', color: '#112233', icono: '', activo: true, orden: 6, recurrencia: 'unica', mes: '2026-10', medioPago: '', tipo: 'extra' })
+    expect(nuevo.tipo).toBe('extra')
+    expect(filas('FONDOS_PRESUPUESTO')).toHaveLength(6)
+    expect(JSON.stringify(filas('FONDOS_PRESUPUESTO').slice(0, 5))).toBe(antes)
+    await a.saveFondo({ ...nuevo, monto: 120 })
+    expect(filas('FONDOS_PRESUPUESTO')[5][2]).toBe(120)
+    await a.saveFondo({ ...nuevo, monto: 120, activo: false })
+    let d = await a.getData(true)
+    expect(aggregate([], oct, CTX(d)).cajas.presupuesto).toBe(679400)                       // inactivo: no suma
+    await a.saveFondoMes({ fondoId: 'f-pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4', mes: '2026-12', monto: 3300, modo: 'solo' })
+    d = await a.getData(true)
+    expect(d.fondosMeses).toHaveLength(1)
+    expect(filas('FONDOS_PRESUPUESTO')[0][2]).toBe(3000)                                    // el fondo base no cambia
+    await a.deleteFondo('f-nuevo')
+    expect(filas('FONDOS_PRESUPUESTO')).toHaveLength(5)
+  })
+
+  it('revisión del presupuesto: registra una nueva revisión sin borrar la anterior y es idempotente por ID', async () => {
+    const a = api()
+    const i = { id: 'rev-0b0b0b0b-0000-4000-8000-000000000001', periodo: '2026-10', estado: 'completo' as const, pendientes: '', observacion: '' }
+    await a.saveRevisionPresupuesto(i)
+    await a.saveRevisionPresupuesto(i)
+    expect(filas('REVISIONES_PRESUPUESTO')).toHaveLength(2)
+    const d = await a.getData(true)
+    expect(d.revisionesPresupuesto.map(r => r.estado)).toContain('completo')
+    expect(d.revisionesPresupuesto.map(r => r.estado)).toContain('revisado_con_observaciones')
+  })
+
+  it('configuración: guarda una clave y la devuelve; un token incorrecto no escribe nada', async () => {
+    const a = api()
+    await a.saveConfig('tema', 'oscuro')
+    expect((await a.getData(true)).config.tema).toBe('oscuro')
+    const antes = JSON.stringify(filas('CONFIG'))
+    expect(b.post('saveConfig', { clave: 'tema', valor: 'claro' }, 'token-malo').error.code).toBe('UNAUTHORIZED')
+    expect(JSON.stringify(filas('CONFIG'))).toBe(antes)
+  })
+
+  it('con el lock ocupado la escritura falla con BUSY y no deja filas a medias', async () => {
+    const a = api()
+    b.setLock(false)
+    await expect(a.saveGasto(gasto({ id: 'bbbbbbbb-1111-4222-8333-444444444444' }) as never, 'create')).rejects.toMatchObject({ code: 'BUSY' })
+    b.setLock(true)
+    expect(filas('GASTOS')).toHaveLength(0)
+  })
+})

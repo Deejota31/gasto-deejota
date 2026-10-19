@@ -174,15 +174,6 @@ export function SelectField({ id, value, onChange, children, label, invalid }: {
   )
 }
 
-export function Select({ value, onChange, options, placeholder, label, id }: { value: string; onChange: (v: string) => void; options: string[]; placeholder?: string; label: string; id?: string }) {
-  return (
-    <select id={id} aria-label={label} className={inputCls} value={value} onChange={e => onChange(e.target.value)}>
-      {placeholder !== undefined && <option value="">{placeholder}</option>}
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
-  )
-}
-
 /**
  * Casilla de selección múltiple (no es un interruptor: los interruptores activan/desactivan, las casillas seleccionan).
  * Un solo diseño para listas, filtros y plantillas; `color` tiñe el estado marcado con el color del catálogo.

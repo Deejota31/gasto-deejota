@@ -296,5 +296,4 @@ export function FilterBar({ filters, setFilters, catalogo, medios, today, extra,
   )
 }
 
-export const periodTitle = (f: Filters) => rangeLabel(f)
 export { monthLabel }
