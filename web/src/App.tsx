@@ -3,7 +3,6 @@ import { configurarExcepciones } from './lib/texto'
 import { loadConnection, type Api, type Connection } from './lib/api'
 import { hayDemoParam, useAppData } from './lib/store'
 import { Skeleton, ErrorBox } from './components/ui'
-import { MigracionBanner } from './components/MigracionBanner'
 import { Desconectado } from './components/Desconectado'
 import Toaster from './components/Toaster'
 import AppShell from './components/AppShell'
@@ -132,7 +131,6 @@ export default function App({ api }: { api?: Api }) {
           {!store.loading && <button className="font-semibold underline" onClick={() => void store.refresh()}>Reintentar</button>}
         </div>
       )}
-      {store.data?.migracion?.pendiente && <MigracionBanner store={store} />}
       {store.desconectado && (
         <div className="bg-bg px-4 py-1.5 text-center text-xs text-muted" data-testid="aviso-desconectado">
           Sin conexión. <button className="font-semibold underline" onClick={() => setConexionAbierta(true)}>Conecta tu Apps Script</button> para ver y usar tu hoja.
