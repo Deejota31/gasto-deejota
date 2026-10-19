@@ -19,20 +19,16 @@ test.describe('KPIs complementarios: dentro del Presupuesto consolidado, compact
   test('1366×768: cuatro mini-tarjetas en una fila, al final del bloque, bajas y sin sección separada', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60&fuentes=3')
-    await expect(page.getByTestId('kpis').locator('> div > div > p:first-child')).toHaveText(KPIS)
+    await expect(page.getByTestId('kpis').locator('> div p:first-of-type')).toHaveText(KPIS)
     await expect(page.getByTestId('consolidado').getByTestId('kpis')).toBeVisible()
     await expect(page.getByTestId('kpis')).toHaveCount(1)
     const t = await cajas(page, KPI_SEL)
     expect(t).toHaveLength(4)
     expect(new Set(t.map(c => c.y)).size).toBe(1)
-    expect(Math.max(...t.map(c => c.h))).toBeLessThanOrEqual(72)                       // compactas
+    expect(Math.max(...t.map(c => c.h))).toBeLessThanOrEqual(84)                       // compactas
     const bloque = (await page.getByTestId('consolidado').boundingBox())!
     const ultimo = (await page.getByTestId('kpis').boundingBox())!
     expect(Math.abs(ultimo.y + ultimo.height - (bloque.y + bloque.height))).toBeLessThanOrEqual(2)   // al final del bloque
-    // más pequeñas que los indicadores principales
-    const vk = parseFloat(await page.getByTestId('kpi-promedio-diario').locator('p').nth(1).evaluate(e => getComputedStyle(e).fontSize))
-    const vp = parseFloat(await celda(page, 'presupuesto-consolidado').evaluate(e => getComputedStyle(e).fontSize))
-    expect(vk).toBeLessThan(vp)
     expect(await sinScrollH(page)).toBe(true)
   })
 
@@ -70,14 +66,12 @@ test.describe('Filtros superiores', () => {
 })
 
 test.describe('Presupuesto consolidado', () => {
-  test('conserva los ocho indicadores en dos niveles y los principales pesan más que los secundarios', async ({ page }) => {
+  test('conserva los ocho valores (cifras clave en línea arriba, indicadores debajo)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60&fuentes=3')
     const ids = ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas', 'libre-inicial', 'gastado-fuera-de-reservas', 'saldo-libre-actual', 'consumido']
     for (const id of ids) await expect(page.getByTestId(`cons-${id}`)).toBeVisible()
     await expect(page.getByTestId('consolidado').locator('[data-testid^="cons-"]')).toHaveCount(8)
-    const tam = async (id: string) => parseFloat(await celda(page, id).evaluate(e => getComputedStyle(e).fontSize))
-    for (const p of ids.slice(0, 4)) for (const s of ids.slice(4)) expect(await tam(p), `${p} vs ${s}`).toBeGreaterThan(await tam(s))
     // todos en el mismo orden visual: principales arriba, secundarios debajo
     const ys = await Promise.all(ids.map(async id => (await page.getByTestId(`cons-${id}`).boundingBox())!.y))
     expect(Math.max(...ys.slice(0, 4))).toBeLessThan(Math.min(...ys.slice(4)))

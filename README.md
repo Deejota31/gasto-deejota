@@ -28,6 +28,14 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
 
+## Novedades v1.25.1 — Presupuesto consolidado más compacto
+
+Solo frontend (`Code.gs` sigue en 1.23.0). Sin cambios de fórmulas ni de datos.
+
+- **Sin fila de cuatro tarjetas grandes**: se eliminó la rejilla de tarjetas (Presupuesto consolidado, Gastado del período, Disponible consolidado, Reservado en cajas). Esas cifras **no estaban repetidas abajo**, así que se conservan como una línea de texto compacta bajo el encabezado (`consolidado-resumen`, sin iconos ni tarjetas, mismos `data-testid` `cons-*`). Si prefieres quitarlas del todo, basta borrar ese bloque.
+- **Ocho indicadores con un único diseño** (`Indicador`): *Libre inicial, Gastado fuera de reservas, Saldo libre actual, Consumido* y *Promedio diario, Promedio por movimiento, Mayor gasto, Movimientos*. Icono tintado (36 px) a la izquierda de todo el bloque de texto y centrado en vertical; título con ⓘ a la derecha y el valor debajo, en la misma columna; altura mínima común. Escritorio 4 por fila, tablet y móvil (≥ 360 px) 2, móvil muy angosto 1.
+- **Pruebas**: unitarias y `e2e/v125.spec.ts` actualizadas (icono a la izquierda del título y del valor, ⓘ sin solaparse con el valor, alturas uniformes, 4/2/1 por fila).
+
 ## Novedades v1.25.0 — Iconografía coherente y explorador de gasto acumulado/diario
 
 Solo frontend: **`Code.gs` sigue en 1.23.0**. No cambia ninguna fórmula ni el modelo de datos (`engine.ts` intacto).

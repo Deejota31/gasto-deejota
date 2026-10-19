@@ -56,13 +56,12 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     montar(await datos(), filtros())
     const kpis = screen.getByTestId('kpis')
     expect(kpis.className).toContain('lg:grid-cols-4')
-    expect(kpis.className).toContain('grid-cols-2')
+    expect(kpis.className).toContain('min-[360px]:grid-cols-2')
     const tarjetas = [...kpis.children] as HTMLElement[]
     expect(tarjetas).toHaveLength(4)
     expect(new Set(tarjetas.map(t => t.className)).size).toBe(1)
     for (const t of tarjetas) {
-      expect(t.className).not.toContain('p-4')
-      expect(t.querySelectorAll('p')[1].className).toContain('text-sm')                      // valor pequeño, no compite con los principales
+      expect(t.querySelectorAll('p')).toHaveLength(2)
     }
     for (const l of ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos']) {
       expect(screen.getByRole('button', { name: `Información: ${l}` }), l).toBeTruthy()
@@ -70,17 +69,21 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     expect(within(kpis).getByText('Ticket promedio')).toBeTruthy()
   })
 
-  it('los 12 indicadores del Presupuesto consolidado tienen icono a la izquierda del título', async () => {
+  it('los 8 indicadores (4 + 4) tienen el mismo patrón: icono a la izquierda del título y del valor', async () => {
     montar(await datos(), filtros())
-    const ids = ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-reservado-en-cajas', 'cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido',
+    const ids = ['cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido',
       'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
     for (const id of ids) {
       const cel = screen.getByTestId(id)
       const icono = cel.querySelector('span[aria-hidden="true"] > svg')
       expect(icono, id).toBeTruthy()
-      const titulo = cel.querySelector('p')!
+      const [titulo, valor] = [...cel.querySelectorAll('p')]
       expect(!!(icono!.compareDocumentPosition(titulo) & Node.DOCUMENT_POSITION_FOLLOWING), `${id}: icono antes del título`).toBe(true)
+      expect(!!(icono!.compareDocumentPosition(valor) & Node.DOCUMENT_POSITION_FOLLOWING), `${id}: icono antes del valor`).toBe(true)
+      expect((cel.firstElementChild as HTMLElement).className, id).toContain('size-9')
     }
+    // ya no existe la fila de cuatro tarjetas grandes
+    expect(screen.getByTestId('consolidado-resumen').querySelector('svg')).toBeNull()
     for (const [id, clase] of [['cons-libre-inicial', 'lucide-wallet'], ['cons-gastado-fuera-de-reservas', 'lucide-arrow-up-right'], ['cons-saldo-libre-actual', 'lucide-scale'], ['cons-consumido', 'lucide-gauge']]) {
       expect(screen.getByTestId(id).querySelector(`svg.${clase}`), id).toBeTruthy()
     }

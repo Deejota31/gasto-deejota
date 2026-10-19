@@ -47,21 +47,30 @@ describe('PresupuestoConsolidado', () => {
       ['consumido', `${c.pct}%`],
     ]
     const celdas = within(screen.getByTestId('consolidado')).getAllByTestId(/^cons-/)
-    expect(celdas).toHaveLength(8)
+    expect(celdas).toHaveLength(8)                                                          // 4 cifras clave + 4 indicadores
     for (const [id, valor] of esperado) expect(texto(celdaValor(id)), id).toBe(valor)
     // contrato con e2e y Salud financiera: cada celda tiene exactamente dos <p> (etiqueta y valor)
     for (const cel of celdas) expect(cel.querySelectorAll('p')).toHaveLength(2)
   })
 
-  it('jerarquía de dos niveles: cuatro indicadores principales y cuatro secundarios, los principales con mayor tamaño', () => {
+  it('sin fila de tarjetas grandes: cifras clave en línea y cuatro indicadores con el mismo diseño (icono a la izquierda, título + ⓘ, valor)', () => {
     montaje(SIN_EXCESO)
-    const principal = ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas']
-    const secundario = ['libre-inicial', 'gastado-fuera-de-reservas', 'saldo-libre-actual', 'consumido']
-    for (const id of principal) expect(celdaValor(id).className, id).toMatch(/text-(lg|xl|2xl)/)
-    for (const id of secundario) expect(celdaValor(id).className, id).toContain('text-sm')
-    // los principales aparecen antes que los secundarios en el documento
-    const orden = within(screen.getByTestId('consolidado')).getAllByTestId(/^cons-/).map(e => e.getAttribute('data-testid')!.slice(5))
-    expect(orden).toEqual([...principal, ...secundario])
+    const resumen = screen.getByTestId('consolidado-resumen')
+    expect(within(resumen).getAllByTestId(/^cons-/).map(e => e.getAttribute('data-testid')!.slice(5)))
+      .toEqual(['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas'])
+    // ninguna tarjeta grande: los valores de las cifras clave son texto pequeño, no text-lg/xl/2xl
+    for (const id of ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas']) expect(celdaValor(id).className, id).not.toMatch(/text-(lg|xl|2xl)/)
+    const fila = within(screen.getByTestId('indicadores')).getAllByTestId(/^cons-/)
+    expect(fila.map(e => e.getAttribute('data-testid')!.slice(5))).toEqual(['libre-inicial', 'gastado-fuera-de-reservas', 'saldo-libre-actual', 'consumido'])
+    expect(new Set(fila.map(e => e.className)).size).toBe(1)                                  // mismo estilo exacto
+    for (const e of fila) {
+      expect(e.className).toContain('items-center')                                           // icono centrado respecto al bloque de texto
+      const icono = e.firstElementChild as HTMLElement
+      expect(icono.getAttribute('aria-hidden')).toBe('true')
+      expect(icono.className).toContain('size-9')
+      expect(e.querySelector('button[aria-label^="Información:"]')).toBeTruthy()              // ⓘ presente
+      expect(e.querySelectorAll('p')).toHaveLength(2)
+    }
   })
 
   it('encabezado: título, cantidad de fuentes o caja general, período e icono de información', () => {
@@ -113,10 +122,10 @@ describe('PresupuestoConsolidado', () => {
     expect(celdaValor('saldo-libre-actual').style.color).toBe('var(--danger)')
   })
 
-  it('Disponible consolidado y Saldo libre actual son importes distintos y cada uno explica su definición', () => {
+  it('Disponible consolidado y Saldo libre actual son importes distintos y se explican (encabezado y ⓘ del saldo libre)', () => {
     const c = montaje(SIN_EXCESO)
     expect(c.disponible).not.toBe(c.saldoLibre)
-    fireEvent.click(screen.getByRole('button', { name: 'Información: Disponible consolidado' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Información: Cómo se calcula' }))
     expect(screen.getByRole('tooltip').textContent).toMatch(/disponible = saldo libre \+ reservas sin utilizar/i)
     cleanup()
     montaje(SIN_EXCESO)
@@ -165,6 +174,7 @@ describe('PresupuestoConsolidado', () => {
     const kpis = within(bloque).getByTestId('kpis')
     expect(kpis.children).toHaveLength(4)
     expect(bloque.lastElementChild).toBe(kpis)
+    for (const t of [...kpis.children]) expect(t.querySelectorAll('p')).toHaveLength(2)      // etiqueta y valor
     expect(within(kpis).getByText('pista 2')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Información: Mayor gasto' })).toBeTruthy()
   })
