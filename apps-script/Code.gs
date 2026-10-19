@@ -706,12 +706,16 @@ function getData_(fresh) {
   return data;
 }
 
+// Nombres anteriores a v1.26 (solo lectura mientras no se migre): leen con el esquema de su hoja nueva.
+var HOJA_ANTERIOR_ = { FUENTES: 'FONDOS_PRESUPUESTO', FUENTES_MESES: 'FONDOS_PRESUPUESTO_MESES' };
+
 function readRows_(ss, name) {
   var sh = ss.getSheetByName(name);
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var key = KEY_COL[name];
-  return sh.getRange(2, 1, last - 1, SHEETS[name].length).getValues().filter(function (r) {
+  var esquema = HOJA_ANTERIOR_[name] || name;
+  var key = KEY_COL[esquema];
+  return sh.getRange(2, 1, last - 1, SHEETS[esquema].length).getValues().filter(function (r) {
     return str_(r[key]) !== ''; // filas sin clave (vacías o con FALSE residual) no son registros
   });
 }
@@ -1850,7 +1854,8 @@ function atajoGasto_(p) {
 
 /* ===================== Fondos del presupuesto (v1.8) ===================== */
 
-var FONDO_GENERAL_ID = 'fuente-general'  // ID histórico: se conserva para no romper datos existentes;
+var FONDO_GENERAL_ID = 'fondo-general';
+var FONDO_GENERAL_ID_ANTERIOR_ = 'fuente-general'; // ID histórico (datos creados antes de v1.26): se reconoce, no se cambia
 var MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function iso_(v) { return v instanceof Date ? v.toISOString() : str_(v); }
@@ -1989,7 +1994,7 @@ function reorderFondos_(p) {
  */
 function migrarGeneralAFondo_() {
   var h = fondosSheets_();
-  if (findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID)) return { creada: false, meses: 0 };
+  if (findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID) || findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID_ANTERIOR_)) return { creada: false, meses: 0 };
   var general = readRows_(h.ss, 'CAJAS').filter(function (r) { return str_(r[3]) === 'Todos'; })[0];
   if (!general) throw appError_('NOT_FOUND', 'No hay caja general que migrar.');
   fondosRows_(h.fondos).forEach(function (r) {

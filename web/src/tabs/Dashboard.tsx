@@ -35,7 +35,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
 
   // Una sola agregación por combinación de filtros; KPIs, cajas y gráficos reutilizan este resultado.
   // Dependencias explícitas: un cambio en vínculos o revisiones (Salud financiera) no recalcula el dashboard.
-  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  // Mismo motor y mismo contexto (fondos, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
   const a = useAgregado(data, filters, today)
   const config = data?.config
   const rates = useMemo(() => ratesFromConfig(config ?? {}), [config])
@@ -72,14 +72,14 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             <ErrorBox tone="warning" message={`${a.excluidosSinTipoCambio} movimiento(s) en otra moneda no se suman porque falta su tipo de cambio en Configuración.`} />
           )}
 
-          {/* v1.19: mes sin fuentes/cajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
+          {/* v1.19: mes sin fondos/cajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
           {mes && data && mes >= aislaDesde(data.config) && plan && (() => {
-            const sinF = a.cajas.origen === 'fuentes' && !a.cajas.fuentes.lista.some(r => r.aplicada)
+            const sinF = a.cajas.origen === 'fondos' && !a.cajas.fondos.lista.some(r => r.aplicada)
             const sinS = a.cajas.subcajas.length > 0 && !a.cajas.subcajas.some(r => r.aplicada)
             if (!sinF && !sinS) return null
             return (
               <div className="space-y-2" data-testid="aviso-mes-sin-config">
-                {sinF && <ErrorBox tone="warning" message="Todavía no has configurado fuentes de dinero para este mes." action={{ label: 'Preparar fuentes mensuales', onClick: () => plan.abrir(mes, 'fuentes') }} />}
+                {sinF && <ErrorBox tone="warning" message="Todavía no has configurado fondos del presupuesto para este mes." action={{ label: 'Preparar fondos mensuales', onClick: () => plan.abrir(mes, 'fondos') }} />}
                 {sinS && <ErrorBox tone="warning" message="Todavía no has reservado presupuesto para este mes." action={{ label: 'Preparar cajas mensuales', onClick: () => plan.abrir(mes, 'subcajas') }} />}
               </div>
             )
@@ -100,7 +100,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
                 pista: a.count ? `${new Set(data!.gastos.filter(g => g.estado === 'Activo' && g.fecha >= filters.desde && g.fecha <= filters.hasta).map(g => g.fecha)).size} días con gastos` : undefined,
                 info: <p>Cantidad de gastos activos que cumplen los filtros.</p> },
             ]}
-            accion={a.cajas.origen !== 'fuentes' && a.cajas.general
+            accion={a.cajas.origen !== 'fondos' && a.cajas.general
               ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
               : undefined} />
           <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />

@@ -34,7 +34,7 @@ type Form = GastoDraft
 export type GastoPreset = Clasif & { descripcion: string; monto?: number | null; moneda?: string; medioPago?: string; tipoGasto?: TipoGasto; esRecurrente?: boolean
   /** Plantilla de origen: el gasto queda vinculado como pago de ese compromiso. */
   plantillaId?: string; plantillaNombre?: string
-  /** Fecha precargada AAAA-MM-DD (p. ej. la fecha de corte de una conciliación). */
+  /** Fecha precargada AAAA-MM-DD (p. ej. un día sin movimientos de la Revisión del presupuesto). */
   fecha?: string }
 
 function initial(store: AppStore, mode: ModalMode, g: Gasto | null, draft?: GastoDraft, preset?: GastoPreset): Form {

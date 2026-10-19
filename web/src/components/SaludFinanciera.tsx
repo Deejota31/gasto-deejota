@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarClock, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Copy, ExternalLink,
-  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet, Landmark,
+  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, ClipboardCheck, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet,
 } from 'lucide-react'
 import { cajaDe, prioridadCajas, type Aggregates } from '../lib/engine'
 import { formatDate, monthLabel, rangeLabel, singleMonth, shiftMonth } from '../lib/dates'
@@ -14,12 +14,12 @@ import {
 import type { AppStore } from '../lib/store'
 import type { CatalogoItem, EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
 import { cajaLook } from '../lib/visual'
-import { Conciliacion } from './conciliacion/Conciliacion'
+import { RevisionPresupuesto } from './RevisionPresupuesto'
 import { MenuAcciones } from './MenuAcciones'
-import { difTxt, montoTxt, resumenConciliacion } from '../lib/conciliacion'
+import { ESTADO_REV_TXT, estadoDe, revisarPeriodo } from '../lib/revisionPresupuesto'
 import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
 
-type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos' | 'conciliacion'
+type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos' | 'revision'
 let vistaSesion: Vista = 'presupuesto'
 
 /**
@@ -27,10 +27,10 @@ let vistaSesion: Vista = 'presupuesto'
  * Todo se calcula con los datos ya cargados (memoizado); la única lectura adicional son las plantillas,
  * una vez por sesión y solo si aún no estaban en memoria.
  */
-export default function SaludFinanciera({ store, a, filters, today, onRevisarGasto, onGastosMensuales, onConcRevisarGastos, onConcNuevoGasto, onConcIrFuentes }: {
+export default function SaludFinanciera({ store, a, filters, today, onRevisarGasto, onGastosMensuales, onRevisionRevisarGastos, onRevisionNuevoGasto }: {
   store: AppStore; a: Aggregates; filters: Filters; today: string
-  /** Conciliación de saldos: abren Gastos / Nuevo gasto / Fuentes con el período y corte de la conciliación. */
-  onConcRevisarGastos: (desde: string, hasta: string) => void; onConcNuevoGasto: (fecha: string) => void; onConcIrFuentes: () => void
+  /** Revisión del presupuesto: abren Gastos / Nuevo gasto con el período revisado. */
+  onRevisionRevisarGastos: (desde: string, hasta: string) => void; onRevisionNuevoGasto: (fecha: string) => void
   /** Abre el movimiento en la pestaña Gastos (con su formulario) y permite volver aquí. */
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
@@ -82,14 +82,12 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
   const calTone = calidad.indice === null ? TONO.neutro : calidad.indice >= 90 ? TONO.ok : calidad.indice >= 70 ? TONO.atencion : TONO.alerta
   const presTone = pres.presupuesto ? TONO[NIVEL[pres.nivel].tono] : TONO.neutro
   const compTone = !comp.n ? TONO.neutro : comp.pendiente > 0 ? TONO.atencion : TONO.ok
-  // Tarjeta de conciliación: mes actual y corte de hoy. Misma función que el panel; solo lee, no escribe.
-  const conc = useMemo(() => resumenConciliacion(data, today.slice(0, 7), today, today), [data, today])
-  const concMoneda = conc.saldo.moneda
-  const concTone = conc.estadoGlobal === 'conciliado' ? TONO.ok : conc.estadoGlobal === 'pendiente' || conc.estadoGlobal === 'desactualizada' ? TONO.atencion : TONO.neutro
-  const concValor = conc.estadoGlobal === 'pendiente' ? difTxt(conc.sumaPendiente, concMoneda) : conc.estadoGlobal === 'conciliado' ? montoTxt(0, concMoneda)
-    : conc.estadoGlobal === 'desactualizada' ? 'Desactualizada' : conc.estadoGlobal === 'insuficiente' ? 'Sin datos' : 'Sin verificar'
-  const concSub = { pendiente: 'Diferencia pendiente de revisión.', conciliado: 'Saldos conciliados.', desactualizada: 'Los datos cambiaron desde tu verificación.',
-    insuficiente: 'Información insuficiente para calcular.', sin_verificar: 'Aún no registras saldos reales.', positiva: '', negativa: '' }[conc.estadoGlobal]
+  // Tarjeta de revisión: mes actual. Misma función que el panel; solo lee, no escribe.
+  const mesRev = today.slice(0, 7)
+  const revEstado = estadoDe(data.revisionesPresupuesto, mesRev)
+  const revRes = useMemo(() => revisarPeriodo(data, mesRev, today), [data, mesRev, today])
+  const revTone = revEstado === 'completo' ? TONO.ok : revEstado === 'pendiente' && !revRes.alertas && !revRes.avisos ? TONO.neutro : TONO.atencion
+  const revSub = revRes.alertas || revRes.avisos ? `${revRes.alertas + revRes.avisos} observación${revRes.alertas + revRes.avisos === 1 ? '' : 'es'} del presupuesto` : 'Sin observaciones del presupuesto'
   const tiles: Tile[] = [
     {
       id: 'calidad', titulo: 'Calidad de datos', icon: ShieldCheck, tone: calTone,
@@ -143,12 +141,12 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       </>,
     },
     {
-      id: 'conciliacion', titulo: 'Conciliación de saldos', icon: Landmark, tone: concTone,
-      valor: concValor, valorTxt: concValor, sub: concSub, cta: 'Ver conciliación',
-      vacio: conc.estadoGlobal === 'sin_verificar' || conc.estadoGlobal === 'insuficiente',
+      id: 'revision', titulo: 'Revisión del presupuesto', icon: ClipboardCheck, tone: revTone,
+      valor: ESTADO_REV_TXT[revEstado], valorTxt: ESTADO_REV_TXT[revEstado], sub: revSub, cta: 'Ver revisión',
+      vacio: false,
       info: <>
-        <p>Compara el disponible presupuestario con los saldos reales que tú verificas. Muestra la diferencia pendiente del mes actual al día de hoy.</p>
-        <p>Una diferencia positiva no es necesariamente buena: solo indica que tienes más (o menos, si es negativa) de lo registrado. Nunca crea ingresos ni gastos.</p>
+        <p>Comprueba que el mes tenga todos sus gastos y que fondos, reservas y gastos sean coherentes entre sí.</p>
+        <p>Solo usa datos del presupuesto: no conoce saldos de cuentas ni ingresos, y nunca crea gastos por su cuenta.</p>
       </>,
     },
   ]
@@ -159,9 +157,9 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
         {tiles.map(t => <TileKpi key={t.id} t={t} on={vista === t.id} onClick={() => setVista(t.id)} />)}
       </div>
 
-      {vista === 'conciliacion' ? (
-        <div id="salud-conciliacion" role="tabpanel" aria-labelledby="salud-tab-conciliacion" className="fade-in">
-          <Conciliacion store={store} today={today} onRevisarGastos={onConcRevisarGastos} onNuevoGasto={onConcNuevoGasto} onIrFuentes={onConcIrFuentes} />
+      {vista === 'revision' ? (
+        <div>
+          <RevisionPresupuesto store={store} today={today} onRevisarGastos={onRevisionRevisarGastos} onNuevoGasto={onRevisionNuevoGasto} />
         </div>
       ) : (
       <div id={`salud-${vista}`} role="tabpanel" aria-labelledby={`salud-tab-${vista}`} key={vista}

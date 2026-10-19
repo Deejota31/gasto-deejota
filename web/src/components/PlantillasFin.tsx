@@ -1,6 +1,6 @@
-// "Fuentes mensuales" y "Subcajas mensuales" (v1.17): plantillas reutilizables de fuentes de dinero y de subcajas.
-// Una plantilla es SOLO configuración: guardarla, editarla o clonarla no crea dinero, fuentes, subcajas ni gastos.
-// Aplicarla a un mes escribe únicamente ese mes (FUENTES_MESES / PRESUPUESTOS) y es idempotente; ver el backend.
+// "Fondos mensuales" y "Subcajas mensuales" (v1.17): plantillas reutilizables de fondos del presupuesto y de subcajas.
+// Una plantilla es SOLO configuración: guardarla, editarla o clonarla no crea dinero, fondos, subcajas ni gastos.
+// Aplicarla a un mes escribe únicamente ese mes (FONDOS_PRESUPUESTO_MESES / PRESUPUESTOS) y es idempotente; ver el backend.
 import { formatearDescripcion } from '../lib/texto'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -15,9 +15,9 @@ import { nombreMes } from '../lib/plan'
 import { formatMoney, toCents } from '../lib/money'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
-import { mediosDeFuente, unirMedios } from '../lib/fuenteMedios'
+import { mediosDeFondo, unirMedios } from '../lib/fondoMedios'
 import { ALCANCES_LISTA, opcionesAlcanceCombo, opcionesValor, type Alcance } from '../lib/alcance'
-import { cajaLook, fuenteLook, medioLook, sortMedios } from '../lib/visual'
+import { cajaLook, fondoLook, medioLook, sortMedios } from '../lib/visual'
 import { Combobox, type Opcion } from './Combobox'
 import { MonthPicker } from './DatePicker'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
@@ -33,7 +33,7 @@ export type InicioPlantillasFin =
 const AMOUNT = /^\d{1,9}([.,]\d{1,2})?$/
 const nuevoId = () => `pf-${crypto.randomUUID()}`
 const TXT = {
-  fuente: { titulo: 'Fuentes mensuales', sub: 'Plantillas de tus fuentes habituales', una: 'fuente', Icon: CircleDollarSign, vacio: 'Aún no tienes plantillas de fuentes', ejemplo: 'General, Aporte de Pareja, Sodexo, Ingresos extras…' },
+  fondo: { titulo: 'Fondos mensuales', sub: 'Plantillas de tus fondos habituales', una: 'fondo', Icon: CircleDollarSign, vacio: 'Aún no tienes plantillas de fondos', ejemplo: 'General, Aporte de Pareja, Sodexo, Ingresos extras…' },
   subcaja: { titulo: 'Cajas mensuales', sub: 'Plantillas de tus cajas habituales', una: 'caja', Icon: Boxes, vacio: 'Aún no tienes plantillas de cajas', ejemplo: 'Servicios del Hogar, Auto, Bebé, Viaje…' },
 } as const
 
@@ -81,10 +81,10 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
   const o = operacionPlantilla(p, mes, monto, data)
   const ent = entidadDePlantilla(p, data)
   const nombre = ent?.nombre ?? p.nombre
-  if (p.tipo === 'fuente') {
+  if (p.tipo === 'fondo') {
     const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
-    if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la fuente “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
-    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La fuente ${nombre} ya existe, pero aún no está aplicada a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
+    if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará el fondo “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
+    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `El fondo ${nombre} ya existe, pero aún no está aplicada a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
     if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya aporta ${m(o.actual ?? 0)} en ${ml}.` }
     return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
   }
@@ -125,7 +125,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
   if (vista.kind === 'form') {
     return (
       <Modal open onClose={onClose} size="lg" title={vista.plantilla ? 'Editar plantilla' : vista.clonDe ? 'Clonar plantilla' : `Nueva plantilla de ${T.una}`} icon={<T.Icon className="size-5" />}
-        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fuentes, cajas ni gastos."
+        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fondos, cajas ni gastos."
         footer={<>
           <Button type="button" variant="outline" onClick={() => setVista({ kind: 'lista' })}><ArrowLeft className="size-4" /> Volver</Button>
           <Button type="submit" form="plantilla-fin-form"><Save className="size-4" /> {vista.plantilla ? 'Guardar cambios' : 'Guardar plantilla'}</Button>
@@ -149,7 +149,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
               if (ok) setBorrar(null)
             }}><Trash2 className="size-4" /> Eliminar</Button>
           </>}>
-          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. {borrar.tipo === 'fuente' ? 'La fuente' : 'La caja'} original, los importes ya aplicados en meses y los gastos no cambian.</p>
+          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. {borrar.tipo === 'fondo' ? 'El fondo' : 'La caja'} original, los importes ya aplicados en meses y los gastos no cambian.</p>
         </Modal>
       )}
     </>
@@ -193,7 +193,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
   }
   const valido = (p: PlantillaFin) => AMOUNT.test(montoDe(p).trim()) && Number(montoDe(p).replace(',', '.')) >= 0
   const numero = (p: PlantillaFin) => Number(montoDe(p).replace(',', '.'))
-  const moneda = (p: PlantillaFin) => (p.tipo === 'fuente' ? p.moneda || 'PEN' : monedaPrincipal)
+  const moneda = (p: PlantillaFin) => (p.tipo === 'fondo' ? p.moneda || 'PEN' : monedaPrincipal)
   const elegidas = items.filter(p => sel.includes(p.id))
   const totales = new Map<string, number>()
   for (const p of elegidas) if (valido(p)) totales.set(moneda(p), (totales.get(moneda(p)) ?? 0) + toCents(numero(p)))
@@ -307,7 +307,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
             trigger={<><Plus className="size-4" /> Nueva plantilla <ChevronDown className="size-4" /></>}
             acciones={[
               { key: 'cero', label: 'Crear desde cero', icon: <Plus className="size-4" />, onClick: () => onForm(null) },
-              { key: 'existente', label: `Crear desde ${tipo === 'fuente' ? 'una fuente' : 'una caja'} existente`, icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
+              { key: 'existente', label: `Crear desde ${tipo === 'fondo' ? 'un fondo' : 'una caja'} existente`, icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
             ]} />
         </div>
         {items.length > 4 && (
@@ -331,13 +331,13 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
         ) : !filas.length ? <Empty icon={<Search className="size-5" />} title="Sin coincidencias">Prueba con otra palabra.</Empty> : (
           <ul aria-label={`Plantillas de ${T.una}s`} className="divide-y divide-line/70 overflow-hidden rounded-xl border border-line" data-testid="pf-lista">
             {filas.map(p => {
-              const look = p.tipo === 'fuente' ? fuenteLook({ nombre: p.nombre, medioPago: p.medios, icono: p.icono, color: p.color }) : cajaLook({ filtroCampo: p.campo as Caja['filtroCampo'], filtroValor: p.valor, color: p.color, icono: p.icono }, data.catalogo)
+              const look = p.tipo === 'fondo' ? fondoLook({ nombre: p.nombre, medioPago: p.medios, icono: p.icono, color: p.color }) : cajaLook({ filtroCampo: p.campo as Caja['filtroCampo'], filtroValor: p.valor, color: p.color, icono: p.icono }, data.catalogo)
               const e = estadoRealPlantilla(p, mes, data)
               const b = BADGE[e]
               const busy = store.pending.has(`pf:${p.id}`)
               const on = sel.includes(p.id)
-              const sub = p.tipo === 'fuente'
-                ? `${p.recurrencia === 'unica' ? 'Un solo mes' : 'Mensual'}${mediosDeFuente(p.medios).length ? ` · ${mediosDeFuente(p.medios).join(', ')}` : ''}${p.origenId ? '' : ' · sin fuente aún'}`
+              const sub = p.tipo === 'fondo'
+                ? `${p.recurrencia === 'unica' ? 'Un solo mes' : 'Mensual'}${mediosDeFondo(p.medios).length ? ` · ${mediosDeFondo(p.medios).join(', ')}` : ''}${p.origenId ? '' : ' · sin fondo aún'}`
                 : `${p.campo}: ${p.valor.replace(' › ', ' › ')}${p.origenId ? '' : ' · sin caja aún'}`
               return (
                 <li key={p.id} {...dnd.item(p.id)} data-testid="pf-fila" data-estado={e} className={`${CLASE_ARRASTRE} border border-transparent ${on ? 'bg-primary-soft/40' : ''} ${p.activo ? '' : 'opacity-70'}`}>
@@ -381,8 +381,8 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
           </ul>
         )}
         <p className="text-[11px] text-muted">
-          {tipo === 'fuente'
-            ? 'Cambiar el importe aquí solo afecta al mes elegido: el importe predeterminado de la plantilla (y de la fuente) se conserva para los demás meses. Nunca se crean ingresos ni gastos.'
+          {tipo === 'fondo'
+            ? 'Cambiar el importe aquí solo afecta al mes elegido: el importe predeterminado de la plantilla (y del fondo) se conserva para los demás meses. Nunca se crean ingresos ni gastos.'
             : 'Una caja no crea dinero: solo reserva parte del presupuesto existente. Cambiar el importe aquí solo afecta al mes elegido; la plantilla conserva su valor para los demás.'}
         </p>
       </div>
@@ -413,7 +413,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
   const data = store.data!
   const base = plantilla ?? clonDe ?? null
   const [id] = useState(() => plantilla?.id ?? nuevoId())
-  const fuentes = data.fuentes ?? []
+  const fondos = data.fondos ?? []
   const medios = useMemo(() => sortMedios(data.medios.filter(m => m.activo).map(m => m.nombre)), [data.medios])
   const monedas = (data.config.monedas || 'PEN,USD').split(',').map(s => s.trim()).filter(Boolean)
   const [origen, setOrigen] = useState(plantilla?.origenId ?? origenId ?? '')
@@ -421,7 +421,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
   const [nombre, setNombre] = useState(base ? (clonDe ? `${clonDe.nombre.slice(0, 31)} (Copia)` : base.nombre) : '')
   const [monto, setMonto] = useState(base ? String(base.monto) : '')
   const [moneda, setMoneda] = useState(base?.moneda || data.config.moneda || 'PEN')
-  const [elegidos, setElegidos] = useState<string[]>(base ? mediosDeFuente(base.medios) : [])
+  const [elegidos, setElegidos] = useState<string[]>(base ? mediosDeFondo(base.medios) : [])
   const [recurrencia, setRecurrencia] = useState<'mensual' | 'unica'>(base?.recurrencia ?? 'mensual')
   const [campo, setCampo] = useState<Alcance>((base?.campo as Alcance) || 'Categoría')
   const [valor, setValor] = useState(base?.valor ?? '')
@@ -429,14 +429,14 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
   const [activo, setActivo] = useState(base ? base.activo : true)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Rellena desde una fuente/subcaja existente (editable antes de guardar).
+  // Rellena desde un fondo/subcaja existente (editable antes de guardar).
   function cargarDesde(oid: string) {
     setOrigen(oid)
     setErrors({})
-    if (tipo === 'fuente') {
-      const f = fuentes.find(x => x.id === oid)
+    if (tipo === 'fondo') {
+      const f = fondos.find(x => x.id === oid)
       if (!f) return
-      setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setElegidos(mediosDeFuente(f.medioPago)); setRecurrencia(f.recurrencia)
+      setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setElegidos(mediosDeFondo(f.medioPago)); setRecurrencia(f.recurrencia)
     } else {
       const c = data.cajas.find(x => x.id === oid)
       if (!c) return
@@ -446,7 +446,7 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
   useEffect(() => { if (origenId && !plantilla) cargarDesde(origenId) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const yaVinculada = origen ? todas.find(p => p.origenId === origen && p.id !== id) : undefined
-  const entidades = tipo === 'fuente' ? fuentes.map(f => ({ id: f.id, nombre: f.nombre, look: fuenteLook(f, fuentes) })) : data.cajas.filter(c => c.filtroCampo !== 'Todos').map(c => ({ id: c.id, nombre: c.nombre, look: cajaLook(c, data.catalogo) }))
+  const entidades = tipo === 'fondo' ? fondos.map(f => ({ id: f.id, nombre: f.nombre, look: fondoLook(f, fondos) })) : data.cajas.filter(c => c.filtroCampo !== 'Todos').map(c => ({ id: c.id, nombre: c.nombre, look: cajaLook(c, data.catalogo) }))
   const opcionesExistente: Opcion[] = entidades.map(x => ({ value: x.id, label: x.nombre, Icon: x.look.Icon, color: x.look.color, hint: todas.some(p => p.origenId === x.id) ? 'Ya tiene plantilla' : undefined }))
   const valores = useMemo(() => { const xs = opcionesValor(campo, data.catalogo, medios); return valor && !xs.includes(valor) ? [valor, ...xs] : xs }, [campo, data.catalogo, medios, valor])
   const opcionesCombo = useMemo(() => opcionesAlcanceCombo(valores, campo, data.catalogo), [valores, campo, data.catalogo])
@@ -463,11 +463,11 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
     setErrors(errs)
     if (Object.keys(errs).length) return
     const input: PlantillaFinInput = {
-      id, tipo, nombre: nombre.trim(), monto: n, moneda: tipo === 'fuente' ? moneda : '', medios: tipo === 'fuente' ? unirMedios(elegidos) : '',
+      id, tipo, nombre: nombre.trim(), monto: n, moneda: tipo === 'fondo' ? moneda : '', medios: tipo === 'fondo' ? unirMedios(elegidos) : '',
       campo: tipo === 'subcaja' ? campo : '', valor: tipo === 'subcaja' ? valor : '', descripcion: formatearDescripcion(descripcion),
-      color: base?.color ?? (origen ? (tipo === 'fuente' ? fuentes.find(f => f.id === origen)?.color : data.cajas.find(c => c.id === origen)?.color) : undefined) ?? '#1e3a8a',
-      icono: base?.icono ?? (origen ? (tipo === 'fuente' ? fuentes.find(f => f.id === origen)?.icono : data.cajas.find(c => c.id === origen)?.icono) : undefined) ?? '',
-      recurrencia: tipo === 'fuente' ? recurrencia : 'mensual', activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
+      color: base?.color ?? (origen ? (tipo === 'fondo' ? fondos.find(f => f.id === origen)?.color : data.cajas.find(c => c.id === origen)?.color) : undefined) ?? '#1e3a8a',
+      icono: base?.icono ?? (origen ? (tipo === 'fondo' ? fondos.find(f => f.id === origen)?.icono : data.cajas.find(c => c.id === origen)?.icono) : undefined) ?? '',
+      recurrencia: tipo === 'fondo' ? recurrencia : 'mensual', activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
     }
     const ok = store.track(`pf:${id}`, { pending: 'Guardando la plantilla…', ok: `Plantilla ${input.nombre} guardada.`, error: 'No se pudo guardar la plantilla.' }, () => store.actions.savePlantillaFin(plantilla ? input : { ...input, orden: undefined }))
     if (ok) onDone()
@@ -478,10 +478,10 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
       {!plantilla && !clonDe && (
         <div className="space-y-2 rounded-xl bg-bg/70 p-3">
           <Segmented label="Origen de la plantilla" value={desdeExistente ? 'existente' : 'cero'} onChange={v => { setDesdeExistente(v === 'existente'); if (v === 'cero') setOrigen('') }}
-            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: `Desde ${tipo === 'fuente' ? 'una fuente' : 'una caja'} existente` }]} />
+            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: `Desde ${tipo === 'fondo' ? 'un fondo' : 'una caja'} existente` }]} />
           {desdeExistente && (
-            <Field label={`${tipo === 'fuente' ? 'Fuente' : 'Caja'} existente`} htmlFor="pf-origen" error={errors.origen}>
-              <Combobox id="pf-origen" label={`${tipo === 'fuente' ? 'Fuente' : 'Caja'} existente`} value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
+            <Field label={`${tipo === 'fondo' ? 'Fondo' : 'Caja'} existente`} htmlFor="pf-origen" error={errors.origen}>
+              <Combobox id="pf-origen" label={`${tipo === 'fondo' ? 'Fondo' : 'Caja'} existente`} value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
             </Field>
           )}
           {yaVinculada && (
@@ -496,11 +496,11 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
         <Field label="Nombre" htmlFor="pf-nombre" error={errors.nombre}>
           <input id="pf-nombre" className={`${inputCls} ${errors.nombre ? 'border-danger' : ''}`} maxLength={40} value={nombre} onChange={e => setNombre(e.target.value)} autoComplete="off" />
         </Field>
-        <Field label={tipo === 'fuente' ? 'Monto predeterminado' : 'Presupuesto predeterminado'} htmlFor="pf-monto" error={errors.monto}>
+        <Field label={tipo === 'fondo' ? 'Monto predeterminado' : 'Presupuesto predeterminado'} htmlFor="pf-monto" error={errors.monto}>
           <input id="pf-monto" className={`${inputCls} tabular text-right ${errors.monto ? 'border-danger' : ''}`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} placeholder="0.00" autoComplete="off" />
         </Field>
       </div>
-      {tipo === 'fuente' ? (
+      {tipo === 'fondo' ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Moneda" htmlFor="pf-moneda"><Combobox id="pf-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={[...new Set([...monedas, moneda])].map(m => ({ value: m, label: m }))} /></Field>
@@ -508,10 +508,10 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
               <Segmented label="Recurrencia" value={recurrencia} onChange={setRecurrencia} options={[{ value: 'mensual', label: 'Todos los meses' }, { value: 'unica', label: 'Un solo mes' }]} />
             </Field>
           </div>
-          <Field label="Medios de pago asociados (opcional)" htmlFor="pf-medio" hint="Los gastos pagados con esos medios se atribuyen a la fuente. El importe no se divide entre medios.">
+          <Field label="Medios de pago asociados (opcional)" htmlFor="pf-medio" hint="Los gastos pagados con esos medios se atribuyen al fondo. El importe no se divide entre medios.">
             <div className="space-y-2">
               <ul className="flex flex-wrap gap-1.5" aria-label="Medios elegidos" data-testid="pf-medios">
-                {!elegidos.length && <li className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted">Ninguno (fuente libre)</li>}
+                {!elegidos.length && <li className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted">Ninguno (fondo libre)</li>}
                 {elegidos.map(m => { const l = medioLook(m); return (
                   <li key={m} className="flex items-center gap-1.5 rounded-full py-1 pr-1 pl-2 text-xs font-medium" style={{ background: `${l.color}1A`, color: l.color }}>
                     <l.Icon className="size-3.5" />{m}

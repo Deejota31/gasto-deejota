@@ -6,8 +6,8 @@
 // Fechas siempre como texto AAAA-MM-DD en la zona horaria del usuario: nada de conversiones UTC.
 
 export type EstadoPlan = 'pendiente' | 'en_progreso' | 'completada' | 'descartada'
-export type Etapa = 'fuentes' | 'subcajas' | 'gastos'
-export const ETAPAS: Etapa[] = ['fuentes', 'subcajas', 'gastos']
+export type Etapa = 'fondos' | 'subcajas' | 'gastos'
+export const ETAPAS: Etapa[] = ['fondos', 'subcajas', 'gastos']
 export type EstadoEtapa = 0 | 1 | 2   // pendiente · hecha · omitida
 export interface PlanMes { mes: string; estado: EstadoPlan; etapas: Record<Etapa, EstadoEtapa>; posponerHasta: string }
 export interface PlanConfig { activo: boolean; diaDefecto: number }
@@ -67,9 +67,9 @@ export function leerEstadoPlan(cfg: Record<string, string>, mes: string): PlanMe
   const raw = cfg[`plan_est_${mes}`] ?? ''
   const [e, et, z] = raw.split('|')
   const dig = (i: number): EstadoEtapa => { const n = Number((et ?? '000')[i]); return n === 1 || n === 2 ? n : 0 }
-  return { mes, estado: DESDE_CODIGO[e] ?? 'pendiente', etapas: { fuentes: dig(0), subcajas: dig(1), gastos: dig(2) }, posponerHasta: /^\d{4}-\d{2}-\d{2}$/.test(z ?? '') ? z : '' }
+  return { mes, estado: DESDE_CODIGO[e] ?? 'pendiente', etapas: { fondos: dig(0), subcajas: dig(1), gastos: dig(2) }, posponerHasta: /^\d{4}-\d{2}-\d{2}$/.test(z ?? '') ? z : '' }
 }
-export const serializarEstadoPlan = (p: PlanMes) => `${CODIGO[p.estado]}|${p.etapas.fuentes}${p.etapas.subcajas}${p.etapas.gastos}|${p.posponerHasta}`
+export const serializarEstadoPlan = (p: PlanMes) => `${CODIGO[p.estado]}|${p.etapas.fondos}${p.etapas.subcajas}${p.etapas.gastos}|${p.posponerHasta}`
 
 /** Estado derivado de las etapas: completada si ninguna queda pendiente; en progreso si alguna ya se hizo/omitió. */
 export function estadoDesdeEtapas(etapas: Record<Etapa, EstadoEtapa>): EstadoPlan {

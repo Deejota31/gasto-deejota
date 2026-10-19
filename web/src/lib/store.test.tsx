@@ -154,13 +154,13 @@ describe('plantillas sin bloquear (v1.6)', () => {
 })
 
 
-describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', () => {
+describe('sincronización con la hoja (v1.12): la hoja es el fondo de verdad', () => {
   const CONN = { url: 'https://script.google.com/macros/s/x/exec', token: 't' }
   const fila = (id: string, nombre: string, monto: number, activo = true, orden = 1) => [id, nombre, monto, 'PEN', '#1e3a8a', '', activo, orden, 'mensual', '', '', 't', 't']
-  const datos = (fuentes: unknown[][]) => ({ ...base(), fuentes, fuentesMeses: [] })
-  const snapshot = (fuentes: unknown[][]) => {
+  const datos = (fondos: unknown[][]) => ({ ...base(), fondos, fondosMeses: [] })
+  const snapshot = (fondos: unknown[][]) => {
     // El respaldo del navegador ya normalizado (mismo formato que escribe la app).
-    const api = createApi(() => Promise.resolve(datos(fuentes)))
+    const api = createApi(() => Promise.resolve(datos(fondos)))
     return api.getData(true).then(d => localStorage.setItem('gd.snapshot', JSON.stringify({ url: CONN.url, data: d })))
   }
   const seis = [fila('f1', 'General', 3109.75, true, 1), fila('f2', 'Sodexo', 280, true, 2), fila('f3', 'Carpeta Tesis', 1000, true, 3),
@@ -171,17 +171,17 @@ describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', 
     const be = deferredBackend()
     const hook = renderHook(() => useAppData(CONN, be.api))
     // Se pinta el respaldo del navegador, pero marcado como NO confirmado.
-    expect(hook.result.current.data!.fuentes!.map(f => f.nombre)).toEqual(['General', 'Sodexo', 'Carpeta Tesis', 'Viaje a Ica', 'hola', 'bono'])
+    expect(hook.result.current.data!.fondos!.map(f => f.nombre)).toEqual(['General', 'Sodexo', 'Carpeta Tesis', 'Viaje a Ica', 'hola', 'bono'])
     expect(hook.result.current.confirmado).toBe(false)
     expect(be.calls[0]).toMatchObject({ action: 'data', payload: { fresh: true } })
     // En la hoja ya no están "hola" ni "bono" (ni nada por su nombre: se reconcilia por ID), y cambiaron un monto y el orden.
     await act(async () => { be.calls[0].resolve(datos([fila('f1', 'General', 3109.75, true, 1), fila('f4', 'Viaje a Ica', 1000, false, 2), fila('f2', 'Sodexo', 282.9, true, 3), fila('f3', 'Carpeta Tesis', 1000, true, 4), fila('f9', 'Nueva', 50, true, 5)])) })
-    const fs = hook.result.current.data!.fuentes!
+    const fs = hook.result.current.data!.fondos!
     expect(fs.map(f => f.id)).toEqual(['f1', 'f4', 'f2', 'f3', 'f9'])
     expect(fs.find(f => f.id === 'f2')!.monto).toBe(282.9)       // monto modificado en la hoja
     expect(fs.find(f => f.id === 'f4')!.activo).toBe(false)      // TRUE → FALSE en la hoja
     expect(hook.result.current.confirmado).toBe(true)
-    expect(JSON.parse(localStorage.getItem('gd.snapshot')!).data.fuentes).toHaveLength(5)   // el respaldo también se reconcilia
+    expect(JSON.parse(localStorage.getItem('gd.snapshot')!).data.fondos).toHaveLength(5)   // el respaldo también se reconcilia
   })
 
   it('si la lectura falla informa el error y los datos viejos quedan marcados como NO confirmados', async () => {
@@ -192,12 +192,12 @@ describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', 
     expect(hook.result.current.error).toContain('No se pudo conectar')
     expect(hook.result.current.confirmado).toBe(false)
     expect(hook.result.current.lastSync).toBeNull()
-    expect(hook.result.current.data!.fuentes).toHaveLength(6)    // no se pierde lo que había, pero no se presenta como vigente
+    expect(hook.result.current.data!.fondos).toHaveLength(6)    // no se pierde lo que había, pero no se presenta como vigente
     // Al reintentar con éxito se confirma y desaparecen los registros fantasma.
     await act(async () => { void hook.result.current.refresh() })
     await act(async () => { be.calls[1].resolve(datos(seis.slice(0, 4))) })
     expect(hook.result.current.confirmado).toBe(true)
-    expect(hook.result.current.data!.fuentes).toHaveLength(4)
+    expect(hook.result.current.data!.fondos).toHaveLength(4)
   })
 
   it('un cambio confirmado mientras llega la lectura no se pierde (no se pisa con la respuesta antigua)', async () => {
@@ -205,10 +205,10 @@ describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', 
     const hook = renderHook(() => useAppData(CONN, be.api))
     await act(async () => { be.calls[0].resolve(datos([fila('f1', 'General', 100)])) })
     await act(async () => { void hook.result.current.refresh() })       // lectura en curso
-    act(() => { void hook.result.current.actions.saveFuente({ id: 'f2', nombre: 'Extra', monto: 20, moneda: 'PEN', color: '#1e3a8a', icono: '', activo: true, orden: 2, recurrencia: 'mensual', mes: '', medioPago: '' }) })
+    act(() => { void hook.result.current.actions.saveFondo({ id: 'f2', nombre: 'Extra', monto: 20, moneda: 'PEN', color: '#1e3a8a', icono: '', activo: true, orden: 2, recurrencia: 'mensual', mes: '', medioPago: '' }) })
     await waitFor(() => expect(be.calls).toHaveLength(3))
     await act(async () => { be.calls[2].resolve(fila('f2', 'Extra', 20, true, 2)) })           // guardado confirmado
     await act(async () => { be.calls[1].resolve(datos([fila('f1', 'General', 100)])) })        // respuesta antigua (sin Extra)
-    expect(hook.result.current.data!.fuentes!.map(f => f.id)).toEqual(['f1', 'f2'])
+    expect(hook.result.current.data!.fondos!.map(f => f.id)).toEqual(['f1', 'f2'])
   })
 })

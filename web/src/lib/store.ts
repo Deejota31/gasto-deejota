@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { calentar, createApi, httpTransport, type Api, type Connection, type AplicarItem, type FuenteInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
+import { calentar, createApi, httpTransport, type Api, type Connection, type AplicarItem, type FondoInput, type GastoInput, type PlantillaFinInput, type PlantillaInput } from './api'
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
-import type { ConcGrupoInput, ConcSeguimientoInput, ConcVerificacionInput } from './api'
-import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fuente, FuenteMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
+import type { RevisionPresInput } from './api'
+import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fondo, FondoMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
 import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
@@ -53,7 +53,7 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fuentes')) || 0, 25), q.get('vacio') === '1')
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fondos')) || 0, 25), q.get('vacio') === '1')
   // ?falla=aplicar: solo fallan las acciones «aplicar…» (permite crear plantillas y probar el error del guardado en segundo plano).
   const falla = q.get('falla') === '1' || q.get('falla') === 'timeout' || q.get('falla') === 'aplicar'
   const soloAplicar = q.get('falla') === 'aplicar'
@@ -273,7 +273,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       try { await api.reorderCajas(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, cajas: previo }); throw e }
     },
     async savePresupuesto(p: Presupuesto) { await lanzar('savePresupuesto', [p]) },
-    /** Plantillas de fuentes/subcajas. Solo guardan configuración: no crean fuentes, subcajas, dinero ni gastos. */
+    /** Plantillas de fondos/subcajas. Solo guardan configuración: no crean fondos, subcajas, dinero ni gastos. */
     savePlantillaFin: (p: PlantillaFinInput) => lanzar('savePlantillaFin', [p]),
     async deletePlantillaFin(id: string) { await lanzar('deletePlantillaFin', [id]) },
     /** Orden de las plantillas: se ve al instante; si falla, vuelve al anterior (una sola solicitud por arrastre). */
@@ -283,54 +283,54 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       setData(d => { previo = d?.plantillasFin ?? []; return d && aplicar(d) })
       try { await api.reorderPlantillasFin(tipo, ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, plantillasFin: previo }); throw e }
     },
-    /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fuentes, cajas, importes del mes). */
+    /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fondos, cajas, importes del mes). */
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]) {
       const pl = await api.aplicarPlantillasFin(mes, items)
       const raw = await api.getData(true)   // relectura real de Sheets: de aquí sale la verificación de lo aplicado
       patch(d => ({
         ...d, plantillasFin: (d.plantillasFin ?? []).map(x => pl.find(y => y.id === x.id) ?? x).concat(pl.filter(y => !(d.plantillasFin ?? []).some(x => x.id === y.id))),
-        fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos,
+        fondos: raw.fondos, fondosMeses: raw.fondosMeses, cajas: raw.cajas, presupuestos: raw.presupuestos,
       }))
-      return { plantillas: pl, datos: { fuentes: raw.fuentes ?? [], fuentesMeses: raw.fuentesMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos } }
+      return { plantillas: pl, datos: { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos } }
     },
-    /** Aplica fuentes o subcajas existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
-    async aplicarEntidadesMes(tipo: 'fuente' | 'subcaja', mes: string, items: { id: string; monto: number }[]) {
+    /** Aplica fondos o subcajas existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
+    async aplicarEntidadesMes(tipo: 'fondo' | 'subcaja', mes: string, items: { id: string; monto: number }[]) {
       await api.aplicarEntidadesMes(tipo, mes, items)
       const raw = await api.getData(true)
-      patch(d => ({ ...d, fuentes: raw.fuentes, fuentesMeses: raw.fuentesMeses, cajas: raw.cajas, presupuestos: raw.presupuestos }))
-      return { fuentes: raw.fuentes ?? [], fuentesMeses: raw.fuentesMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos }
+      patch(d => ({ ...d, fondos: raw.fondos, fondosMeses: raw.fondosMeses, cajas: raw.cajas, presupuestos: raw.presupuestos }))
+      return { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos }
     },
-    /** Crea o edita una fuente. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
-    saveFuente: (f: FuenteInput) => lanzar('saveFuente', [f]),
-    /** Importe de una fuente para un mes ("solo") o desde un mes ("desde"). Nunca toca otros meses. */
-    async saveFuenteMes(m: FuenteMes, quitar = false) { await lanzar('saveFuenteMes', [m, quitar]) },
-    /** Elimina una fuente y sus importes por mes. Los gastos no se tocan (la atribución se calcula, no se guarda). */
-    async deleteFuente(id: string) { await lanzar('deleteFuente', [id]) },
-    /** Orden de las fuentes: se ve al instante; si falla, vuelve al anterior. */
-    async reorderFuentes(ids: string[]) {
-      let previo: Fuente[] = []
-      const aplicar = (d: AppData) => ({ ...d, fuentes: (d.fuentes ?? []).map(f => ({ ...f, orden: ids.indexOf(f.id) >= 0 ? ids.indexOf(f.id) + 1 : ids.length + 1 })) })
-      setData(d => { previo = d?.fuentes ?? []; return d && aplicar(d) })
-      try { await api.reorderFuentes(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, fuentes: previo }); throw e }
+    /** Crea o edita un fondo. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
+    saveFondo: (f: FondoInput) => lanzar('saveFondo', [f]),
+    /** Importe de un fondo para un mes ("solo") o desde un mes ("desde"). Nunca toca otros meses. */
+    async saveFondoMes(m: FondoMes, quitar = false) { await lanzar('saveFondoMes', [m, quitar]) },
+    /** Elimina un fondo y sus importes por mes. Los gastos no se tocan (la atribución se calcula, no se guarda). */
+    async deleteFondo(id: string) { await lanzar('deleteFondo', [id]) },
+    /** Orden de los fondos: se ve al instante; si falla, vuelve al anterior. */
+    async reorderFondos(ids: string[]) {
+      let previo: Fondo[] = []
+      const aplicar = (d: AppData) => ({ ...d, fondos: (d.fondos ?? []).map(f => ({ ...f, orden: ids.indexOf(f.id) >= 0 ? ids.indexOf(f.id) + 1 : ids.length + 1 })) })
+      setData(d => { previo = d?.fondos ?? []; return d && aplicar(d) })
+      try { await api.reorderFondos(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, fondos: previo }); throw e }
     },
-    /** Migración pedida por el usuario: fuente General desde la caja general (con sus ajustes mensuales). Idempotente. */
-    async migrarGeneralAFuente() {
-      const r = await api.migrarGeneralAFuente()
-      const f = r.fuente
+    /** Migración pedida por el usuario: fondo General desde la caja general (con sus ajustes mensuales). Idempotente. */
+    async migrarGeneralAFondo() {
+      const r = await api.migrarGeneralAFondo()
+      const f = r.fondo
       if (f) patch(d => ({
         ...d,
-        fuentes: [...(d.fuentes ?? []).filter(x => x.id !== f.id), f],
-        fuentesMeses: [...(d.fuentesMeses ?? []).filter(x => x.fuenteId !== f.id), ...r.ajustes],
+        fondos: [...(d.fondos ?? []).filter(x => x.id !== f.id), f],
+        fondosMeses: [...(d.fondosMeses ?? []).filter(x => x.fondoId !== f.id), ...r.ajustes],
       }))
       return r
     },
     async saveConfig(clave: string, valor: string) { await lanzar('saveConfig', [clave, valor]) },
     /** Asocia (o desasocia con '') un movimiento existente a un compromiso. No cambia el gasto. */
     async vincular(gastoId: string, plantillaId: string) { await lanzar('vincular', [gastoId, plantillaId]) },
-    /** Conciliación de saldos: solo agrega filas a CONCILIACIONES. Nunca modifica fuentes, gastos, cajas ni presupuestos. */
-    async saveConciliacion(i: ConcVerificacionInput) { const f = await api.saveConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
-    async saveSeguimientoConciliacion(i: ConcSeguimientoInput) { const f = await api.saveSeguimientoConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
-    async saveGrupoConciliacion(i: ConcGrupoInput) { const f = await api.saveGrupoConciliacion(i); patch(d => ({ ...d, conciliaciones: [...(d.conciliaciones ?? []).filter(x => x.id !== f.id), f] })) },
+    /** Revisión del presupuesto: solo agrega filas a REVISIONES_PRESUPUESTO. Nunca modifica fondos, gastos, cajas ni presupuestos. */
+    async saveRevisionPresupuesto(i: RevisionPresInput) { const f = await api.saveRevisionPresupuesto(i); patch(d => ({ ...d, revisionesPresupuesto: [...(d.revisionesPresupuesto ?? []).filter(x => x.id !== f.id), f] })) },
+    /** Migra a Fondos del presupuesto (respaldo previo en el backend) y recarga todo: cambiaron nombres de hojas y datos. */
+    async migrarAFondosPresupuesto() { const r = await api.migrarAFondosPresupuesto(); await refresh(true); return r },
     /** Decisión sobre una coincidencia (legítima, pendiente o duplicado confirmado). Nunca modifica movimientos. */
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>) {
       const saved = await api.saveRevision(r)
@@ -348,7 +348,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
         return { ambito: c.ambito, categoria: c.categoria, subcategoria: c.subcategoria, icono: claveDeIcono(l.Icon), color: l.color }
       })
       const r = await api.completarVacios(defs)
-      const n = r.cajas + r.fuentes + r.catalogo + r.config + (r.medios ?? 0)
+      const n = r.cajas + r.fondos + r.catalogo + r.config + (r.medios ?? 0)
       if (n > 0) await refresh(true)
       return { ...r, total: n }
     },

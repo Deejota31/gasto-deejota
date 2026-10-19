@@ -10,7 +10,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 ## Arquitectura en una línea por pieza
 
 - **Registro jerárquico**: en el formulario primero se elige el ámbito; las categorías dependen del ámbito y las subcategorías de la categoría. La subcategoría es obligatoria cuando la categoría tiene opciones.
-- **Hoja `GASTOS`** (16 columnas exactas): única fuente de movimientos. Además, solo `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS` y `CONFIG`.
+- **Hoja `GASTOS`** (16 columnas exactas): única fondo de movimientos. Además, solo `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS` y `CONFIG`.
 - **API**: `POST` con cuerpo `text/plain` JSON `{token, action, payload}`. Así el token nunca viaja en la URL y no hay preflight CORS. `GET` solo responde un ping de salud sin datos.
 - **Lectura**: una sola llamada `data` lee cada hoja una vez (`getValues` por bloque). El resultado se guarda en `CacheService` por 10 minutos, en trozos. "Actualizar" pide `fresh` y salta la caché.
 - **Escritura**: `LockService`, validación en el servidor, UUID generado por el cliente al abrir el formulario (si un reintento llega dos veces no se duplica), invalidación de caché por "generación" para que una lectura lenta no deje datos viejos.
@@ -51,12 +51,12 @@ Solo frontend: **`Code.gs` sigue en 1.23.0**. No cambia ninguna fórmula ni el m
 
 Solo frontend: **`Code.gs` sigue en 1.23.0 (no hay que volver a desplegarlo)**. No cambia el modelo de datos ni ninguna fórmula (`engine.ts` intacto).
 
-- **Cuatro tarjetas menos**: se quitaron *Presupuesto* (o *Caja mensual*), *Total gastado*, *Disponible* y *Consumido* como tarjetas independientes; sus cifras siguen en el Presupuesto consolidado. Quedan **Promedio diario · Promedio por movimiento · Mayor gasto · Movimientos**, ahora como **nivel 4 compacto al final del Presupuesto consolidado** (mini-tarjetas con icono pequeño, valor `text-sm`, subtítulo e ⓘ; una fila en escritorio, 2 columnas en tablet y móvil). Ya no hay sección separada debajo de Fuentes / Cajas.
+- **Cuatro tarjetas menos**: se quitaron *Presupuesto* (o *Caja mensual*), *Total gastado*, *Disponible* y *Consumido* como tarjetas independientes; sus cifras siguen en el Presupuesto consolidado. Quedan **Promedio diario · Promedio por movimiento · Mayor gasto · Movimientos**, ahora como **nivel 4 compacto al final del Presupuesto consolidado** (mini-tarjetas con icono pequeño, valor `text-sm`, subtítulo e ⓘ; una fila en escritorio, 2 columnas en tablet y móvil). Ya no hay sección separada debajo de Fondos / Cajas.
 - **Presupuesto consolidado en dos niveles**: principal (*Presupuesto consolidado, Gastado del período, Disponible consolidado, Reservado en cajas*) con cifras grandes e icono; secundario (*Libre inicial, Gastado fuera de reservas, Saldo libre actual, Consumido*) más compacto. Mismos nombres, mismos `data-testid` (`cons-*`) y mismos importes que antes.
 - **Estado en texto + color** en el encabezado: *Dentro del presupuesto* (verde), *Cerca del límite · N % consumido* (ámbar, desde 70 %), *Presupuesto agotado* (ámbar, 100 %), *Presupuesto excedido en S/ X* (rojo; X = −disponible, siempre calculado) y *Sin presupuesto definido* (neutro).
 - **Barra segmentada** e interactiva: gastado fuera de reservas, gastado en cajas, reservas sin utilizar (rayado) y saldo libre. Tooltip con nombre, importe y % del presupuesto (ratón, toque y teclado; Esc lo cierra) y leyenda. Con consumo > 100 % o saldo libre negativo la barra **nunca desborda**: el ancho se calcula sobre la suma de tramos y una marca punteada indica dónde estaba el límite del presupuesto. Los importes no se alteran.
 - **Disponible ≠ Saldo libre**: cada indicador tiene su ⓘ con la definición real (disponible = presupuesto − gastado; saldo libre = libre inicial − gastado fuera de reservas − excesos de cajas; disponible = saldo libre + reservas sin utilizar). El ⓘ del encabezado resume cómo leer el bloque completo.
-- **Orden del Dashboard**: encabezado y acciones → filtros → Presupuesto consolidado (principales → barra → secundarios → 4 métricas compactas) → Fuentes de dinero y Cajas / reservas → gráficos.
+- **Orden del Dashboard**: encabezado y acciones → filtros → Presupuesto consolidado (principales → barra → secundarios → 4 métricas compactas) → Fondos del presupuesto y Cajas / reservas → gráficos.
 - **Filtros superiores más anchos**: la fila (escritorio) reparte el ancho por prioridad Período > Subcategoría > Categoría > Medio de pago > Tipo de gasto > Ámbito, con la misma altura (h-10) y la misma lógica; tablet 2 columnas, móvil 1.
 - **Filtros**: el Presupuesto consolidado sigue usando el período completo (ignora ámbito/categoría/subcategoría/medio/tipo, como antes); los 4 KPIs responden a todos los filtros. Sin llamadas nuevas al backend. El total filtrado sigue visible en la pestaña Gastos.
 - **Pruebas**: `lib/presupuestoVista.test.ts` (reparto de la barra y estados con consumo < 70 %, 70–100 %, = 100 %, > 100 %, saldo libre negativo y exceso en una caja; regresión de las fórmulas del motor), `components/PresupuestoConsolidado.test.tsx`, `tabs/Dashboard.test.tsx` (solo cuatro KPIs, orden, importes idénticos al motor con y sin filtros, sin errores de consola) y `e2e/v124.spec.ts` (escritorio, tablet y móvil sin desborde ni superposición, exceso de presupuesto, barra y tooltips, modo oscuro). Las e2e que leían *Total gastado* / *Disponible* ahora leen *Gastado del período* / *Disponible consolidado*.
@@ -81,17 +81,17 @@ Salud financiera ahora tiene cinco tarjetas de navegación (Calidad de datos · 
 Compara **lo que Deejota calcula que deberías tener** con **lo que realmente tienes** y te ayuda a investigar la diferencia. **Nunca crea ingresos, gastos ni ajustes** para cuadrar saldos.
 
 **Tres conceptos distintos**
-- *Disponible presupuestario* = lo que dice el motor existente (`aggregate`): fuentes efectivas del mes − gastos activos hasta la fecha de corte (anulados fuera, conversión de moneda, ajustes mensuales y atribución por fuente ya vigentes). No se reimplementó ninguna regla. Las cajas son reservas: se muestran aparte («Reservado en cajas» y «Libre no reservado») y no se descuentan dos veces.
-- *Saldo real verificado* = lo escribes tú, con fecha y hora (America/Lima por defecto). Nunca se deduce de fuentes ni gastos.
+- *Disponible presupuestario* = lo que dice el motor existente (`aggregate`): fondos efectivas del mes − gastos activos hasta la fecha de corte (anulados fuera, conversión de moneda, ajustes mensuales y atribución por fondo ya vigentes). No se reimplementó ninguna regla. Las cajas son reservas: se muestran aparte («Reservado en cajas» y «Libre no reservado») y no se descuentan dos veces.
+- *Saldo real verificado* = lo escribes tú, con fecha y hora (America/Lima por defecto). Nunca se deduce de fondos ni gastos.
 - *Diferencia* = real − calculado, con signo y porcentaje (solo si el calculado no es ~0). Positiva y negativa son hipótesis a investigar, no diagnósticos; los colores no tratan lo positivo como «bueno».
 
-**Grupos de fondos** (botón «Grupos de fondos»): un grupo es un conjunto de **fuentes** (p. ej. «Dinero general» = General + Aporte Pareja + Tésis, y «Sodexo»). El calculado de un grupo es la suma del disponible que el motor ya atribuye a cada una de sus fuentes (atribución por medio de pago, verificable). Una fuente solo puede estar en un grupo activo y no se repiten nombres. Sin grupos se concilia el total. **Yape y Plin no son cuentas** y no tienen saldo propio: no existe hoy una relación explícita cuenta ↔ medio de pago, así que no se inventa. Si algún gasto no pertenece a ningún grupo (fuente inactiva o sin fuente) se muestra «Sin atribuir».
+**Grupos de fondos** (botón «Grupos de fondos»): un grupo es un conjunto de **fondos** (p. ej. «Dinero general» = General + Aporte Pareja + Tésis, y «Sodexo»). El calculado de un grupo es la suma del disponible que el motor ya atribuye a cada una de sus fondos (atribución por medio de pago, verificable). Un fondo solo puede estar en un grupo activo y no se repiten nombres. Sin grupos se concilia el total. **Yape y Plin no son cuentas** y no tienen saldo propio: no existe hoy una relación explícita cuenta ↔ medio de pago, así que no se inventa. Si algún gasto no pertenece a ningún grupo (fondo inactivo o sin fondo) se muestra «Sin atribuir».
 
 **Hoja CONCILIACIONES** (una sola, de solo agregar, creada al primer guardado o con `setup`/«Reparar hojas»): `ID, Tipo, Conciliación ID, Período, Fecha de corte, Grupo ID, Grupo, Moneda, Saldo presupuestario, Saldo real, Diferencia, Estado, Causa, Observación, Reemplaza a, Referencia, Creado en`. Tres tipos de fila: `verificacion` (foto del calculado y el real), `seguimiento` (en revisión / cerrada con diferencia justificada / reabierta, con causa y explicación) y `grupo`. Nada se edita ni se borra: una nueva verificación añade una fila; corregir una mal ingresada añade otra que «reemplaza a» la anterior (que se conserva marcada como corregida). IDs únicos e idempotentes (doble clic o reintento no duplican). Guardar solo escribe esta hoja.
 
-**Estados**: Pendiente (diferencia sin explicar) · En revisión · Conciliada (diferencia cero) · Cerrada con diferencia justificada (no se presenta como cero) · Desactualizada. «Desactualizada» se detecta comparando la foto guardada con el cálculo de hoy para el mismo período, corte y grupo: si registras un gasto olvidado fechado antes del corte, o cambian fuentes/ajustes, la verificación se marca así y puedes «Verificar de nuevo»; la verificación original **no se modifica** y los estados históricos no cambian solos.
+**Estados**: Pendiente (diferencia sin explicar) · En revisión · Conciliada (diferencia cero) · Cerrada con diferencia justificada (no se presenta como cero) · Desactualizada. «Desactualizada» se detecta comparando la foto guardada con el cálculo de hoy para el mismo período, corte y grupo: si registras un gasto olvidado fechado antes del corte, o cambian fondos/ajustes, la verificación se marca así y puedes «Verificar de nuevo»; la verificación original **no se modifica** y los estados históricos no cambian solos.
 
-**Investigar una diferencia** («Revisar diferencia»): revisar gastos (abre Gastos con el período y el corte), registrar gasto olvidado (Nuevo gasto con la fecha de corte), registrar ingreso omitido (ve a Cajas → Fuentes; nunca se crea una fuente para cuadrar), corregir un movimiento (en Gastos) y documentar la causa. Documentar no es una transacción.
+**Investigar una diferencia** («Revisar diferencia»): revisar gastos (abre Gastos con el período y el corte), registrar gasto olvidado (Nuevo gasto con la fecha de corte), registrar ingreso omitido (ve a Cajas → Fondos; nunca se crea un fondo para cuadrar), corregir un movimiento (en Gastos) y documentar la causa. Documentar no es una transacción.
 
 **Fecha de corte**: el calculado incluye los movimientos **fechados** hasta el día de corte (corte diario); la hora se guarda con el saldo real. No se simula precisión horaria que los datos no permiten. El refresco automático nunca escribe ni sobrescribe un saldo verificado; mostrar la pantalla no genera escrituras.
 
@@ -102,7 +102,7 @@ Compara **lo que Deejota calcula que deberías tener** con **lo que realmente ti
 ## Novedades v1.21.0 — sin conexión ≠ sin datos, «Caja» y «Finalizar» en segundo plano
 
 - **Sin conexión** (sin Apps Script conectado y sin `?demo`): ninguna pestaña muestra datos de ejemplo. Dashboard, Cajas, Gastos, Salud y Catálogo muestran un estado vacío con «Conectar mi hoja»; Configuración conserva la conexión y muestra «Conéctate para acceder a estas funciones» en Preferencias, Planificación mensual, Administración de datos y Funciones del backend. La app ya no hace ninguna lectura sin conexión. El modo demostración solo existe con `?demo=…`.
-- **Conectado pero sin registros**: cada sección tiene su propio vacío (Fuentes: «Aún no tienes fuentes registradas. Registra una fuente para empezar»; Cajas: «Aún no tienes cajas registradas. Añade una caja para empezar»; Gastos; Catálogo, que solo oculta lo que realmente no existe; Dashboard y Salud sin gráficos ni conclusiones). Se quitaron los botones «Crear mi primera fuente/caja»; el control habitual (+ / «Nueva …») sigue.
+- **Conectado pero sin registros**: cada sección tiene su propio vacío (Fondos: «Aún no tienes fondos registradas. Registra un fondo para empezar»; Cajas: «Aún no tienes cajas registradas. Añade una caja para empezar»; Gastos; Catálogo, que solo oculta lo que realmente no existe; Dashboard y Salud sin gráficos ni conclusiones). Se quitaron los botones «Crear mi primer fondo/caja»; el control habitual (+ / «Nueva …») sigue.
 - **Error de carga ≠ vacío**: si falla la lectura estando conectado, se muestra «No se pudieron cargar tus datos» con Reintentar.
 - **Terminología**: la interfaz dice «Caja/Cajas». Los identificadores internos, la API y los datos guardados (`tipo: 'subcaja'`, etapa `subcajas`, claves de CONFIG) **no cambian**.
 - **Finalizar planificación**: el asistente se cierra al instante con tu clic, la vista de planificación muestra «Guardando planificación…» y al terminar aparece «Planificación guardada» sin reabrir nada; si falla, error con Reintentar y no se marca como guardada.
@@ -123,7 +123,7 @@ Solo frontend (Code.gs sigue en 1.20.1).
 
 Solo frontend (Code.gs sigue en 1.20.1).
 
-- Al confirmar «Aplicar» (fila o varias) en Fuentes/Subcajas mensuales, el módulo y su confirmación **se cierran al instante** y el asistente sigue visible: la etapa muestra «En progreso» con un aviso de guardado en segundo plano, y pasa sola a «Completada» cuando Sheets confirma y la relectura lo verifica.
+- Al confirmar «Aplicar» (fila o varias) en Fondos/Subcajas mensuales, el módulo y su confirmación **se cierran al instante** y el asistente sigue visible: la etapa muestra «En progreso» con un aviso de guardado en segundo plano, y pasa sola a «Completada» cuando Sheets confirma y la relectura lo verifica.
 - Mientras guarda se puede seguir con las demás etapas (omitir, ir a Gastos, ver el Resumen); «Finalizar» y reabrir ese mismo módulo quedan bloqueados hasta que termine.
 - Si falla, no queda nada aplicado: la etapa pasa a «Error» con «Reintentar» (reabre el módulo).
 - Fuera del asistente (desde Cajas) el módulo también guarda en segundo plano con toast de progreso. «Gastos mensuales» conserva su confirmación con carga porque su reintento usa un lote idempotente.
@@ -131,8 +131,8 @@ Solo frontend (Code.gs sigue en 1.20.1).
 
 ## Corrección v1.20.1 — aplicar plantillas con marcas viejas (requiere redesplegar Code.gs)
 
-- **Síntoma:** «No se pudo verificar lo guardado en Google Sheets. “General”: no se encontró la fuente en la hoja».
-- **Causa:** `aplicarPlantillasFin` daba por buena la marca `aplicada` de la plantilla (columna Estados) sin comprobar que la fuente/subcaja y su importe del mes existieran. Con la hoja vaciada (FUENTES, CAJAS, FUENTES_MESES, PRESUPUESTOS) pero las plantillas aún marcadas, devolvía OK sin crear nada y la verificación de v1.20 lo detectaba.
+- **Síntoma:** «No se pudo verificar lo guardado en Google Sheets. “General”: no se encontró el fondo en la hoja».
+- **Causa:** `aplicarPlantillasFin` daba por buena la marca `aplicada` de la plantilla (columna Estados) sin comprobar que el fondo/subcaja y su importe del mes existieran. Con la hoja vaciada (FONDOS_PRESUPUESTO, CAJAS, FONDOS_PRESUPUESTO_MESES, PRESUPUESTOS) pero las plantillas aún marcadas, devolvía OK sin crear nada y la verificación de v1.20 lo detectaba.
 - **Arreglo (`Code.gs` 1.20.1):** «sin cambios» solo si la entidad existe y su importe real del mes coincide; si no, se recrea y se aplica. Revertir no escribe sobre entidades inexistentes. Una plantilla sana sigue sin escribir nada.
 - **Tests:** 4 nuevos en `backend.test.ts` (3 fallan sin el arreglo).
 
@@ -140,20 +140,20 @@ Solo frontend (Code.gs sigue en 1.20.1).
 
 Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo).**
 
-- **Causa raíz**: el asistente se cerraba al abrir Fuentes/Subcajas/Gastos mensuales y, al volver, solo se marcaba una casilla local; el estado de cada etapa no salía de lo guardado, y «Se creará» se calculaba con la plantilla en vez de con la aplicación real del mes.
+- **Causa raíz**: el asistente se cerraba al abrir Fondos/Subcajas/Gastos mensuales y, al volver, solo se marcaba una casilla local; el estado de cada etapa no salía de lo guardado, y «Se creará» se calculaba con la plantilla en vez de con la aplicación real del mes.
 - **Flujo continuo**: el asistente queda montado (oculto) mientras el módulo hijo está abierto y reaparece al aplicar, con la etapa en «Completada» y el botón «Continuar con …». Solo los accesos nacidos del plan vuelven al asistente; abrir un módulo desde Cajas se cierra normalmente.
 - **Estados**: Pendiente / En progreso / Completada / Omitida / Error (texto + color + icono). Se guardan **por mes** en CONFIG (`plan_est_AAAA-MM`, sin hojas nuevas) y solo pasan a Completada tras la confirmación del backend **y** la relectura de Sheets (`verificarPlantillasAplicadas`).
-- **Aplicada vs. Se creará**: el estado de cada plantilla sale de la aplicación real del mes (FUENTES_MESES / PRESUPUESTOS); la vista previa muestra la operación: *Crear aplicación mensual*, *Actualizar aplicación existente*, *Sin cambios*, *Omitir*. Los meses anteriores al corte conservan su comportamiento histórico y no se reescriben.
+- **Aplicada vs. Se creará**: el estado de cada plantilla sale de la aplicación real del mes (FONDOS_PRESUPUESTO_MESES / PRESUPUESTOS); la vista previa muestra la operación: *Crear aplicación mensual*, *Actualizar aplicación existente*, *Sin cambios*, *Omitir*. Los meses anteriores al corte conservan su comportamiento histórico y no se reescriben.
 - **Modales estables**: confirmación sobre el módulo con estado de carga, error con «Reintentar», y Escape/X/clic fuera bloqueados mientras se guarda.
 - **Resumen real**: conteos y totales leídos de los datos, indicadores y accesos «Revisar …»; «Finalizar» solo guarda el estado (no vuelve a crear nada) y lo omitido no se muestra como ejecutado.
 - Pruebas: `e2e/v120.spec.ts`, `src/lib/planificar.test.ts` y el test de paridad de IDs frontend↔backend en `backend.test.ts`.
 
 ## Novedades v1.19.2 / v1.19.0
 
-- **Aislamiento por mes:** desde **noviembre de 2026** (CONFIG `aislamiento_desde`, `9999-12` lo apaga) cada mes tiene sus propias fuentes y subcajas *aplicadas*: nada se arrastra solo. Una fuente cuenta en un mes solo si tiene su fila `solo` en `FUENTES_MESES` (o es de un único mes); una subcaja, solo si tiene su fila en `PRESUPUESTOS`. Los meses anteriores conservan exactamente su comportamiento histórico (no se inventa historial ni hay migración). Editar noviembre no cambia octubre ni diciembre.
-- **Estados vacíos por mes** en Cajas y Dashboard con acciones: *Configurar fuentes/subcajas del mes*, *Usar plantillas mensuales* y *Copiar configuración del mes anterior* (vista previa editable, sin duplicar ni sobrescribir). Los gastos reales se conservan y no se muestran porcentajes engañosos.
-- **Nueva fuente / subcaja** se aplica al mes seleccionado; el formulario muestra **Mes de aplicación**.
-- **Planificación mensual:** asistente *Prepara tu mes* (Fuentes → Subcajas → Gastos → Resumen). Nada se guarda hasta **Aplicar planificación**; avanzar nunca registra gastos. Estados pendiente / en progreso / completada / descartada (+ pospuesta) y por etapa (hecha / omitida).
+- **Aislamiento por mes:** desde **noviembre de 2026** (CONFIG `aislamiento_desde`, `9999-12` lo apaga) cada mes tiene sus propias fondos y subcajas *aplicadas*: nada se arrastra solo. Un fondo cuenta en un mes solo si tiene su fila `solo` en `FONDOS_PRESUPUESTO_MESES` (o es de un único mes); una subcaja, solo si tiene su fila en `PRESUPUESTOS`. Los meses anteriores conservan exactamente su comportamiento histórico (no se inventa historial ni hay migración). Editar noviembre no cambia octubre ni diciembre.
+- **Estados vacíos por mes** en Cajas y Dashboard con acciones: *Configurar fondos/subcajas del mes*, *Usar plantillas mensuales* y *Copiar configuración del mes anterior* (vista previa editable, sin duplicar ni sobrescribir). Los gastos reales se conservan y no se muestran porcentajes engañosos.
+- **Nuevo fondo / subcaja** se aplica al mes seleccionado; el formulario muestra **Mes de aplicación**.
+- **Planificación mensual:** asistente *Prepara tu mes* (Fondos → Subcajas → Gastos → Resumen). Nada se guarda hasta **Aplicar planificación**; avanzar nunca registra gastos. Estados pendiente / en progreso / completada / descartada (+ pospuesta) y por etapa (hecha / omitida).
 - **Campana** en la barra superior (antes de Actualizar) con badge y panel: *Preparar ahora*, *Recordar después* (mañana), *Descartar aviso del mes*. Solo avisos dentro de la app, sin notificaciones del sistema; se calculan al abrir, solo del mes actual y hasta 2 anteriores (sin avalancha) y nunca de meses previos al corte.
 - **Configuración → Planificación mensual y recordatorios:** activar/desactivar, día predeterminado, día y ON/OFF por mes y año (valida días reales, bisiestos incluidos), mismo día a todos, copiar del año anterior, restablecer, próximas fechas. Zona horaria `America/Lima` (fechas como texto, sin conversión UTC).
 - **Descripciones normalizadas** (`normalizarDescripcion`, idéntica en la web y en Apps Script): primera palabra en mayúscula, conectores en minúscula (lista cerrada), el resto con inicial mayúscula; excepciones de marca/frase (ChatGPT, iPhone, YouTube, Netflix, USD, API, *papa a la Huancaina*…) editables en CONFIG `desc_excepciones`. Se aplica al salir del campo y antes de guardar (cajas, plantillas, gastos, clones, lotes y aplicación de plantillas); no reescribe registros históricos y es idempotente.
@@ -164,21 +164,21 @@ Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo)
 
 ### v1.19.3
 
-- **Fuentes de dinero:** cuando no hay fuentes se muestra un estado vacío igual al de Subcajas («Aún no tienes fuentes» + botón *Crear mi primera fuente*).
+- **Fondos del presupuesto:** cuando no hay fondos se muestra un estado vacío igual al de Subcajas («Aún no tienes fondos» + botón *Crear mi primer fondo*).
 
 ### Corrección v1.19.2 (una sola hoja de plantillas)
 
-- **Todas las plantillas viven en `PLANTILLAS_FINANCIERAS`**, distinguidas por la columna *Tipo*: `fuente`, `subcaja` y `gasto` (gastos mensuales). Se añadió la columna **`Datos`** (JSON propio de cada tipo; en `gasto`: `{ambito, categoria, subcategoria, tipoGasto, esCompromiso, esRecurrente}`). El estado Aplicada/Omitida por mes de fuentes y subcajas sigue en *Estados*.
+- **Todas las plantillas viven en `PLANTILLAS_FINANCIERAS`**, distinguidas por la columna *Tipo*: `fondo`, `subcaja` y `gasto` (gastos mensuales). Se añadió la columna **`Datos`** (JSON propio de cada tipo; en `gasto`: `{ambito, categoria, subcategoria, tipoGasto, esCompromiso, esRecurrente}`). El estado Aplicada/Omitida por mes de fondos y subcajas sigue en *Estados*.
 - **Migración automática y única** de `PLANTILLAS_MENSUALES` → `PLANTILLAS_FINANCIERAS` (mismos IDs `pl-…`, fechas y orden; los vínculos de `VINCULOS_PLANTILLAS` siguen valiendo). Antes se crea un respaldo del archivo. La hoja anterior no se modifica: puedes borrarla a mano cuando verifiques. También se puede forzar con `migrarPlantillas()`.
-- Ya no se crean `PLANTILLAS_FUENTES`, `PLANTILLAS_SUBCAJAS` ni `PLANTILLAS_MENSUALES` (instalaciones nuevas).
-- Hojas que usa la app: `GASTOS`, `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS`, `CONFIG`, `FUENTES`, `FUENTES_MESES`, `PLANTILLAS_FINANCIERAS`, `VINCULOS_PLANTILLAS`, `REVISIONES_CALIDAD` y `ORDEN_GASTOS` (esta última se crea al reordenar la tabla de gastos).
+- Ya no se crean `PLANTILLAS_FONDOS_PRESUPUESTO`, `PLANTILLAS_SUBCAJAS` ni `PLANTILLAS_MENSUALES` (instalaciones nuevas).
+- Hojas que usa la app: `GASTOS`, `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS`, `CONFIG`, `FONDOS_PRESUPUESTO`, `FONDOS_PRESUPUESTO_MESES`, `PLANTILLAS_FINANCIERAS`, `VINCULOS_PLANTILLAS`, `REVISIONES_CALIDAD` y `ORDEN_GASTOS` (esta última se crea al reordenar la tabla de gastos).
 - Para ver los cambios hay que volver a desplegar `Code.gs` (nueva versión de la implementación, misma URL).
 
 ### Despliegue de v1.19.0
 
 1. Copia `apps-script/Code.gs` y publica una **nueva versión** de la implementación (la URL no cambia).
 2. Claves nuevas en CONFIG (se crean al primer uso, sin tocar tus datos): `desc_excepciones`, `aislamiento_desde`, `plan_activo`, `plan_dia`, `plan_dias_AAAA`, `plan_est_AAAA-MM`.
-3. **Noviembre 2026 empieza sin fuentes ni subcajas aplicadas** (es lo esperado): usa la campana o *Copiar configuración del mes anterior*.
+3. **Noviembre 2026 empieza sin fondos ni subcajas aplicadas** (es lo esperado): usa la campana o *Copiar configuración del mes anterior*.
 
 ## Novedades v1.18.0
 
@@ -186,10 +186,10 @@ Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo)
 
 ## Novedades v1.17.0
 
-- **Fuentes mensuales y Subcajas mensuales**: plantillas reutilizables (crear desde cero o desde una existente, editar, clonar, eliminar, activar/desactivar, reordenar, selección múltiple). Cada una se aplica a un mes concreto con importe temporal, vista previa y confirmación; estados *Pendiente / Aplicada / No aplica este mes*. Reaplicar no duplica; el importe predeterminado se conserva para los demás meses. Una subcaja solo reserva: nunca crea dinero.
-- **Guardar como plantilla** en el menú ⋯ de cada fuente y subcaja (deduplicado por ID; si ya existe se ofrece verla o editarla).
-- **Móvil compacto**: filas de Fuentes, Subcajas y Gastos mensuales en dos líneas, acciones deslizando (con botón y teclado como alternativa; Eliminar siempre pide confirmación). Menú «Agregar» del Catálogo anclado y dentro de la pantalla; los menús ⋯ ya funcionan dentro de modales.
-- **Persistencia**: una sola hoja, `PLANTILLAS_FINANCIERAS` (Tipo `fuente`/`subcaja`/`gasto`, columna `Datos` en JSON); los meses aplicados reutilizan `FUENTES_MESES` y `PRESUPUESTOS`.
+- **Fondos mensuales y Subcajas mensuales**: plantillas reutilizables (crear desde cero o desde una existente, editar, clonar, eliminar, activar/desactivar, reordenar, selección múltiple). Cada una se aplica a un mes concreto con importe temporal, vista previa y confirmación; estados *Pendiente / Aplicada / No aplica este mes*. Reaplicar no duplica; el importe predeterminado se conserva para los demás meses. Una subcaja solo reserva: nunca crea dinero.
+- **Guardar como plantilla** en el menú ⋯ de cada fondo y subcaja (deduplicado por ID; si ya existe se ofrece verla o editarla).
+- **Móvil compacto**: filas de Fondos, Subcajas y Gastos mensuales en dos líneas, acciones deslizando (con botón y teclado como alternativa; Eliminar siempre pide confirmación). Menú «Agregar» del Catálogo anclado y dentro de la pantalla; los menús ⋯ ya funcionan dentro de modales.
+- **Persistencia**: una sola hoja, `PLANTILLAS_FINANCIERAS` (Tipo `fondo`/`subcaja`/`gasto`, columna `Datos` en JSON); los meses aplicados reutilizan `FONDOS_PRESUPUESTO_MESES` y `PRESUPUESTOS`.
 - **Despliegue**: volver a desplegar `Code.gs` en Apps Script y publicar en Netlify.
 
 ## Novedades v1.16.0
@@ -199,8 +199,8 @@ Solo frontend: **el `Code.gs` sigue en v1.19.3 (no hay que volver a desplegarlo)
 - **Navegación:** barra lateral (contraída por defecto, 68–76 px; expandida 220–248 px; el estado se guarda en `deejota.sidebar.collapsed`), barra superior compacta, panel temporal en tablet y barra inferior Dashboard / Gastos / Cajas / Más en móvil. Una sola lista central de módulos (`lib/navegacion.ts`).
 - **Preferencias:** todos los campos usan el `Combobox` moderno; la actualización automática ofrece solo 0 / 30 / 60 / 300 / 600 s. Un valor antiguo (120, 900, 1800…) se trata como Desactivada sin escribir en la hoja.
 - **Calendarios propios:** `DatePicker`, `MonthPicker` y selector de rango (período).
-- **Fuentes y subcajas:** vista Lista por defecto (se recuerda por separado), reordenar arrastrando o con teclado (Espacio y flechas), formulario de fuente mejorado.
-- **Medios por fuente:** una fuente puede tener 0, 1 o N medios; el importe no se multiplica ni se divide, y varias fuentes pueden compartir un medio (se usan en el orden de la lista hasta agotar su cupo).
+- **Fondos y subcajas:** vista Lista por defecto (se recuerda por separado), reordenar arrastrando o con teclado (Espacio y flechas), formulario de fondo mejorado.
+- **Medios por fondo:** un fondo puede tener 0, 1 o N medios; el importe no se multiplica ni se divide, y varios fondos pueden compartir un medio (se usan en el orden de la lista hasta agotar su cupo).
 - **Gastos:** orden personalizado global, selección múltiple y eliminación en lote (todo o nada).
 - **Configuración:** grupos de funciones del backend y consola contraídos por defecto; plantilla mensual en dos columnas.
 - **Auditoría:** zona horaria desde `CONFIG`, comparación de token en tiempo constante, bundles divididos (entrada ~281 KB).
@@ -224,24 +224,24 @@ Vuelve a pegar `apps-script/Code.gs` en tu proyecto de Apps Script y haz **Imple
 - **Configuración rediseñada** (sin perder funciones): encabezado con estado, conexión a Google Sheets (token oculto con ojo para verlo), Preferencias en tres grupos (Moneda y finanzas · Regionalización · Interfaz y experiencia), Administración de datos, Funciones del backend en acordeones por categoría con una **consola de resultados** (función, estado, duración, copiar, expandir/contraer, desplazamiento interno) y "Acerca de" compacto.
 - **Duplicado eliminado:** "Completar vacíos" ejecutaba la misma operación desde Administración de datos y desde Funciones del backend; queda solo en *Mantenimiento de la hoja*. "Administrar catálogo/Actualizar catálogo", "Crear respaldo/Autorizar respaldos" y "Abrir hoja/Mis archivos" hacen cosas distintas y se conservan.
 - **Catálogo:** se quitó el botón inferior "Nuevo medio de pago"; se crea desde **+ Agregar → Nuevo medio de pago**.
-- **Cajas:** se quitó el panel grande de Presupuesto consolidado (sigue en el Dashboard y Salud financiera). El botón "Ajustar presupuesto" (cuando no hay fuentes) pasó a la cabecera. Sin cambios en fórmulas ni en el backend.
+- **Cajas:** se quitó el panel grande de Presupuesto consolidado (sigue en el Dashboard y Salud financiera). El botón "Ajustar presupuesto" (cuando no hay fondos) pasó a la cabecera. Sin cambios en fórmulas ni en el backend.
 
 ## Novedades v1.13.0
 
-- **Sincronización con Google Sheets corregida (causa raíz):** la web abría con la lectura en caché del servidor (10 min) y con una copia local, así que fuentes borradas a mano en la hoja seguían apareciendo. Ahora cada apertura/"Actualizar" lee la hoja directamente, la hoja manda (se reconcilia por ID: altas, ediciones y bajas), se conservan tus cambios pendientes y, si la lectura falla, aparece un aviso "datos sin confirmar" en vez de mostrar la copia como vigente. Refrescar nunca escribe en la hoja.
-- **Fuentes de dinero:** el menú ⋯ trae Subir, Bajar, Clonar y Eliminar. Clonar abre una vista previa editable (copia inactiva, sin gastos ni dinero). Eliminar pide confirmación, revisa dependencias y, si hay gastos atribuidos, no borra nada y ofrece desactivar. Nunca se borra un gasto.
+- **Sincronización con Google Sheets corregida (causa raíz):** la web abría con la lectura en caché del servidor (10 min) y con una copia local, así que fondos borradas a mano en la hoja seguían apareciendo. Ahora cada apertura/"Actualizar" lee la hoja directamente, la hoja manda (se reconcilia por ID: altas, ediciones y bajas), se conservan tus cambios pendientes y, si la lectura falla, aparece un aviso "datos sin confirmar" en vez de mostrar la copia como vigente. Refrescar nunca escribe en la hoja.
+- **Fondos del presupuesto:** el menú ⋯ trae Subir, Bajar, Clonar y Eliminar. Clonar abre una vista previa editable (copia inactiva, sin gastos ni dinero). Eliminar pide confirmación, revisa dependencias y, si hay gastos atribuidos, no borra nada y ofrece desactivar. Nunca se borra un gasto.
 - **Subcajas:** interruptor ON/OFF (columna `Activo` de `CAJAS`) y el mismo menú de 4 acciones en tarjetas y lista. Clonar copia la configuración con monto 0 e inactiva; eliminar revisa dependencias y ofrece desactivar. Desactivar no crea ni borra dinero.
-- Nueva acción de backend `deleteFuente`.
+- Nueva acción de backend `deleteFondo`.
 
 ### Despliegue de v1.13.0
 
-1. Copia `apps-script/Code.gs` a Apps Script y publica una **nueva versión** (necesaria para eliminar fuentes desde la web).
+1. Copia `apps-script/Code.gs` a Apps Script y publica una **nueva versión** (necesaria para eliminar fondos desde la web).
 
 ## Novedades v1.12.0
 
 - **Globos de información corregidos:** el ⓘ (p. ej. "Caja mensual" o "Presupuesto consolidado") siempre se muestra por encima de las tarjetas vecinas y no se recorta; abre con el mouse, con el toque y con el teclado.
-- **Nueva fuente y Nueva caja sin selector de icono/color:** el aspecto es siempre automático (fuente con medio = el de ese medio; fuente libre = General; caja = el de su alcance); la vista previa lo muestra.
-- **Medios de pago personalizables:** al crear un medio eliges su icono y color (y puedes cambiarlos después con el lápiz). Se ven igual en gastos, filtros, fuentes y cajas, y **se guardan en la hoja `MEDIOS_PAGO`** (nuevas columnas `Icono` y `Color`).
+- **Nuevo fondo y Nueva caja sin selector de icono/color:** el aspecto es siempre automático (fondo con medio = el de ese medio; fondo libre = General; caja = el de su alcance); la vista previa lo muestra.
+- **Medios de pago personalizables:** al crear un medio eliges su icono y color (y puedes cambiarlos después con el lápiz). Se ven igual en gastos, filtros, fondos y cajas, y **se guardan en la hoja `MEDIOS_PAGO`** (nuevas columnas `Icono` y `Color`).
 - **Funciones del backend desde la web** (Configuración): ejecuta con un clic las funciones de `Code.gs` que antes corrías en el editor (`setup`, `misArchivos`, `crearTokenAtajo`, `revocarTokenAtajo`, `autorizarRespaldos`, `migrarPlantillas`, `actualizarCatalogo`, `repararIds`, `repararHojas`, `generarDatosPrueba`, `borrarDatosPrueba`, diagnóstico y completar vacíos) y ve su respuesta (tokens, URLs, conteos) en un área de resultado con botón de copiar. Las que cambian o borran piden confirmación. Requiere volver a desplegar `Code.gs`.
 
 ### Despliegue de v1.12.0
@@ -251,13 +251,13 @@ Vuelve a pegar `apps-script/Code.gs` en tu proyecto de Apps Script y haz **Imple
 
 ## Novedades v1.11.0
 
-- **Aspecto automático coherente:** una fuente con medio de pago se ve exactamente como ese medio (Yape = Yape); una fuente libre se ve como **General**. Las cajas toman el icono y color de su alcance (ámbito, categoría, subcategoría o medio de pago).
+- **Aspecto automático coherente:** un fondo con medio de pago se ve exactamente como ese medio (Yape = Yape); un fondo libre se ve como **General**. Las cajas toman el icono y color de su alcance (ámbito, categoría, subcategoría o medio de pago).
 - **Categorías y subcategorías compartidas entre ámbitos:** cambiar el icono o color de "Transporte" en Personal lo cambia en todos los ámbitos; crear una categoría que ya existe en otro ámbito hereda su aspecto.
 - **Selector de color compacto:** una fila de 10 colores y, en "Más colores", la paleta completa (64) y un color libre.
 - **Pestaña Catálogo** (antes Categorías): ámbitos, categorías, subcategorías **y medios de pago** (ya no se agregan en Configuración).
 - **Conectar** junto a "Mi hoja", disponible en cualquier pestaña.
 - **Actualización automática** configurable en Configuración (desactivada, 30 s … 30 min; por defecto 5 min) con aviso verde "Datos actualizados".
-- **Hoja sin celdas vacías:** Activo = TRUE, Orden correlativo, Icono = `auto` y, en fuentes sin medio, Medio de pago = `Libre`; botón "Completar vacíos" en Configuración (se ejecuta solo una vez por versión).
+- **Hoja sin celdas vacías:** Activo = TRUE, Orden correlativo, Icono = `auto` y, en fondos sin medio, Medio de pago = `Libre`; botón "Completar vacíos" en Configuración (se ejecuta solo una vez por versión).
 - **Plantilla compacta:** Tipo de gasto, Es recurrente y Es compromiso en una sola fila; el formulario cabe sin desplazarse en escritorio.
 
 ### Despliegue de v1.11.0
@@ -267,8 +267,8 @@ Vuelve a pegar `apps-script/Code.gs` en tu proyecto de Apps Script y haz **Imple
 
 ## Novedades v1.10.0
 
-- **Cascada de fuentes libres:** un gasto consume primero la fuente principal (General) hasta su tope y el resto pasa a la siguiente fuente libre (p. ej. Viaje a Ica); nadie queda en negativo mientras haya saldo. Las fuentes ligadas a un medio de pago (Sodexo…) solo cubren su propio medio.
-- **Icono y color** elegibles en fuentes y cajas; por defecto siguen al medio de pago (fuentes) o al ámbito/categoría/medio (cajas). Un solo aspecto en Dashboard, Cajas, Configuración y Categorías.
+- **Cascada de fondos libres:** un gasto consume primero el fondo principal (General) hasta su tope y el resto pasa a la siguiente fondo libre (p. ej. Viaje a Ica); nadie queda en negativo mientras haya saldo. Los fondos ligadas a un medio de pago (Sodexo…) solo cubren su propio medio.
+- **Icono y color** elegibles en fondos y cajas; por defecto siguen al medio de pago (fondos) o al ámbito/categoría/medio (cajas). Un solo aspecto en Dashboard, Cajas, Configuración y Categorías.
 - **Paleta de 64 colores + color libre** y ~250 iconos para ámbitos, categorías y subcategorías.
 - **Plantillas con "Tipo de gasto" y "Es recurrente"** (se precargan en Nuevo gasto).
 - Hoja: `CAJAS` gana la columna *Icono* y `PLANTILLAS_MENSUALES` las columnas *Tipo de gasto* y *Es recurrente* (se migran solas). **Vuelve a desplegar el Apps Script (v1.10.0).**
@@ -286,7 +286,7 @@ Vuelve a pegar `apps-script/Code.gs` en tu proyecto de Apps Script y haz **Imple
 
 | Punto | Qué cambió |
 |---|---|
-| Dashboard | Orden: Resumen → filtros → KPIs → **Presupuesto consolidado** (`N fuentes activas · Mes AAAA`) → acordeones **Fuentes de dinero** y **Subcajas / reservas** (cerrados al entrar, con resumen y “Administrar en Cajas”) → gráficos. Se quitaron las tarjetas grandes de subcajas y la tarjeta **Top 10 subcategorías**. |
+| Dashboard | Orden: Resumen → filtros → KPIs → **Presupuesto consolidado** (`N fondos activos · Mes AAAA`) → acordeones **Fondos del presupuesto** y **Subcajas / reservas** (cerrados al entrar, con resumen y “Administrar en Cajas”) → gráficos. Se quitaron las tarjetas grandes de subcajas y la tarjeta **Top 10 subcategorías**. |
 | Top 5 | Una sola tarjeta con selector **Categorías / Subcategorías**. Las subcategorías se agrupan por ámbito › categoría › subcategoría (los “Otros” no se mezclan). La opción se recuerda durante la sesión. |
 | Jerarquía | Empieza **totalmente contraída** (ámbitos y categorías); se abre solo con clic. Expandir/Contraer todo. Una consulta nueva (período o filtros) vuelve a contraer. |
 | Cifras idénticas | Un único bloque `PresupuestoConsolidado` (mismas 8 cifras y nombres) en Dashboard y Cajas; Salud usa los mismos nombres. El motor agrega `gastadoPeriodo` y `reservasSinUsar`, y se cumple siempre: disponible = saldo libre + reservas sin usar (probado con 200 escenarios aleatorios). |
@@ -302,19 +302,19 @@ Pega el `Code.gs` nuevo y publica una **Nueva versión**. Para el atajo, ejecuta
 
 | Punto | Qué cambió |
 |---|---|
-| Fuentes de dinero | Ilimitadas (General, Sodexo, Extra 1, Bonificación…): nombre, monto, moneda, color, recurrencia (**todos los meses** desde un mes, o **solo un mes**), mes de aplicación, medio de pago asociado opcional y estado. Botón **+ Nueva fuente** con validación (nombre único, monto ≥ 0, moneda permitida, mes válido) e ID fijo por formulario: doble clic o reintento no duplica. Guardar no bloquea la navegación. |
-| Presupuesto consolidado | Con al menos una fuente, **P = Σ aportes del período de las fuentes activas**; las subcajas siguen siendo reservas dentro de P. Sin fuentes, P sigue siendo la caja general (hojas anteriores funcionan igual). Ejemplo: 3,500 + 280 + 1,000 = 4,780; con S/ 500 gastados, disponible 4,280; reservas de 950 no cambian los 4,780. |
-| Por mes | Importes por mes en la hoja **FUENTES_MESES**: “solo este mes” o “desde este mes en adelante”. Editar un mes nunca toca los anteriores; un ingreso extraordinario no se arrastra. Se puede quitar el ajuste de un mes. |
-| Activar / desactivar | Interruptor ON/OFF en cada fuente. Antes de apagar una fuente que aporta o tiene gastos se muestra el impacto (presupuesto y disponible antes/después). La fuente queda guardada y nada se borra ni se reasigna; los gastos pagados con el medio de una fuente inactiva siguen descontando y se muestran en una **conciliación** aparte. |
-| Atribución | Cada gasto se atribuye a una sola fuente: la que tiene su medio de pago (p. ej. Sodexo) o la fuente principal (primera fuente libre activa con importe). Solo informa cuánto se usó de cada fuente; el total gastado no cambia. |
-| Pestaña Cajas | Orden: Fuentes de dinero → Presupuesto consolidado (total fuentes, total gastado, disponible, reservado, libre inicial, gastado fuera, saldo libre, % consumido) → Reservas / subcajas. Con muchas fuentes: búsqueda, filtro por estado, vista tarjetas/lista y “Ver las N fuentes”. Probado con 0, 2, 3, 5, 10 y 20 fuentes. |
-| Migración | No automática. Sin fuentes, la pestaña ofrece **Crear fuente General** con el presupuesto de la caja general y copia sus ajustes mensuales (ningún mes cambia); hace respaldo antes y es idempotente. **Sodexo no se convierte sola**: si su dinero no está incluido en tu presupuesto general, crea la fuente tú. Las hojas FUENTES y FUENTES_MESES se crean solas (con respaldo previo) al guardar la primera fuente. |
+| Fondos del presupuesto | Ilimitadas (General, Sodexo, Extra 1, Bonificación…): nombre, monto, moneda, color, recurrencia (**todos los meses** desde un mes, o **solo un mes**), mes de aplicación, medio de pago asociado opcional y estado. Botón **+ Nuevo fondo** con validación (nombre único, monto ≥ 0, moneda permitida, mes válido) e ID fijo por formulario: doble clic o reintento no duplica. Guardar no bloquea la navegación. |
+| Presupuesto consolidado | Con al menos un fondo, **P = Σ aportes del período de los fondos activos**; las subcajas siguen siendo reservas dentro de P. Sin fondos, P sigue siendo la caja general (hojas anteriores funcionan igual). Ejemplo: 3,500 + 280 + 1,000 = 4,780; con S/ 500 gastados, disponible 4,280; reservas de 950 no cambian los 4,780. |
+| Por mes | Importes por mes en la hoja **FONDOS_PRESUPUESTO_MESES**: “solo este mes” o “desde este mes en adelante”. Editar un mes nunca toca los anteriores; un ingreso extraordinario no se arrastra. Se puede quitar el ajuste de un mes. |
+| Activar / desactivar | Interruptor ON/OFF en cada fondo. Antes de apagar un fondo que aporta o tiene gastos se muestra el impacto (presupuesto y disponible antes/después). El fondo queda guardado y nada se borra ni se reasigna; los gastos pagados con el medio de un fondo inactivo siguen descontando y se muestran en una **conciliación** aparte. |
+| Atribución | Cada gasto se atribuye a una sola fondo: la que tiene su medio de pago (p. ej. Sodexo) o el fondo principal (primer fondo libre activa con importe). Solo informa cuánto se usó de cada fondo; el total gastado no cambia. |
+| Pestaña Cajas | Orden: Fondos del presupuesto → Presupuesto consolidado (total fondos, total gastado, disponible, reservado, libre inicial, gastado fuera, saldo libre, % consumido) → Reservas / subcajas. Con muchas fondos: búsqueda, filtro por estado, vista tarjetas/lista y “Ver las N fondos”. Probado con 0, 2, 3, 5, 10 y 20 fondos. |
+| Migración | No automática. Sin fondos, la pestaña ofrece **Crear fondo General** con el presupuesto de la caja general y copia sus ajustes mensuales (ningún mes cambia); hace respaldo antes y es idempotente. **Sodexo no se convierte sola**: si su dinero no está incluido en tu presupuesto general, crea el fondo tú. Las hojas FONDOS_PRESUPUESTO y FONDOS_PRESUPUESTO_MESES se crean solas (con respaldo previo) al guardar el primer fondo. |
 | Configuración | Ya no muestra “Cajas y presupuestos” (solo visual: no se borró ninguna hoja ni dato). Todo se administra en Cajas. |
 | Coherencia | Dashboard, Cajas y Salud financiera arman el contexto del motor en un único lugar (`useAgregado`): mismas cifras. |
 | Menú | Orden: Dashboard, Gastos, Cajas, Categorías, Salud financiera, Configuración. Centrado en la barra. |
 
 ### Despliegue de v1.8.0
-Pega el `Code.gs` nuevo y publica una **Nueva versión** de la implementación. Acciones nuevas: `saveFuente`, `saveFuenteMes`, `reorderFuentes`, `migrarGeneralAFuente`. La web se publica al fusionar en `main`.
+Pega el `Code.gs` nuevo y publica una **Nueva versión** de la implementación. Acciones nuevas: `saveFondo`, `saveFondoMes`, `reorderFondos`, `migrarGeneralAFondo`. La web se publica al fusionar en `main`.
 
 ## Novedades v1.7.0
 

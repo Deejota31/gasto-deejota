@@ -16,7 +16,7 @@ import { cajaLook, COLORS, sortMedios } from '../lib/visual'
 import { Combobox, type Opcion } from '../components/Combobox'
 import { PeriodPicker } from '../components/shared'
 import { CajaModal } from '../components/cajas'
-import { FuentesSeccion, Toggle } from '../components/fuentes'
+import { FondosSeccion, Toggle } from '../components/fondos'
 import { MonthPicker } from '../components/DatePicker'
 import { BarraPlan, VacioMes, type PlanificacionApi } from '../components/Planificacion'
 import { MenuAcciones, type AccionMenu } from '../components/MenuAcciones'
@@ -53,7 +53,7 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
   const base = data?.config.moneda || 'PEN'
   const money = useCallback((c: number) => formatMoney(c, base), [base])
   const cajas = data?.cajas
-  // Mismo motor y mismo contexto (fuentes, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  // Mismo motor y mismo contexto (fondos, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
   const a = useAgregado(data, filters, today)
   const mes = singleMonth(filters.desde, filters.hasta)
   const [q, setQ] = useState('')
@@ -117,9 +117,9 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
   return (
     <div className="space-y-4">
       <Cabecera c={c} money={money} filters={filters} setFilters={setFilters} today={today} n={items.length}
-        onAjustar={c.general && c.origen !== 'fuentes' ? () => setAjustar({ caja: c.general!, asignado: c.presupuesto }) : undefined} />
+        onAjustar={c.general && c.origen !== 'fondos' ? () => setAjustar({ caja: c.general!, asignado: c.presupuesto }) : undefined} />
       {mes && <BarraPlan store={store} hoy={today} mes={mes} plan={plan} />}
-      <FuentesSeccion plan={plan} plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
+      <FondosSeccion plan={plan} plantillas={plantillas} store={store} c={c} mes={mes} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)} hoyMes={today.slice(0, 7)} />
 
       <section className="rounded-3xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.04)] sm:p-5" aria-label="Reservas y cajas">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -196,7 +196,7 @@ export default function Cajas({ store, filters, setFilters, today, plan }: { pla
 function Cabecera({ c, money, filters, setFilters, today, n, onAjustar }: {
   c: CajasResumen; money: (n: number) => string; filters: Filters; setFilters: (f: Filters) => void; today: string; n: number; onAjustar?: () => void
 }) {
-  const nf = c.fuentes.lista.length
+  const nf = c.fondos.lista.length
   return (
     <div className="relative overflow-hidden rounded-3xl border border-line p-5 sm:p-6"
       style={{ background: 'radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, #F59E0B 12%, var(--card)) 0%, var(--card) 45%), radial-gradient(90% 120% at 100% 100%, color-mix(in srgb, #4F7BE8 12%, var(--card)) 0%, transparent 60%)' }}>
@@ -205,17 +205,17 @@ function Cabecera({ c, money, filters, setFilters, today, n, onAjustar }: {
           <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-card text-warning shadow-sm ring-1 ring-line"><Wallet className="size-6" /></span>
           <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight text-ink">Cajas y presupuestos</h1>
-            <p className="mt-0.5 text-sm text-muted">Tus fuentes de dinero forman el presupuesto consolidado; las cajas reservan partes de él.</p>
+            <p className="mt-0.5 text-sm text-muted">Tus fondos del presupuesto forman el presupuesto consolidado; las cajas reservan partes de él.</p>
           </div>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className="w-full sm:w-72"><PeriodPicker value={filters} today={today} onChange={p => setFilters({ ...filters, ...p })} /></div>
-        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fuente{nf === 1 ? '' : 's'} · {n} caja{n === 1 ? '' : 's'}</span>
+        <span className="text-[11px] text-muted">{formatDate(filters.desde)} – {formatDate(filters.hasta)} · {nf} fondo{nf === 1 ? '' : 's'} · {n} caja{n === 1 ? '' : 's'}</span>
         {onAjustar && <button type="button" onClick={onAjustar} className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-line px-3 py-2 text-xs font-medium text-ink hover:bg-bg"><Pencil className="size-3.5" /> Ajustar presupuesto</button>}
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="cajas-resumen">
-        <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fuentes' ? money(c.presupuesto) : '—'} />
+        <Mini label="Presupuesto consolidado" value={c.presupuesto || c.origen === 'fondos' ? money(c.presupuesto) : '—'} />
         <Mini label="Reservado en cajas" value={money(c.reservado)} tone="#6D5DD3" />
         <Mini label="Libre inicial" value={c.presupuesto ? money(c.libreInicial) : '—'} tone={c.libreInicial < 0 ? TONO.alerta.fg : undefined} />
         <Mini label="Gastado fuera de cajas" value={money(c.gastadoLibre)} tone="#E8664F" />

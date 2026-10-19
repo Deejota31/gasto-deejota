@@ -158,9 +158,8 @@ export default function App({ api }: { api?: Api }) {
           foco={foco} onVolverFoco={foco ? () => irATab(foco.desde) : undefined} />}
         {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}
           onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
-          onConcRevisarGastos={(desde, hasta) => { setFilters({ preset: 'custom', desde, hasta, ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }); irATab('gastos') }}
-          onConcNuevoGasto={fecha => openGasto('create', null, undefined, { ambito: 'Personal', categoria: '', subcategoria: '', descripcion: '', fecha })}
-          onConcIrFuentes={() => irATab('cajas')}
+          onRevisionRevisarGastos={(desde, hasta) => { setFilters({ preset: 'custom', desde, hasta, ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }); irATab('gastos') }}
+          onRevisionNuevoGasto={fecha => openGasto('create', null, undefined, { ambito: 'Personal', categoria: '', subcategoria: '', descripcion: '', fecha })}
           onRevisarGasto={g => { setFoco({ id: g.id, desde: 'salud' }); setTab('gastos'); if (!g.problemaId) openGasto('edit', g) }} /></Suspense>}
         {tab === 'catalogo' && <Catalogo store={store} />}
         {tab === 'config' && <Configuracion plan={plan} hoy={today} store={store} conn={conn} onConnect={setConn} notify={notify} goCatalogo={() => setTab('catalogo')} />}

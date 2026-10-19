@@ -1,29 +1,29 @@
 import { aggregate, aislaDesde, cajaMatches } from './engine'
 import { ratesFromConfig } from './money'
-import type { AppData, Caja, Filters, Fuente, Plantilla } from './types'
+import type { AppData, Caja, Filters, Fondo, Plantilla } from './types'
 
 /**
- * Dependencias de una fuente o subcaja antes de eliminarla. Ningún gasto guarda el ID de una fuente ni de una caja
+ * Dependencias de un fondo o subcaja antes de eliminarla. Ningún gasto guarda el ID de un fondo ni de una caja
  * (la atribución se calcula por medio de pago / alcance), así que eliminar nunca borra gastos; pero sí cambia a dónde
  * se atribuyen y qué presupuesto suman. Por eso, si hay gastos (de cualquier fecha) la web propone DESACTIVAR.
  */
 
 const filtroTotal = (desde: string, hasta: string): Filters => ({ preset: 'custom', desde, hasta, ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] })
 
-export interface DepsFuente { gastos: number; ajustes: number }
+export interface DepsFondo { gastos: number; ajustes: number }
 
-/** Gastos (todo el historial) atribuidos hoy a la fuente + cantidad de importes por mes propios que se borrarían con ella. */
-export function dependenciasFuente(f: Fuente, data: AppData, today: string): DepsFuente {
-  const ajustes = (data.fuentesMeses ?? []).filter(m => m.fuenteId === f.id).length
+/** Gastos (todo el historial) atribuidos hoy al fondo + cantidad de importes por mes propios que se borrarían con ella. */
+export function dependenciasFondo(f: Fondo, data: AppData, today: string): DepsFondo {
+  const ajustes = (data.fondosMeses ?? []).filter(m => m.fondoId === f.id).length
   const vivos = data.gastos.filter(g => g.estado !== 'Anulado')
   if (!vivos.length) return { gastos: 0, ajustes }
   const fechas = vivos.map(g => g.fecha).sort()
   const a = aggregate(data.gastos, filtroTotal(fechas[0], fechas.at(-1)! > today ? fechas.at(-1)! : today), {
     base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today, cajas: data.cajas, presupuestos: data.presupuestos,
-    fuentes: data.fuentes ?? [], fuentesMeses: data.fuentesMeses ?? [], aislarDesde: aislaDesde(data.config),
+    fondos: data.fondos ?? [], fondosMeses: data.fondosMeses ?? [], aislarDesde: aislaDesde(data.config),
   })
-  const r = a.cajas.fuentes.lista.find(x => x.fuente.id === f.id)
-  // En la cascada un gasto se cuenta en la primera fuente que toma parte; las siguientes solo reciben el excedente (gastado > 0).
+  const r = a.cajas.fondos.lista.find(x => x.fondo.id === f.id)
+  // En la cascada un gasto se cuenta en el primer fondo que toma parte; las siguientes solo reciben el excedente (gastado > 0).
   return { gastos: r ? (r.count > 0 ? r.count : r.gastado > 0 ? 1 : 0) : 0, ajustes }
 }
 

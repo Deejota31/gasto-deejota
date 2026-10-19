@@ -11,7 +11,7 @@ const grafico = (page: Page, n: 0 | 1) => page.locator('[data-testid="explorador
 
 async function abrir(page: Page, w = 1366, h = 900) {
   await page.setViewportSize({ width: w, height: h })
-  await page.goto('/?demo=60&fuentes=3')
+  await page.goto('/?demo=60&fondos=3')
   await expect(page.getByTestId('explorador-gasto')).toBeAttached()
   await page.getByTestId('explorador-gasto').scrollIntoViewIfNeeded()
 }
@@ -38,7 +38,7 @@ test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', 
   for (const [w, h] of [[1366, 768], [834, 1112], [390, 844]] as const) {
     test(`${w}×${h}: icono a la izquierda del título y del valor, ⓘ a la derecha, sin desborde ni solapes`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
-      await page.goto('/?demo=60&fuentes=3')
+      await page.goto('/?demo=60&fondos=3')
       for (const id of ids) {
         const c = page.getByTestId(id)
         await expect(c, id).toBeVisible()
@@ -63,7 +63,7 @@ test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', 
 
   test('1366: alturas uniformes por fila, cuatro por fila y sin la fila de tarjetas grandes', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const fila1 = await Promise.all(ids.slice(0, 4).map(async id => (await page.getByTestId(id).boundingBox())!))
     const fila2 = await Promise.all(ids.slice(4).map(async id => (await page.getByTestId(id).boundingBox())!))
     for (const f of [fila1, fila2]) { expect(new Set(f.map(b => Math.round(b.y))).size).toBe(1); expect(new Set(f.map(b => Math.round(b.height))).size).toBe(1) }
@@ -78,7 +78,7 @@ test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', 
 
   test('tablet 834 y móvil 390: dos por fila; las cifras clave siguen visibles', async ({ page }) => {
     await page.setViewportSize({ width: 834, height: 1112 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const ys = await Promise.all(ids.map(async id => Math.round((await page.getByTestId(id).boundingBox())!.y)))
     expect(new Set(ys).size).toBe(4)
     await page.setViewportSize({ width: 390, height: 844 })

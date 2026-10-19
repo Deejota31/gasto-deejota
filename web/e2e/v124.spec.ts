@@ -18,7 +18,7 @@ const KPI_SEL = '[data-testid="kpis"] > div'
 test.describe('KPIs complementarios: dentro del Presupuesto consolidado, compactos', () => {
   test('1366×768: cuatro mini-tarjetas en una fila, al final del bloque, bajas y sin sección separada', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     await expect(page.getByTestId('kpis').locator('> div p:first-of-type')).toHaveText(KPIS)
     await expect(page.getByTestId('consolidado').getByTestId('kpis')).toBeVisible()
     await expect(page.getByTestId('kpis')).toHaveCount(1)
@@ -35,7 +35,7 @@ test.describe('KPIs complementarios: dentro del Presupuesto consolidado, compact
   for (const [w, h, filas] of [[1024, 768, 1], [834, 1112, 2], [768, 1024, 2], [430, 932, 2], [390, 844, 2], [360, 740, 2]] as const) {
     test(`${w}×${h}: ${filas} fila(s), sin desborde ni superposición`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
-      await page.goto('/?demo=60&fuentes=3')
+      await page.goto('/?demo=60&fondos=3')
       await expect(page.getByTestId('kpis')).toBeVisible()
       const t = await cajas(page, KPI_SEL)
       expect(new Set(t.map(c => c.y)).size, `${w}px`).toBe(filas)
@@ -52,7 +52,7 @@ test.describe('KPIs complementarios: dentro del Presupuesto consolidado, compact
 test.describe('Filtros superiores', () => {
   test('1366×768: seis filtros en una fila, altura compacta, Período y textos largos con más ancho', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const nombres = ['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago', 'Tipo de gasto']
     const bs = await Promise.all(nombres.map(async n => (await page.getByRole('button', { name: n, exact: true }).boundingBox())!))
     const periodo = (await page.getByRole('button', { name: /^Período/ }).first().boundingBox())!
@@ -68,7 +68,7 @@ test.describe('Filtros superiores', () => {
 test.describe('Presupuesto consolidado', () => {
   test('conserva los ocho valores (cifras clave en línea arriba, indicadores debajo)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const ids = ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas', 'libre-inicial', 'gastado-fuera-de-reservas', 'saldo-libre-actual', 'consumido']
     for (const id of ids) await expect(page.getByTestId(`cons-${id}`)).toBeVisible()
     await expect(page.getByTestId('consolidado').locator('[data-testid^="cons-"]')).toHaveCount(8)
@@ -78,7 +78,7 @@ test.describe('Presupuesto consolidado', () => {
   })
 
   test('cifras coherentes: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin utilizar', async ({ page }) => {
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const v = async (id: string) => money(await celda(page, id).innerText())
     const P = await v('presupuesto-consolidado'), R = await v('reservado-en-cajas'), G = await v('gastado-del-período')
     expect(P).toBe(4780)
@@ -90,7 +90,7 @@ test.describe('Presupuesto consolidado', () => {
 
   test('barra segmentada: tooltip con nombre e importe, leyenda y teclado', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3&cajas=3')
+    await page.goto('/?demo=60&fondos=3&cajas=3')
     const barra = page.getByTestId('barra-presupuesto')
     await expect(barra).toBeVisible()
     await expect(barra.getByRole('list', { name: 'Leyenda de la distribución' })).toContainText('Gastado fuera de reservas')
@@ -116,7 +116,7 @@ test.describe('Presupuesto consolidado', () => {
     page.on('console', m => { if (m.type() === 'error') errores.push(m.text()) })
     page.on('pageerror', e => errores.push(String(e)))
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const estado = page.getByTestId('consolidado-estado')
     await expect(estado).toBeVisible()
     const disp0 = money(await celda(page, 'disponible-consolidado').innerText())
@@ -144,7 +144,7 @@ test.describe('Presupuesto consolidado', () => {
   })
 
   test('los filtros no cambian el presupuesto (período completo) pero sí los KPIs complementarios', async ({ page }) => {
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     const p0 = await celda(page, 'presupuesto-consolidado').innerText(), g0 = await celda(page, 'gastado-del-período').innerText()
     const n0 = Number((await page.getByTestId('kpis').getByText(/^\d+$/).first().innerText()))
     await page.getByRole('button', { name: 'Ámbito', exact: true }).click()
@@ -158,7 +158,7 @@ test.describe('Presupuesto consolidado', () => {
   test('oscuro: el estado y los tramos se ven y no hay desborde', async ({ page }) => {
     await page.addInitScript(() => { try { localStorage.setItem('deejota.tema', 'dark'); localStorage.setItem('theme', 'dark') } catch { /* */ } })
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/?demo=60&fuentes=3')
+    await page.goto('/?demo=60&fondos=3')
     await expect(page.getByTestId('consolidado-estado')).toBeVisible()
     await expect(page.getByTestId('barra-presupuesto')).toBeVisible()
     expect(await sinScrollH(page)).toBe(true)

@@ -6,7 +6,7 @@ import { InfoTooltip } from './ui'
 
 /**
  * Bloque único de "Presupuesto consolidado" del Dashboard: protagonista de la pantalla, en dos niveles.
- * No calcula nada: todo sale de `aggregate().cajas` (misma fuente que antes, mismas cifras y mismos nombres).
+ * No calcula nada: todo sale de `aggregate().cajas` (mismo fondo que antes, mismas cifras y mismos nombres).
  * El presupuesto usa el período completo (sin filtros de categoría, ámbito o medio), por eso su "Gastado del período"
  * puede diferir de los KPIs inferiores cuando hay filtros.
  *
@@ -46,11 +46,11 @@ function IconoIndicador({ icono, color }: { icono: ReactNode; color: string }) {
 
 export function PresupuestoConsolidado({ c, money, periodo, accion, complementarios }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode; complementarios?: Complementario[] }) {
   const P = c.presupuesto
-  const def = P > 0 || c.origen === 'fuentes'
+  const def = P > 0 || c.origen === 'fondos'
   const v = (n: number) => (def ? money(n) : '—')
   const estado = estadoPresupuesto(c, money)
-  const origen = c.origen === 'fuentes'
-    ? `${c.fuentes.activas} fuente${c.fuentes.activas === 1 ? '' : 's'} activa${c.fuentes.activas === 1 ? '' : 's'}`
+  const origen = c.origen === 'fondos'
+    ? `${c.fondos.activas} fondo${c.fondos.activas === 1 ? '' : 's'} activa${c.fondos.activas === 1 ? '' : 's'}`
     : `Desde ${c.general?.nombre ?? 'la caja general'}`
   const tonoSaldo = (n: number) => (def ? (n < 0 ? ESTADO.alerta : ESTADO.ok) : undefined)
   const IconoEstado = estado.tono === 'ok' ? CheckCircle2 : estado.tono === 'neutro' ? Info : AlertTriangle
@@ -64,7 +64,7 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
             <h2 className="truncate text-base font-semibold">Presupuesto consolidado</h2>
             <span className="rounded-full bg-white/15 [&_button]:text-white [&_button:hover]:bg-white/20">
               <InfoTooltip title="Cómo se calcula" align="left">
-                <p>Presupuesto consolidado = suma de lo que aportan las fuentes activas del período (sin fuentes: la caja general). Es el 100 % contra el que se mide todo lo demás.</p>
+                <p>Presupuesto consolidado = suma de lo que aportan los fondos activos del período (sin fondos: la caja general). Es el 100 % contra el que se mide todo lo demás.</p>
                 <p><b>Gastado:</b> todos los gastos activos del período, cada uno una sola vez. No usa los filtros de ámbito, categoría, subcategoría, medio ni tipo.</p>
                 <p><b>Reservado en cajas:</b> lo asignado a las cajas activas. Es una parte del presupuesto, no dinero adicional.</p>
                 <p><b>Disponible consolidado</b> = presupuesto − gastado. <b>Saldo libre</b> = libre inicial − gastado fuera de reservas − excesos de cajas. Siempre se cumple: disponible = saldo libre + reservas sin utilizar.</p>

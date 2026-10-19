@@ -30,26 +30,13 @@ export interface Gasto {
 /** Decisión sobre una alerta de calidad. `firma` resume los datos revisados: si cambian, la alerta vuelve. */
 export type EstadoRevision = 'legitimo' | 'pendiente' | 'duplicado'
 /**
- * Conciliación de saldos (v1.22). Hoja de solo agregar: una fila es un hecho que no se edita.
- * tipo 'verificacion' = saldo real comprobado vs saldo presupuestario (foto) en una fecha de corte; 'seguimiento' = estado/causa
- * de una verificación; 'grupo' = definición de un grupo de fondos (conjunto de fuentes). Nada de esto es una transacción.
+ * Revisión del presupuesto (v1.26). Hoja de solo agregar: cada fila es un registro de revisión de un período; la vigente es la
+ * última. No hay saldos reales ni importes inventados: `pendientes` es texto libre sobre gastos anteriores por registrar.
  */
-export type TipoConc = 'verificacion' | 'seguimiento' | 'grupo'
-export type EstadoConc = 'pendiente' | 'en_revision' | 'conciliada' | 'cerrada_justificada'
-export type CausaConc = 'gasto_pendiente' | 'ingreso_pendiente' | 'saldo_anterior' | 'comision' | 'reembolso' | 'no_identificada' | 'otro'
-export interface ConcFila {
-  id: string; tipo: TipoConc; conciliacionId: string; periodo: string
-  /** Instante de la verificación (ISO UTC). */
-  corte: string
-  grupoId: string; grupo: string; moneda: string
-  calculado: number | null; real: number | null; diferencia: number | null
-  /** verificacion/seguimiento: EstadoConc · grupo: 'activo' | 'archivado' */
-  estado: string
-  causa: string; observacion: string; reemplazaA: string
-  /** verificacion: huella de los datos al verificar · grupo: IDs de fuentes separados por coma. */
-  referencia: string
-  creadoEn: string
-}
+export type EstadoRevisionPres = 'pendiente' | 'completo' | 'con_gastos_anteriores' | 'revisado_con_observaciones'
+export interface RevisionPres { id: string; periodo: string; estado: EstadoRevisionPres; pendientes: string; observacion: string; creadoEn: string }
+/** Qué falta migrar de la hoja a “Fondos del presupuesto” (lo calcula el backend). */
+export interface MigracionEstado { pendiente: boolean; hojasViejas: string[]; plantillasPorConvertir: number; fondosSinTipo: number }
 
 export interface Revision { id: string; tipo: 'duplicado'; ids: string[]; estado: EstadoRevision; firma: string; creadoEn: string; actualizadoEn: string }
 
@@ -88,32 +75,40 @@ export interface Caja {
 export interface Presupuesto { periodo: string; cajaId: string; monto: number }
 
 /**
- * Fuente de dinero (v1.8): de dónde sale el presupuesto del mes (General, Sodexo, Extra 1…). Es configuración
- * reutilizable; su aporte a cada mes lo dan `recurrencia` + `mes` + los importes de FUENTES_MESES.
+ * Fondo del presupuesto (v1.8): de dónde sale el presupuesto del mes (General, Sodexo, Extra 1…). Es configuración
+ * reutilizable; su aporte a cada mes lo dan `recurrencia` + `mes` + los importes de FONDOS_PRESUPUESTO_MESES.
  *  - mensual: aporta `monto` todos los meses desde `mes` (vacío = desde siempre).
  *  - unica: aporta `monto` solo en `mes` (un ingreso extraordinario no se arrastra a otros meses).
  * Inactiva = queda guardada pero no aporta presupuesto. Nunca toca gastos.
  */
 export type Recurrencia = 'mensual' | 'unica'
-export interface Fuente {
+/**
+ * Tipo de fondo (independiente de la recurrencia): mensual = presupuesto habitual del mes; extra = presupuesto adicional de un período;
+ * ahorro_asignado = dinero ya separado para un objetivo (p. ej. Carpeta Tésis, Viaje a Ica).
+ */
+export type TipoFondo = 'mensual' | 'extra' | 'ahorro_asignado'
+export const TIPOS_FONDO: readonly TipoFondo[] = ['mensual', 'extra', 'ahorro_asignado']
+export const TIPO_FONDO_TXT: Record<TipoFondo, string> = { mensual: 'Mensual', extra: 'Extra', ahorro_asignado: 'Ahorro asignado' }
+export interface Fondo {
   id: string; nombre: string; monto: number; moneda: string; color: string; icono: string
   activo: boolean; orden: number; recurrencia: Recurrencia; mes: string
-  /** Medio de pago asociado (Sodexo…): los gastos pagados con él se atribuyen a esta fuente. Vacío = fuente libre. */
+  tipo: TipoFondo
+  /** Medio de pago asociado (Sodexo…): los gastos pagados con él se atribuyen a este fondo. Vacío = fondo libre. */
   medioPago: string
   creadoEn: string; actualizadoEn: string
 }
-/** Importe de una fuente para un mes: "solo" = únicamente ese mes; "desde" = ese mes en adelante. */
-export interface FuenteMes { fuenteId: string; mes: string; monto: number; modo: 'solo' | 'desde' }
+/** Importe de un fondo para un mes: "solo" = únicamente ese mes; "desde" = ese mes en adelante. */
+export interface FondoMes { fondoId: string; mes: string; monto: number; modo: 'solo' | 'desde' }
 
 /**
- * Plantilla de fuente o de subcaja (v1.17): solo configuración reutilizable. Crearla, editarla o clonarla no crea dinero,
- * fuentes, subcajas ni gastos. `origenId` enlaza con la fuente/subcaja original; `estados` dice qué pasó cada mes.
+ * Plantilla de fondo o de subcaja (v1.17): solo configuración reutilizable. Crearla, editarla o clonarla no crea dinero,
+ * fondos, subcajas ni gastos. `origenId` enlaza con el fondo/subcaja original; `estados` dice qué pasó cada mes.
  */
-export type TipoPlantillaFin = 'fuente' | 'subcaja'
+export type TipoPlantillaFin = 'fondo' | 'subcaja'
 export type EstadoPlantillaMes = 'pendiente' | 'aplicada' | 'omitida'
 export interface PlantillaFin {
   id: string; tipo: TipoPlantillaFin; nombre: string; monto: number
-  moneda: string; medios: string                                  // solo fuentes ('A|B' o vacío)
+  moneda: string; medios: string                                  // solo fondos ('A|B' o vacío)
   campo: string; valor: string                                     // solo cajas (alcance)
   descripcion: string; color: string; icono: string
   recurrencia: Recurrencia; activo: boolean; orden: number
@@ -127,9 +122,9 @@ export interface AppData {
   medios: Medio[]
   cajas: Caja[]
   presupuestos: Presupuesto[]
-  /** Sin fuentes (instalaciones anteriores) el presupuesto sigue saliendo de la caja general. */
-  fuentes?: Fuente[]
-  fuentesMeses?: FuenteMes[]
+  /** Sin fondos (instalaciones anteriores) el presupuesto sigue saliendo de la caja general. */
+  fondos?: Fondo[]
+  fondosMeses?: FondoMes[]
   plantillasFin?: PlantillaFin[]
   config: Record<string, string>
   /** Orden personalizado de la tabla de Gastos: [id, orden]. Se guarda aparte para no recalcular el dashboard. */
@@ -137,8 +132,10 @@ export interface AppData {
   /** Vínculo gasto → plantilla (qué movimiento pagó qué compromiso): [gastoId, plantillaId]. */
   vinculos?: [string, string][]
   revisiones?: Revision[]
-  /** Conciliación de saldos: historial inmutable (verificaciones, seguimientos y grupos). */
-  conciliaciones?: ConcFila[]
+  /** Revisión del presupuesto: historial de solo agregar (la vigente de un período es la última). */
+  revisionesPresupuesto?: RevisionPres[]
+  /** Estado de la migración a Fondos del presupuesto (backend ≥ 1.26). `undefined` = backend anterior. */
+  migracion?: MigracionEstado
   sheetUrl: string
   version: string
 }

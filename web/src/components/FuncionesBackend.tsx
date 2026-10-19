@@ -27,7 +27,7 @@ export const FUNCIONES: Funcion[] = [
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
-  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', titulo: 'Generar datos de prueba', desc: 'Agrega movimientos, catálogo y fuentes de ejemplo (marcados para borrarlos). Crea respaldo.', cambiaHoja: true,
+  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', titulo: 'Generar datos de prueba', desc: 'Agrega movimientos, catálogo y fondos de ejemplo (marcados para borrarlos). Crea respaldo.', cambiaHoja: true,
     confirmar: 'Se agregarán datos de ejemplo a tu hoja real. ¿Continuar?' },
   { grupo: 'Datos de prueba', nombre: 'borrarDatosPrueba', titulo: 'Borrar datos de prueba', desc: 'Elimina solo lo marcado como prueba. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Se borrarán los datos de prueba marcados. ¿Continuar?' },
