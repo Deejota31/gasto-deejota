@@ -25,7 +25,7 @@ const NINGUNO = '__ninguno__'
 
 /**
  * Fondos del presupuesto (v1.8): General, Sodexo, Extra 1… Cada fondo activo suma su importe del mes al presupuesto
- * consolidado; desactivarla la conserva sin aportar. Todo pasa por el motor (`aggregate`): esta pantalla solo muestra
+ * consolidado; desactivarlo lo conserva sin aportar. Todo pasa por el motor (`aggregate`): esta pantalla solo muestra
  * y edita, no calcula por su cuenta.
  */
 
@@ -151,8 +151,8 @@ export function FondosSeccion({ store, c, mes, money, periodo, hoyMes, plantilla
       {!todosLosFondos.length && (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line px-4 py-10 text-center" data-testid="vacio-fondos">
           <span className="grid size-12 place-items-center rounded-2xl" style={{ background: TONO.info.bg, color: TONO.info.fg }}><CircleDollarSign className="size-6" /></span>
-          <p className="text-sm font-semibold text-ink">Aún no tienes fondos registradas. Registra un fondo para empezar</p>
-          <p className="max-w-md text-xs text-muted">Un fondo es de dónde viene tu dinero (General, Sodexo, un extra…): cada una suma al presupuesto del mes en que la apliques.</p>
+          <p className="text-sm font-semibold text-ink">Aún no tienes fondos registrados. Registra un fondo para empezar</p>
+          <p className="max-w-md text-xs text-muted">Un fondo es de dónde viene tu dinero (General, Sodexo, un extra…): cada uno suma al presupuesto del mes en que lo apliques.</p>
         </div>
       )}
 
@@ -356,7 +356,7 @@ function BorrarFondo({ store, r, data, money, onClose, onDesactivar }: {
         ? <><Button variant="outline" onClick={onClose}>Cerrar</Button>{f.activo && <Button onClick={onDesactivar}>Desactivar en su lugar</Button>}</>
         : <><Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button variant="danger" disabled={store.pending.has(`fondo:${f.id}`)} onClick={() => {
-            const ok = store.track(`fondo:${f.id}`, { pending: `Eliminando ${f.nombre}…`, ok: `${f.nombre} eliminada. Ningún gasto se borró.`, error: `No se pudo eliminar ${f.nombre}.` },
+            const ok = store.track(`fondo:${f.id}`, { pending: `Eliminando ${f.nombre}…`, ok: `${f.nombre} eliminado. Ningún gasto se borró.`, error: `No se pudo eliminar ${f.nombre}.` },
               () => store.actions.deleteFondo(f.id))
             if (ok) onClose()
           }}><Trash2 className="size-4" /> Eliminar</Button></>}>
@@ -390,7 +390,7 @@ function DesactivarFondo({ r, c, money, periodo, onClose, onConfirm }: { r: Fond
           {r.count} gasto(s) por {money(r.gastado)} están atribuidos a este fondo. {mediosDeFondo(r.fondo.medioPago).length
             ? `Los pagados con ${mediosDeFondo(r.fondo.medioPago).join(', ')} seguirán descontando del presupuesto y se mostrarán como gastos por revisar: no se pasan a otro fondo.`
             : 'Pasarán a la siguiente fondo principal activo (si no hay, se mostrarán como “sin fondo”). Siguen descontando del presupuesto.'}</p>}
-        <p className="text-xs text-muted">No se borra el fondo, ni sus importes por mes, ni ningún gasto. Puedes reactivarla cuando quieras.</p>
+        <p className="text-xs text-muted">No se borra el fondo, ni sus importes por mes, ni ningún gasto. Puedes reactivarlo cuando quieras.</p>
       </div>
     </Modal>
   )

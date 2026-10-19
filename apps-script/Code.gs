@@ -2767,7 +2767,7 @@ function migracionFondosEstado_(ss) {
 
 function exigirMigrado_() {
   var ss = openSpreadsheet_(false);
-  if (migracionFondosEstado_(ss).pendiente) throw appError_('MIGRACION_PENDIENTE', 'Falta migrar tus datos a “Fondos del presupuesto”. Ve a Configuración → Migración y pulsa “Migrar ahora” (se hace un respaldo antes).');
+  if (migracionFondosEstado_(ss).pendiente) throw appError_('MIGRACION_PENDIENTE', 'Falta migrar tus datos a “Fondos del presupuesto”. Pulsa “Migrar ahora” en el aviso superior de la web, o ejecuta migrarAFondosPresupuesto en Apps Script (se hace un respaldo antes).');
 }
 
 function contarFilas_(sh) { return sh ? Math.max(lastDataRow_(sh) - 1, 0) : 0; }

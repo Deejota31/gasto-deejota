@@ -59,7 +59,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     await expect(page.getByTestId('asistente-plan')).toBeVisible()
     await expect(estado(page, 'fondos')).toHaveText('Completada')
     await expect(page.getByTestId('continuar-fondos')).toContainText('Continuar con Cajas')
-    await expect(page.getByTestId('ok-fondos')).toContainText('Fondos configuradas correctamente')
+    await expect(page.getByTestId('ok-fondos')).toContainText('Fondos configurados correctamente')
     await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
     await page.getByTestId('continuar-fondos').click()
     await page.getByRole('button', { name: 'Omitir', exact: true }).click()

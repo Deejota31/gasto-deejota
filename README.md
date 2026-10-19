@@ -10,7 +10,7 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 ## Arquitectura en una línea por pieza
 
 - **Registro jerárquico**: en el formulario primero se elige el ámbito; las categorías dependen del ámbito y las subcategorías de la categoría. La subcategoría es obligatoria cuando la categoría tiene opciones.
-- **Hoja `GASTOS`** (16 columnas exactas): única fondo de movimientos. Además, solo `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS` y `CONFIG`.
+- **Hoja `GASTOS`** (16 columnas exactas): única fuente de movimientos. Además, solo `CATALOGO`, `MEDIOS_PAGO`, `CAJAS`, `PRESUPUESTOS` y `CONFIG`.
 - **API**: `POST` con cuerpo `text/plain` JSON `{token, action, payload}`. Así el token nunca viaja en la URL y no hay preflight CORS. `GET` solo responde un ping de salud sin datos.
 - **Lectura**: una sola llamada `data` lee cada hoja una vez (`getValues` por bloque). El resultado se guarda en `CacheService` por 10 minutos, en trozos. "Actualizar" pide `fresh` y salta la caché.
 - **Escritura**: `LockService`, validación en el servidor, UUID generado por el cliente al abrir el formulario (si un reintento llega dos veces no se duplica), invalidación de caché por "generación" para que una lectura lenta no deje datos viejos.
@@ -27,6 +27,15 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 
 **Excluido en v1.0 (llegó después, en v1.3 y v1.4):** Gastos mensuales (plantillas y registro masivo). `Es recurrente` sigue siendo solo un atributo del movimiento.
 
+
+## Novedades v1.26.0 — Fondos del presupuesto y Revisión del presupuesto
+
+- **Fuentes de dinero → Fondos del presupuesto.** Un fondo es de dónde sale una parte del presupuesto del mes. Nuevo campo **Tipo de fondo** (Mensual · Extra · Ahorro asignado), **independiente** de la recurrencia (todos los meses / solo un mes). *Carpeta Tésis* (S/ 1,900) y *Viaje a Ica* (S/ 1,414) quedan como **ahorro asignado**. Las fórmulas del motor no cambian: extras y ahorros de un mes solo cuentan en su período, cada mes tiene sus importes y las cajas siguen siendo distribuciones internas.
+- **Conciliación de saldos → Revisión del presupuesto.** Ya no se comparan saldos de banco: se revisa que el período esté **completo** y sea coherente (estados: *pendiente de revisión · período completo · con gastos anteriores por registrar · revisado con observaciones*), con chequeos de fondos, reservas y gastos, días sin movimientos y notas. Un gasto olvidado se regulariza como un gasto normal (con el antiduplicado), nunca con importes inventados. Salud financiera queda **solo con datos del presupuesto**.
+- **Hojas:** `FUENTES`→`FONDOS_PRESUPUESTO`, `FUENTES_MESES`→`FONDOS_PRESUPUESTO_MESES`, `CONCILIACIONES`→`REVISIONES_PRESUPUESTO` (la anterior queda archivada como `CONCILIACIONES_ANTERIOR`).
+- **Migración segura:** botón **«Migrar ahora»** (o `migrarAFondosPresupuesto` en el editor): respaldo previo, conserva filas e IDs, idempotente, con verificación y reversión (`revertirMigracionAFondos`). Detalle, mapeo y reversión en [`docs/MIGRACION-FONDOS.md`](docs/MIGRACION-FONDOS.md).
+- **Debes volver a desplegar `Code.gs` (1.26.0)** y luego migrar. Hasta migrar, los gastos funcionan y los fondos se leen, pero no se editan. Con un Apps Script anterior, la web sigue funcionando (capa de compatibilidad).
+- **Pruebas:** backend (migración normal/repetida/a medias/reversión, revisiones), regresión financiera antes/después, compatibilidad con backend anterior, puerta de terminología y Playwright. *(Las notas históricas de abajo conservan los nombres de su época.)*
 
 ## Novedades v1.25.1 — Presupuesto consolidado más compacto
 

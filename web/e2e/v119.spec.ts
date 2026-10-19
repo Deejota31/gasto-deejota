@@ -31,7 +31,7 @@ test.describe('v1.19 aislamiento por mes', () => {
     await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)             // octubre (anterior al corte): comportamiento histórico
     await expect(page.getByRole('list', { name: 'Lista de fondos' })).toBeVisible()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configuradas para noviembre')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para noviembre')
     await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes cajas configuradas para noviembre')
     await expect(page.getByTestId('n-fondos')).toHaveText(/\d+/)
     // Dashboard: mensajes guiados, sin porcentajes engañosos.
@@ -46,9 +46,9 @@ test.describe('v1.19 aislamiento por mes', () => {
     await go(page, 'Cajas')
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
-    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configuradas para diciembre')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para diciembre')
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configuradas para enero')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para enero')
   })
 
   test('copiar del mes anterior: vista previa editable, sin duplicar y sin tocar octubre', async ({ page }) => {

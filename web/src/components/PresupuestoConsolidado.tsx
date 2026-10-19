@@ -50,7 +50,7 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
   const v = (n: number) => (def ? money(n) : '—')
   const estado = estadoPresupuesto(c, money)
   const origen = c.origen === 'fondos'
-    ? `${c.fondos.activas} fondo${c.fondos.activas === 1 ? '' : 's'} activa${c.fondos.activas === 1 ? '' : 's'}`
+    ? `${c.fondos.activas} fondo${c.fondos.activas === 1 ? '' : 's'} activo${c.fondos.activas === 1 ? '' : 's'}`
     : `Desde ${c.general?.nombre ?? 'la caja general'}`
   const tonoSaldo = (n: number) => (def ? (n < 0 ? ESTADO.alerta : ESTADO.ok) : undefined)
   const IconoEstado = estado.tono === 'ok' ? CheckCircle2 : estado.tono === 'neutro' ? Info : AlertTriangle

@@ -14,7 +14,7 @@ export function ResumenCajas({ c, money, catalogo = [], onIrCajas }: { c: CajasR
   const [abierto, setAbierto] = useState<{ fondos: boolean; subcajas: boolean }>({ fondos: false, subcajas: false })
   const fondosAct = c.fondos.lista.filter(r => r.fondo.activo)
   const resumenFondos = c.origen === 'fondos'
-    ? `${fondosAct.length} activa${fondosAct.length === 1 ? '' : 's'} · ${money(c.fondos.total)}`
+    ? `${fondosAct.length} activo${fondosAct.length === 1 ? '' : 's'} · ${money(c.fondos.total)}`
     : `Sin fondos · ${c.general?.nombre ?? 'caja general'} ${c.presupuesto ? money(c.presupuesto) : ''}`.trim()
   const link = onIrCajas && (
     <button type="button" onClick={onIrCajas} className="inline-flex items-center gap-1 text-xs font-semibold text-navy hover:underline">

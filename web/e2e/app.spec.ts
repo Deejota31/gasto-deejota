@@ -1178,7 +1178,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await expect(dialog(page).getByTestId('impacto-desactivar')).toContainText('S/ 3,780.00')
     await dialog(page).getByRole('button', { name: 'Desactivar' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3780)
-    await expect(fondo(page, 'Extra 1').getByTestId('estado-fondo')).toHaveText('Inactiva')
+    await expect(fondo(page, 'Extra 1').getByTestId('estado-fondo')).toHaveText('Inactivo')
     await expect(page.getByRole('status').filter({ hasText: 'Extra 1 desactivada' })).toBeVisible()
     // Dashboard y Salud financiera usan el mismo cálculo
     await go(page, 'Dashboard')
@@ -1201,7 +1201,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(0)                     // nada se arrastra solo
-    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configuradas para noviembre')
+    await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para noviembre')
     await page.getByTestId('vacio-mes-fondo').getByRole('button', { name: 'Copiar configuración del mes anterior' }).click()
     const c = dialog(page)
     await expect(c).toContainText('Usar fondos del mes anterior')
@@ -1246,7 +1246,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await go(page, 'Gastos')
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Gastos' })).toHaveAttribute('aria-current', 'page')
     await go(page, 'Cajas')
-    await expect(page.getByRole('status').filter({ hasText: 'Bonificación creada' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Bonificación creado' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4980)
     await expect(fondo(page, 'General').getByTestId('fondo-aporte')).toHaveText('S/ 3,500.00')
     expect(((await calls(page)).saveFondo ?? 0) - (c0.saveFondo ?? 0)).toBe(1)
@@ -1257,7 +1257,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await page.goto('/?demo=60#cajas')
     await expect(page.getByTestId('sin-fondos')).toBeVisible()
     // estado vacío igual al de subcajas, con acción para crear el primer fondo
-    await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registradas. Registra un fondo para empezar')
+    await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registrados. Registra un fondo para empezar')
     await expect(page.getByRole('button', { name: 'Crear mi primer fondo' })).toHaveCount(0)   // v1.21: sin botón en el estado vacío
     await page.getByRole('button', { name: 'Nuevo fondo' }).first().click()                     // el control habitual sigue funcionando
     await expect(page.getByRole('dialog')).toBeVisible()
@@ -1265,7 +1265,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     const p0 = await cons(page, 'presupuesto-consolidado')
     expect(p0).toBe(7000)
     await page.getByRole('button', { name: /Crear fondo General con/ }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Fondo General creada' })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'Fondo General creado' })).toBeVisible()
     await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')).toHaveCount(1)
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(p0)                     // ningún mes cambia
     await expect(page.getByRole('button', { name: /Crear fondo General/ })).toHaveCount(0)
@@ -1508,7 +1508,7 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
     await pick(page, '#fondo-medio', 'Plin')
     await expect(d.locator('span.size-11').first()).toHaveCSS('color', 'rgb(11, 158, 168)')
     await d.getByRole('button', { name: 'Crear fondo' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Vales Plin creada' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Vales Plin creado' })).toBeVisible({ timeout: 15_000 })
     await expect(fondo(page, 'Vales Plin').locator('svg.lucide-smartphone')).toHaveCount(1)
   })
 
@@ -1934,7 +1934,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await expect(d).toContainText('nace inactiva')
     await d.getByLabel('Nombre del fondo').fill('Sodexo clon')                       // editable antes de confirmar
     await d.getByRole('button', { name: 'Crear copia' }).dblclick()
-    await expect(page.getByRole('status').filter({ hasText: 'Sodexo clon creada inactiva' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Sodexo clon creado inactivo' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => nFondos(page)).toBe(4)
     expect(await cons(page, 'presupuesto-consolidado')).toBe(4780)                      // no sumó dinero
     await expect(fondo(page, 'Sodexo clon')).toContainText('Inactiva')
@@ -1952,7 +1952,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await dialog(page).getByLabel('Nombre del fondo').fill('Temporal')
     await dialog(page).getByLabel('Monto').fill('100')
     await dialog(page).getByRole('button', { name: 'Crear fondo' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Temporal creada' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Temporal creado' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4880)
     await abrirMenu(menuF(page, 'Temporal'))
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
@@ -1964,7 +1964,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await menuF(page, 'Temporal').click()
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     await dialog(page).getByRole('button', { name: 'Eliminar' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Temporal eliminada. Ningún gasto se borró.' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Temporal eliminado. Ningún gasto se borró.' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => nFondos(page)).toBe(3)
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await actualizar(page)
@@ -2401,7 +2401,7 @@ test.describe('v1.16: navegación, preferencias, medios, calendarios y operacion
     await pick(page, '#fondo-medio', 'Plin')
     await expect(d.getByRole('button', { name: /^Quitar / })).toHaveCount(2)
     await d.getByRole('button', { name: 'Crear fondo' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Multi creada' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Multi creado' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(3500 + 280 + 300 + 1000)
   })
 

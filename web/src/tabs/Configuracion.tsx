@@ -13,7 +13,7 @@ import { Preferencias } from '../components/Preferencias'
 import { ResumenPlan, type PlanificacionApi } from '../components/Planificacion'
 import { RecordatoriosPlan } from '../components/RecordatoriosPlan'
 
-export const APP_VERSION = '1.25.1'
+export const APP_VERSION = '1.26.0'
 
 export default function Configuracion({ store, conn, onConnect, notify, goCatalogo, plan, hoy }: {
   plan: PlanificacionApi; hoy: string; store: AppStore; conn: Connection | null; onConnect: (c: Connection | null) => void; notify: (m: string) => void; goCatalogo: () => void

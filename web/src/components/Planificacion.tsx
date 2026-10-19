@@ -133,7 +133,7 @@ export function ResumenPlan({ store, hoy, onPreparar, onConfigurar, compacto }: 
         {fila('Estado', guardando
           ? <span className="inline-flex items-center gap-1.5 text-navy" data-testid="plan-guardando"><Loader2 className="size-3.5 animate-spin" /> Guardando planificación…</span>
           : <Insignia estado={plan.estado} posp={posp && plan.estado !== 'completada'} />)}
-        {fila('Fondos configuradas', aplica ? `${r.fondos} de ${r.fondosTotal}` : 'Mes anterior al aislamiento (todas)')}
+        {fila('Fondos configurados', aplica ? `${r.fondos} de ${r.fondosTotal}` : 'Mes anterior al aislamiento (todos)')}
         {fila('Cajas configuradas', aplica ? `${r.subcajas} de ${r.cajasTotal}` : 'Mes anterior al aislamiento (todas)')}
         {fila('Gastos registrados', r.gastos)}
         {fila('Próximo recordatorio', prox ? `${formatDate(prox.fecha, data.config.formato_fecha)} · ${nombreMes(prox.mes)}` : 'Sin recordatorios programados')}
@@ -153,7 +153,7 @@ const aSel = (cs: Candidato[]): Record<string, Sel> => Object.fromEntries(cs.map
 const montoNum = (s: string) => Number(s.replace(',', '.'))
 
 function ListaSel({ cands, sel, setSel, tipo }: { cands: Candidato[]; sel: Record<string, Sel>; setSel: (s: Record<string, Sel>) => void; tipo: TipoEntidad }) {
-  if (!cands.length) return <p className="rounded-xl bg-bg px-3 py-4 text-sm text-muted">{tipo === 'fondo' ? 'Aún no tienes fondos mensuales. Créalas desde Cajas → Nuevo fondo.' : 'Aún no tienes cajas activas. Créalas desde Cajas → Nueva caja.'}</p>
+  if (!cands.length) return <p className="rounded-xl bg-bg px-3 py-4 text-sm text-muted">{tipo === 'fondo' ? 'Aún no tienes fondos mensuales. Créalos desde Cajas → Nuevo fondo.' : 'Aún no tienes cajas activas. Créalas desde Cajas → Nueva caja.'}</p>
   return (
     <ul className="divide-y divide-line/70 overflow-hidden rounded-2xl border border-line" aria-label={tipo === 'fondo' ? 'Fondos del mes' : 'Cajas del mes'}>
       {cands.map(c => {
@@ -235,7 +235,7 @@ const VISUAL: Record<EstadoVisual, { txt: string; cls: string }> = {
   error: { txt: 'Error', cls: 'border-danger/40 bg-danger-soft text-danger' },
 }
 const ETAPA_SIG: Record<Etapa, string> = { fondos: 'Configurar fondos', subcajas: 'Configurar cajas', gastos: 'Registrar gastos mensuales' }
-const ETAPA_OK: Record<Etapa, string> = { fondos: 'Fondos configuradas correctamente', subcajas: 'Cajas configuradas correctamente', gastos: 'Gastos mensuales registrados correctamente' }
+const ETAPA_OK: Record<Etapa, string> = { fondos: 'Fondos configurados correctamente', subcajas: 'Cajas configuradas correctamente', gastos: 'Gastos mensuales registrados correctamente' }
 const money = (c: number, m: string) => formatMoney(c, m)
 
 function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; mes: string; etapaInicial: Etapa | null; o: PlanificacionOpts; onClose: () => void }) {
@@ -468,7 +468,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
             <p className="text-sm font-semibold text-ink">Planificación de {nombreMes(mes)}</p>
             <ul className="space-y-1.5 text-sm">
               {ETAPAS.map(e => { const v = visual(e), n = e === 'fondos' ? real.fondos.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
-                const detalle = v === 'omitida' ? 'Omitida (no se ejecutó)' : e === 'fondos' ? `${n} configurada${n === 1 ? '' : 's'} · Total ${totalesTxt(real.fondos.totales)}`
+                const detalle = v === 'omitida' ? 'Omitida (no se ejecutó)' : e === 'fondos' ? `${n} configurado${n === 1 ? '' : 's'} · Total ${totalesTxt(real.fondos.totales)}`
                   : e === 'subcajas' ? `${n} configurada${n === 1 ? '' : 's'} · Total reservado ${money(real.subcajas.reservado, monedaBase)}` : `${n} registrado${n === 1 ? '' : 's'} · Total ${totalesTxt(real.gastos.totales)}`
                 return (
                   <li key={e} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl bg-bg px-3 py-2" data-testid={`resumen-${e}`}>
@@ -499,10 +499,11 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
 /** Estado vacío de un mes sin fondos/subcajas aplicadas, con las tres acciones de la planificación. */
 export function VacioMes({ tipo, mes, nOcultas, onConfigurar, onPlantillas, onAnterior }: { tipo: TipoEntidad; mes: string; nOcultas: number; onConfigurar: () => void; onPlantillas: () => void; onAnterior: () => void }) {
   const noun = tipo === 'fondo' ? 'fondos' : 'cajas'
+  const [cfg, propias, creadas] = tipo === 'fondo' ? ['configurados', 'propios', 'creados'] : ['configuradas', 'propias', 'creadas']
   return (
     <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-center" data-testid={`vacio-mes-${tipo}`}>
-      <p className="text-sm font-semibold text-ink">No tienes {noun} configuradas para {nombreMes(mes).split(' ')[0].toLowerCase()}</p>
-      <p className="mx-auto mt-1 max-w-md text-xs text-muted">Cada mes tiene sus propias {noun}: nada se arrastra solo del mes anterior. {nOcultas > 0 ? `Tienes ${nOcultas} ${noun} creadas que aún no se aplicaron a ${nombreMes(mes)}.` : ''} Tus gastos de {nombreMes(mes)} se conservan.</p>
+      <p className="text-sm font-semibold text-ink">No tienes {noun} {cfg} para {nombreMes(mes).split(' ')[0].toLowerCase()}</p>
+      <p className="mx-auto mt-1 max-w-md text-xs text-muted">Cada mes tiene sus {propias} {noun}: nada se arrastra solo del mes anterior. {nOcultas > 0 ? `Tienes ${nOcultas} ${noun} ${creadas} que aún no se aplicaron a ${nombreMes(mes)}.` : ''} Tus gastos de {nombreMes(mes)} se conservan.</p>
       <div className="mt-3 flex flex-wrap justify-center gap-2">
         <Button className="h-9 text-xs" onClick={onConfigurar}>Configurar {noun} del mes</Button>
         <Button variant="outline" className="h-9 text-xs" onClick={onPlantillas}>Usar plantillas mensuales</Button>

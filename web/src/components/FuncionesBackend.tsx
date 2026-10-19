@@ -20,6 +20,12 @@ export const FUNCIONES: Funcion[] = [
   { grupo: 'Conexión y archivos', nombre: 'autorizarRespaldos', titulo: 'Autorizar respaldos', desc: 'Da permiso a Drive y muestra la carpeta donde se guardan.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'diagnose', titulo: 'Diagnóstico', desc: 'Filas por hoja, versión y estado.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'completarVacios', titulo: 'Completar vacíos', desc: 'Rellena las celdas vacías (Activo, Icono, Orden, Medio…).', cambiaHoja: true },
+  // <compat-migración>
+  { grupo: 'Mantenimiento de la hoja', nombre: 'migrarAFondosPresupuesto', titulo: 'Migrar a Fondos del presupuesto', desc: 'Renombra las hojas anteriores, agrega «Tipo de fondo» y archiva la conciliación. Respaldo previo; segura de repetir.', cambiaHoja: true,
+    confirmar: 'Se migrará la hoja a Fondos del presupuesto (con respaldo previo). ¿Continuar?' },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'revertirMigracionAFondos', titulo: 'Revertir la migración a Fondos', desc: 'Devuelve los nombres anteriores de las hojas. No borra datos.', cambiaHoja: true,
+    confirmar: 'Se devolverán los nombres anteriores de las hojas. ¿Continuar?' },
+  // </compat-migración>
   { grupo: 'Mantenimiento de la hoja', nombre: 'migrarPlantillas', titulo: 'Migrar plantillas', desc: 'Copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada).', cambiaHoja: true },
   { grupo: 'Mantenimiento de la hoja', nombre: 'actualizarCatalogo', titulo: 'Actualizar catálogo', desc: 'Agrega la columna Orden y ordena el catálogo. Crea respaldo antes.', cambiaHoja: true },
   { grupo: 'Mantenimiento de la hoja', nombre: 'repararIds', titulo: 'Reparar IDs', desc: 'Asigna ID a movimientos sin ID o repetidos. Crea respaldo antes.', cambiaHoja: true },

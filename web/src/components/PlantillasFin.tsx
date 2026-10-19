@@ -84,7 +84,7 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
   if (p.tipo === 'fondo') {
     const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
     if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará el fondo “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
-    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `El fondo ${nombre} ya existe, pero aún no está aplicada a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
+    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `El fondo ${nombre} ya existe, pero aún no está aplicado a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
     if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya aporta ${m(o.actual ?? 0)} en ${ml}.` }
     return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
   }

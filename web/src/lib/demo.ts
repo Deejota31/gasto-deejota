@@ -88,8 +88,12 @@ function demoFondos(n: number, mes: string): unknown[][] {
   return [...base, ...extra].slice(0, n)
 }
 
+const BLOQUEADAS_SIN_MIGRAR = new Set(['saveFondo', 'saveFondoMes', 'deleteFondo', 'reorderFondos', 'migrarGeneralAFondo', 'savePlantillaFin', 'deletePlantillaFin', 'reorderPlantillasFin', 'aplicarPlantillasFin', 'aplicarEntidadesMes', 'saveRevisionPresupuesto'])
+
 /** `vacio`: simula una hoja conectada pero sin ningún registro (solo pruebas / ?demo&vacio=1). */
 export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0, nFondos = 0, vacio = false): Transport {
+  // Solo pruebas / ?demo&migracion=pendiente: simula un libro que aún tiene las hojas anteriores.
+  const migracionDemo = (() => { try { return new URLSearchParams(location.search).get('migracion') === 'pendiente' ? { pendiente: true } : null } catch { return null } })()
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
@@ -178,7 +182,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     return { monto: !f[9] || mes >= String(f[9]) ? Number(f[2]) : 0, solo: null, aplicada: true }
   }
   const handlers: Record<string, (p: Record<string, unknown>) => unknown> = {
-    data: () => structuredClone({ ...db, plantillasFin: db.plantillasFin.map(pfPub), vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
+    data: () => structuredClone({ ...db, ...(migracionDemo ? { migracion: { pendiente: migracionDemo.pendiente, hojasViejas: migracionDemo.pendiente ? ['FUENTES', 'FUENTES_MESES', 'CONCILIACIONES'] : [], plantillasPorConvertir: 0, fondosSinTipo: 0 } } : {}), plantillasFin: db.plantillasFin.map(pfPub), vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }), // [compat-migración]
     saveGasto: p => {
       const now = new Date().toISOString()
       const i = db.gastos.findIndex(r => r[13] === p.id)
@@ -482,6 +486,13 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       }
       return { cajas: 0, fondos: 0, catalogo, config: 0 }
     },
+    // ?migracion=pendiente: simula un libro con las hojas anteriores. Mientras esté pendiente, las acciones sobre fondos se bloquean como en el backend.
+    migrarAFondosPresupuesto: () => {
+      if (!migracionDemo?.pendiente) return { migrada: false, motivo: 'Ya estaba migrado.' }
+      migracionDemo.pendiente = false
+      return { migrada: true, respaldo: 'https://docs.google.com/spreadsheets/', antes: { fondos: db.fondos.length, meses: db.fondosMeses.length }, despues: { fondos: db.fondos.length, meses: db.fondosMeses.length } }
+    },
+    revertirMigracionAFondos: () => ({ revertida: true }),
     migrarGeneralAFondo: () => {
       if (db.fondos.some(r => r[0] === 'fondo-general')) return { creada: false, meses: 0 }
       if (db.fondos.some(r => normName(String(r[1])) === 'general')) throw fail('VALIDATION', 'Ya tienes un fondo llamado “General”. Revisa sus importes a mano: no se migró nada.')
@@ -605,6 +616,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     await new Promise(r => setTimeout(r, latencyMs))
     const h = handlers[action]
     if (!h) throw fail('BAD_ACTION', 'Acción no válida.')
+    if (migracionDemo?.pendiente && BLOQUEADAS_SIN_MIGRAR.has(action)) throw fail('MIGRACION_PENDIENTE', 'Falta migrar tus datos a “Fondos del presupuesto”. Pulsa “Migrar ahora” en el aviso superior de la web, o ejecuta migrarAFondosPresupuesto en Apps Script (se hace un respaldo antes).')
     return structuredClone(h(payload as Record<string, unknown>))
   }
 }

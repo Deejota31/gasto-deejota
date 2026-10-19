@@ -32,7 +32,7 @@ test.describe('v1.21 sin conexión: nada de datos de ejemplo', () => {
 test.describe('v1.21 conectado sin registros: cada sección con su estado vacío', () => {
   test('Fondos y Cajas sin botones «Crear mi primera…»; Gastos, Dashboard y Salud sin gráficos', async ({ page }) => {
     await ir(page, '/?demo=1&vacio=1&latencia=0#cajas')
-    await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registradas. Registra un fondo para empezar')
+    await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registrados. Registra un fondo para empezar')
     await expect(page.getByText('Aún no tienes cajas registradas. Añade una caja para empezar')).toBeVisible()
     await expect(page.getByRole('button', { name: /Crear mi primera/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Nueva caja' }).first()).toBeVisible()

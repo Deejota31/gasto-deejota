@@ -15,7 +15,7 @@ function archivos(dir: string, acc: string[] = []): string[] {
     if (['node_modules', 'dist', '.git', 'test-results', 'playwright-report'].includes(n)) continue
     const p = join(dir, n)
     if (statSync(p).isDirectory()) archivos(p, acc)
-    else if (/\.(ts|tsx|gs|html|css)$/.test(n) && !/\.test\.tsx?$/.test(n) && !/\.spec\.ts$/.test(n)) acc.push(p)
+    else if (/\.(ts|tsx|gs|html|css)$/.test(n) && !/\.test\.tsx?$/.test(n) && n !== 'v126.spec.ts') acc.push(p)
   }
   return acc
 }

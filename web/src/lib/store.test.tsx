@@ -154,7 +154,7 @@ describe('plantillas sin bloquear (v1.6)', () => {
 })
 
 
-describe('sincronización con la hoja (v1.12): la hoja es el fondo de verdad', () => {
+describe('sincronización con la hoja (v1.12): la hoja es la fuente de verdad', () => {
   const CONN = { url: 'https://script.google.com/macros/s/x/exec', token: 't' }
   const fila = (id: string, nombre: string, monto: number, activo = true, orden = 1) => [id, nombre, monto, 'PEN', '#1e3a8a', '', activo, orden, 'mensual', '', '', 't', 't']
   const datos = (fondos: unknown[][]) => ({ ...base(), fondos, fondosMeses: [] })
