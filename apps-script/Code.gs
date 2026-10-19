@@ -607,7 +607,6 @@ function doPost(e) {
     var fn = ACTIONS[body.action];
     if (!fn) throw appError_('BAD_ACTION', 'Acción no válida: ' + body.action);
     if (READ_ONLY[body.action]) return fn(body.payload || {});
-    if (EXIGE_MIGRACION[body.action]) exigirMigrado_();
     if (SELF_LOCK[body.action]) { var r = fn(body.payload || {}); invalidateCache_(); return r; }
     return withLock_(function () {
       var result = fn(body.payload || {});
@@ -669,8 +668,6 @@ function withLock_(fn) {
 
 /* ===================== Lectura (una lectura por hoja + caché) ===================== */
 
-function hojaFondosNombre_(ss, nuevo, viejo) { return ss.getSheetByName(nuevo) ? nuevo : ss.getSheetByName(viejo) ? viejo : ''; }
-
 function getData_(fresh) {
   var gen = cacheGen_();
   var cached = fresh ? null : readCache_(gen);
@@ -692,30 +689,24 @@ function getData_(fresh) {
     revisiones: ss.getSheetByName('REVISIONES_CALIDAD') ? readRows_(ss, 'REVISIONES_CALIDAD').map(function (r) {
       return [str_(r[0]), str_(r[1]), str_(r[2]), str_(r[3]), str_(r[4]).replace(/^'/, ''), r[5] instanceof Date ? r[5].toISOString() : str_(r[5]), r[6] instanceof Date ? r[6].toISOString() : str_(r[6])];
     }) : [],
-    // Compatibilidad: si aún no se migró, se leen las hojas con el nombre anterior (solo lectura) para no perder nada de vista.
-    fondos: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO', 'FUENTES')).map(fondoOut_) : [], // [compat-migración]
-    fondosMeses: hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES') ? readRows_(ss, hojaFondosNombre_(ss, 'FONDOS_PRESUPUESTO_MESES', 'FUENTES_MESES')).map(function (r) { // [compat-migración]
+    fondos: readRows_(ss, 'FONDOS_PRESUPUESTO').map(fondoOut_),
+    fondosMeses: readRows_(ss, 'FONDOS_PRESUPUESTO_MESES').map(function (r) {
       return [str_(r[0]), periodo_(r[1], tz), num_(r[2]), str_(r[3]) === 'desde' ? 'desde' : 'solo'];
     }) : [],
     plantillasFin: pfTodas_().rows.map(pfOut_),
-    revisionesPresupuesto: ss.getSheetByName('REVISIONES_PRESUPUESTO') ? revLeer_(ss) : [],
-    migracion: migracionFondosEstado_(ss)
+    revisionesPresupuesto: ss.getSheetByName('REVISIONES_PRESUPUESTO') ? revLeer_(ss) : []
   };
   writeCache_(data, gen);
   data.cache = false;
   return data;
 }
 
-// Nombres anteriores a v1.26 (solo lectura mientras no se migre): leen con el esquema de su hoja nueva.
-var HOJA_ANTERIOR_ = { FUENTES: 'FONDOS_PRESUPUESTO', FUENTES_MESES: 'FONDOS_PRESUPUESTO_MESES' }; // [compat-migración]
-
 function readRows_(ss, name) {
   var sh = ss.getSheetByName(name);
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var esquema = HOJA_ANTERIOR_[name] || name;
-  var key = KEY_COL[esquema];
-  return sh.getRange(2, 1, last - 1, SHEETS[esquema].length).getValues().filter(function (r) {
+  var key = KEY_COL[name];
+  return sh.getRange(2, 1, last - 1, SHEETS[name].length).getValues().filter(function (r) {
     return str_(r[key]) !== ''; // filas sin clave (vacías o con FALSE residual) no son registros
   });
 }
@@ -835,8 +826,6 @@ var ACTIONS = {
   vincularGasto: vincularGasto_,
   saveRevision: saveRevision_,
   saveRevisionPresupuesto: saveRevisionPresupuesto_,
-  migrarAFondosPresupuesto: migrarAFondosPresupuesto_,
-  revertirMigracionAFondos: revertirMigracionAFondos_,
   saveFondo: saveFondo_,
   saveFondoMes: saveFondoMes_,
   reorderFondos: reorderFondos_,
@@ -864,9 +853,6 @@ var ACTIONS = {
   repararHojas: function () { return repararHojas(); }
 };
 // Estas ya toman su propio candado (withLock_ no es reentrante): doPost no las envuelve.
-// Acciones que tocan fondos, plantillas financieras o revisiones: no se ejecutan hasta migrar (los gastos sí siguen funcionando).
-var EXIGE_MIGRACION = { saveFondo: true, saveFondoMes: true, deleteFondo: true, reorderFondos: true, migrarGeneralAFondo: true, savePlantillaFin: true,
-  deletePlantillaFin: true, reorderPlantillasFin: true, aplicarPlantillasFin: true, aplicarEntidadesMes: true, saveRevisionPresupuesto: true };
 var SELF_LOCK = { generarDatosPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
 
 function saveGasto_(p, origen) {
@@ -1258,7 +1244,7 @@ function pfEstados_(raw) {
 function pfOut_(r) {
   var est = pfEstados_(r[15]), pub = {};
   Object.keys(est).forEach(function (m) { if (est[m] && (est[m].e === 'aplicada' || est[m].e === 'omitida')) pub[m] = { e: est[m].e, m: num_(est[m].m) }; });
-  return [str_(r[0]), str_(r[1]) === 'fuente' ? 'fondo' : str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]), // [compat-migración]
+  return [str_(r[0]), str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]),
     str_(r[9]), autoVacio_(r[10]), str_(r[11]) === 'unica' ? 'unica' : 'mensual', str_(r[12]) === '' ? true : bool_(r[12]), num_(r[13]), str_(r[14]), pub, iso_(r[16]), iso_(r[17])];
 }
 
@@ -1855,7 +1841,6 @@ function atajoGasto_(p) {
 /* ===================== Fondos del presupuesto (v1.8) ===================== */
 
 var FONDO_GENERAL_ID = 'fondo-general';
-var FONDO_GENERAL_ID_ANTERIOR_ = 'fuente-general'; // ID histórico (datos creados antes de v1.26): se reconoce, no se cambia // [compat-migración]
 var MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 function iso_(v) { return v instanceof Date ? v.toISOString() : str_(v); }
@@ -1865,6 +1850,16 @@ function fondoOut_(r) {
   return [str_(r[0]), str_(r[1]).replace(/^'/, ''), num_(r[2]), str_(r[3]) || 'PEN', str_(r[4]), autoVacio_(r[5]),
     str_(r[6]) === '' ? true : bool_(r[6]), num_(r[7]), str_(r[8]) === 'unica' ? 'unica' : 'mensual',
     periodo_(r[9], tz_()), libreVacio_(r[10]), iso_(r[11]), iso_(r[12]), tipoFondoOut_(r[13], r[1], r[8])];
+}
+
+var AHORRO_ASIGNADO_ = ['carpeta tesis', 'viaje a ica'];
+
+function sinTildes_(v) { return norm_(v).replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u'); }
+
+function tipoFondoInicial_(nombre, recurrencia) {
+  var n = sinTildes_(String(nombre).replace(/^'/, ''));
+  if (AHORRO_ASIGNADO_.some(function (x) { return n.indexOf(x) === 0; })) return 'ahorro_asignado';
+  return recurrencia === 'unica' ? 'extra' : 'mensual';
 }
 
 var TIPOS_FONDO_ = ['mensual', 'extra', 'ahorro_asignado'];
@@ -1994,7 +1989,7 @@ function reorderFondos_(p) {
  */
 function migrarGeneralAFondo_() {
   var h = fondosSheets_();
-  if (findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID) || findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID_ANTERIOR_)) return { creada: false, meses: 0 };
+  if (findRowByValue_(h.fondos, 1, FONDO_GENERAL_ID)) return { creada: false, meses: 0 };
   var general = readRows_(h.ss, 'CAJAS').filter(function (r) { return str_(r[3]) === 'Todos'; })[0];
   if (!general) throw appError_('NOT_FOUND', 'No hay caja general que migrar.');
   fondosRows_(h.fondos).forEach(function (r) {
@@ -2740,137 +2735,6 @@ function saveRevisionPresupuesto_(p) {
   appendRows_(sh, [row]);
   return revLeer_(ss).filter(function (r) { return r[0] === id; })[0];
 }
-
-/* ===================== Migración a Fondos del presupuesto (v1.26) ===================== */
-
-// <compat-migración>
-var MIG_PARES_ = [['FUENTES', 'FONDOS_PRESUPUESTO'], ['FUENTES_MESES', 'FONDOS_PRESUPUESTO_MESES']];
-var AHORRO_ASIGNADO_ = ['carpeta tesis', 'viaje a ica'];
-
-function sinTildes_(v) { return norm_(v).replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u'); }
-
-function tipoFondoInicial_(nombre, recurrencia) {
-  var n = sinTildes_(String(nombre).replace(/^'/, ''));
-  if (AHORRO_ASIGNADO_.some(function (x) { return n.indexOf(x) === 0; })) return 'ahorro_asignado';
-  return recurrencia === 'unica' ? 'extra' : 'mensual';
-}
-
-// Qué falta migrar. Solo lee; no escribe nada.
-function migracionFondosEstado_(ss) {
-  var hojasViejas = MIG_PARES_.map(function (p) { return p[0]; }).concat(['CONCILIACIONES']).filter(function (n) { return !!ss.getSheetByName(n); });
-  var pfFuente = 0, sinTipo = 0;
-  if (ss.getSheetByName('PLANTILLAS_FINANCIERAS')) pfFuente = readRows_(ss, 'PLANTILLAS_FINANCIERAS').filter(function (r) { return str_(r[1]) === 'fuente'; }).length;
-  var fs = ss.getSheetByName('FONDOS_PRESUPUESTO');
-  if (fs) sinTipo = fondosRows_(fs).filter(function (r) { return str_(r[0]) && str_(r[13]) === ''; }).length;
-  return { pendiente: hojasViejas.length > 0 || pfFuente > 0 || sinTipo > 0, hojasViejas: hojasViejas, plantillasPorConvertir: pfFuente, fondosSinTipo: sinTipo };
-}
-
-function exigirMigrado_() {
-  var ss = openSpreadsheet_(false);
-  if (migracionFondosEstado_(ss).pendiente) throw appError_('MIGRACION_PENDIENTE', 'Falta migrar tus datos a “Fondos del presupuesto”. Pulsa “Migrar ahora” en el aviso superior de la web, o ejecuta migrarAFondosPresupuesto en Apps Script (se hace un respaldo antes).');
-}
-
-function contarFilas_(sh) { return sh ? Math.max(lastDataRow_(sh) - 1, 0) : 0; }
-
-/**
- * Migra Fuentes de dinero → Fondos del presupuesto SIN perder datos y de forma idempotente (repetirla no cambia nada):
- *  1. Respaldo completo de la hoja de cálculo.  2. FUENTES→FONDOS_PRESUPUESTO y FUENTES_MESES→FONDOS_PRESUPUESTO_MESES (se renombra la
- *  hoja: los datos y los IDs se conservan; si ya existía la nueva se completan solo las filas que faltan).  3. Columna “Tipo de fondo”
- *  (mensual / extra / ahorro_asignado).  4. Plantillas Tipo “fuente” → “fondo”.  5. CONCILIACIONES queda archivada como
- *  CONCILIACIONES_ANTERIOR (saldos reales: ya no se usan; nada se borra).  6. Verificación de conteos.
- * Si se interrumpe, vuelve a ejecutarla: cada paso comprueba el estado real. Para deshacer: revertirMigracionAFondos().
- */
-function migrarAFondosPresupuesto_() {
-  var ss = openSpreadsheet_(false);
-  var antes = migracionFondosEstado_(ss);
-  if (!antes.pendiente) return { migrada: false, motivo: 'Ya estaba migrado.', estado: antes };
-  var props = PropertiesService.getScriptProperties();
-  var respaldo = backup_();
-  props.setProperty('MIGRACION_FONDOS_RESPALDO', respaldo.url);
-  props.setProperty('MIGRACION_FONDOS', 'en_curso');
-  var conteo = {
-    fondos: contarFilas_(ss.getSheetByName('FUENTES')) + (ss.getSheetByName('FONDOS_PRESUPUESTO') ? contarFilas_(ss.getSheetByName('FONDOS_PRESUPUESTO')) : 0),
-    meses: contarFilas_(ss.getSheetByName('FUENTES_MESES')) + (ss.getSheetByName('FONDOS_PRESUPUESTO_MESES') ? contarFilas_(ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')) : 0)
-  };
-  try {
-    MIG_PARES_.forEach(function (par) {
-      var vieja = ss.getSheetByName(par[0]), nueva = ss.getSheetByName(par[1]);
-      if (!vieja) return;
-      if (!nueva) { vieja.setName(par[1]); return; }
-      // Ya existían las dos (migración a medias): se agregan a la nueva las filas de la vieja cuya clave no está.
-      var claves = {};
-      readRows_(ss, par[1]).forEach(function (r) { claves[str_(r[0]) + '|' + periodo_(r[1], tz_()) + '|' + str_(r[3])] = true; });
-      var faltan = readRows_(ss, par[0]).filter(function (r) {
-        var k = par[0] === 'FUENTES' ? str_(r[0]) + '|' + periodo_(r[1], tz_()) + '|' + str_(r[3]) : str_(r[0]) + '|' + periodo_(r[1], tz_()) + '|' + str_(r[3]);
-        return str_(r[0]) && !claves[k];
-      });
-      if (par[0] === 'FUENTES') {
-        var ids = {}; readRows_(ss, par[1]).forEach(function (r) { ids[str_(r[0])] = true; });
-        faltan = readRows_(ss, par[0]).filter(function (r) { return str_(r[0]) && !ids[str_(r[0])]; });
-      }
-      if (faltan.length) appendRows_(nueva, faltan.map(function (r) { return r.slice(0, SHEETS[par[1]].length); }));
-      vieja.setName(par[0] + '_MIGRADA');
-    });
-    var meses = ss.getSheetByName('FONDOS_PRESUPUESTO_MESES');
-    if (meses && str_(meses.getRange(1, 1, 1, 1).getValues()[0][0]) === 'Fuente ID') meses.getRange(1, 1, 1, 1).setValues([['Fondo ID']]);
-    var h = fondosSheets_();
-    var fr = fondosRows_(h.fondos), nTipos = 0;
-    fr.forEach(function (r, i) {
-      if (!str_(r[0]) || str_(r[13]) !== '') return;
-      h.fondos.getRange(i + 2, 14, 1, 1).setValues([[tipoFondoInicial_(r[1], str_(r[8]) === 'unica' ? 'unica' : 'mensual')]]);
-      nTipos++;
-    });
-    var pf = ss.getSheetByName('PLANTILLAS_FINANCIERAS'), nPf = 0;
-    if (pf) readRows_(ss, 'PLANTILLAS_FINANCIERAS'); // validación de lectura
-    if (pf) {
-      var n = contarFilas_(pf);
-      var tipos = n ? pf.getRange(2, 2, n, 1).getValues() : [];
-      tipos.forEach(function (t, i) { if (str_(t[0]) === 'fuente') { pf.getRange(i + 2, 2, 1, 1).setValues([['fondo']]); nPf++; } });
-    }
-    var conc = ss.getSheetByName('CONCILIACIONES');
-    if (conc && !ss.getSheetByName('CONCILIACIONES_ANTERIOR')) conc.setName('CONCILIACIONES_ANTERIOR');
-    revHoja_(ss);
-    var despues = {
-      fondos: contarFilas_(ss.getSheetByName('FONDOS_PRESUPUESTO')),
-      meses: contarFilas_(ss.getSheetByName('FONDOS_PRESUPUESTO_MESES'))
-    };
-    // El conteo de la hoja migrada nunca puede ser menor que el original (en el caso de dos hojas, puede ser menor por filas repetidas).
-    if (despues.fondos < Math.min(conteo.fondos, contarFilas_(ss.getSheetByName('FONDOS_PRESUPUESTO'))) || (antes.hojasViejas.indexOf('FUENTES') >= 0 && !ss.getSheetByName('FONDOS_PRESUPUESTO'))) throw new Error('Verificación fallida: faltan fondos tras la migración.');
-    var rest = migracionFondosEstado_(ss);
-    if (rest.pendiente) throw new Error('Verificación fallida: quedan pendientes ' + JSON.stringify(rest));
-    props.setProperty('MIGRACION_FONDOS', 'completa');
-    return { migrada: true, respaldo: respaldo.url, antes: conteo, despues: despues, tiposAsignados: nTipos, plantillasConvertidas: nPf,
-      revisionesArchivadas: antes.hojasViejas.indexOf('CONCILIACIONES') >= 0 };
-  } catch (e) {
-    props.setProperty('MIGRACION_FONDOS', 'error');
-    throw appError_('MIGRACION_ERROR', 'La migración se interrumpió (' + (e.message || e) + '). Tus datos están a salvo: respaldo en ' + respaldo.url + '. Puedes volver a ejecutarla; es segura de repetir.');
-  }
-}
-
-/** Deshace la migración (devuelve los nombres anteriores). No borra nada; los datos nuevos se conservan. */
-function revertirMigracionAFondos_() {
-  var ss = openSpreadsheet_(false);
-  MIG_PARES_.forEach(function (par) {
-    var nueva = ss.getSheetByName(par[1]);
-    if (nueva && !ss.getSheetByName(par[0])) nueva.setName(par[0]);
-  });
-  var m = ss.getSheetByName('FUENTES_MESES');
-  if (m && str_(m.getRange(1, 1, 1, 1).getValues()[0][0]) === 'Fondo ID') m.getRange(1, 1, 1, 1).setValues([['Fuente ID']]);
-  var pf = ss.getSheetByName('PLANTILLAS_FINANCIERAS');
-  if (pf) {
-    var n = contarFilas_(pf), tipos = n ? pf.getRange(2, 2, n, 1).getValues() : [];
-    tipos.forEach(function (t, i) { if (str_(t[0]) === 'fondo') pf.getRange(i + 2, 2, 1, 1).setValues([['fuente']]); });
-  }
-  var ant = ss.getSheetByName('CONCILIACIONES_ANTERIOR');
-  if (ant && !ss.getSheetByName('CONCILIACIONES')) ant.setName('CONCILIACIONES');
-  PropertiesService.getScriptProperties().setProperty('MIGRACION_FONDOS', 'revertida');
-  return { revertida: true };
-}
-
-/** Ejecútala desde el editor de Apps Script para migrar. */
-function migrarAFondosPresupuesto() { return withLock_(migrarAFondosPresupuesto_); }
-function revertirMigracionAFondos() { return withLock_(revertirMigracionAFondos_); }
-// </compat-migración>
 
 /* ===================== Orden personalizado de la tabla de Gastos ===================== */
 
