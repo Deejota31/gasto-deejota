@@ -56,38 +56,8 @@ export function calentar(conn: Connection, fetchImpl: typeof fetch = fetch): voi
 
 export type Transport = (action: string, payload: unknown) => Promise<unknown>
 
-// <compat-migración>
-/**
- * Compatibilidad con un Apps Script anterior a v1.26 (aún con los nombres “fuentes”): si responde BAD_ACTION a una acción
- * nueva, se repite con el nombre anterior y los datos se traducen a los nombres actuales. Es la ÚNICA capa que conoce los nombres
- * anteriores; en cuanto el backend se actualiza y migra, deja de usarse.
- */
-const ACCION_ANTERIOR: Record<string, string> = {
-  saveFondo: 'saveFuente', saveFondoMes: 'saveFuenteMes', deleteFondo: 'deleteFuente', reorderFondos: 'reorderFuentes', migrarGeneralAFondo: 'migrarGeneralAFuente',
-}
-const aNombresAnteriores = (v: unknown): unknown => {
-  if (Array.isArray(v)) return v.map(aNombresAnteriores)
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k === 'fondoId' ? 'fuenteId' : k, k === 'tipo' && x === 'fondo' ? 'fuente' : aNombresAnteriores(x)]))
-  return v
-}
-export function conCompatibilidad(t: Transport): Transport {
-  return async (action, payload) => {
-    try { return await t(action, payload) } catch (e) {
-      const anterior = ACCION_ANTERIOR[action] ?? (action === 'savePlantillaFin' || action === 'aplicarEntidadesMes' || action === 'reorderPlantillasFin' ? action : '')
-      if (!(e instanceof ApiError) || e.code !== 'BAD_ACTION' || !anterior) throw e
-      return t(anterior, aNombresAnteriores(payload))
-    }
-  }
-}
-function traducirDatosAnteriores(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object' || !('fuentes' in raw)) return raw
-  const { fuentes, fuentesMeses, ...resto } = raw as Record<string, unknown>
-  return { ...resto, fondos: fuentes, fondosMeses: fuentesMeses }
-}
-// </compat-migración>
-
 export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
-  return conCompatibilidad(async (action, payload) => {
+  return async (action, payload) => {
     let lastError: ApiError | null = null
     // Todas las acciones son idempotentes (el alta lleva su UUID), así que reintentar es seguro. Máximo 4 intentos (1 s, 3 s, 7 s entre ellos).
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -100,7 +70,7 @@ export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch,
       }
     }
     throw lastError!
-  })
+  }
 }
 
 async function once(conn: Connection, action: string, payload: unknown, fetchImpl: typeof fetch): Promise<unknown> {
@@ -221,10 +191,6 @@ const ESTADOS_REV_PRES: readonly string[] = ['pendiente', 'completo', 'con_gasto
 const toRevPres = ([id, periodo, estado, pendientes, observacion, , creadoEn]: z.infer<typeof revPresRow>): RevisionPres =>
   ({ id, periodo, estado: (ESTADOS_REV_PRES.includes(estado) ? estado : 'pendiente') as EstadoRevisionPres, pendientes, observacion, creadoEn })
 export interface RevisionPresInput { id: string; periodo: string; estado: EstadoRevisionPres; pendientes: string; observacion: string }
-const migracionResultado = z.object({ migrada: z.boolean(), motivo: str.optional(), respaldo: str.optional() }).passthrough()
-export type MigracionResultado = z.infer<typeof migracionResultado>
-const migracionSchema = z.object({ pendiente: z.boolean(), hojasViejas: z.array(str), plantillasPorConvertir: z.number(), fondosSinTipo: z.number() })
-
 const dataSchema = z.object({
   version: str,
   sheetUrl: str,
@@ -238,7 +204,6 @@ const dataSchema = z.object({
   vinculos: z.array(z.tuple([str, str])).optional(),
   revisiones: z.array(z.tuple([str, str, str, str, str, str, str])).optional(),
   revisionesPresupuesto: z.array(revPresRow).optional(),
-  migracion: migracionSchema.optional(),
   fondos: z.array(fondoRow).optional(),
   fondosMeses: z.array(fondoMesRow).optional(),
   plantillasFin: z.array(plantillaFinRow).optional(),
@@ -299,7 +264,7 @@ export function createApi(t: Transport) {
     /** Una sola lectura de todo; llamadas simultáneas comparten la misma petición. */
     getData(fresh = false): Promise<AppData> {
       inflight ??= t('data', { fresh }).then(raw => {
-        const d = parse(dataSchema, traducirDatosAnteriores(raw))
+        const d = parse(dataSchema, raw)
         return {
           version: d.version, sheetUrl: d.sheetUrl, config: d.config,
           gastos: marcarIds(d.gastos.map(rowToGasto)),
@@ -311,7 +276,6 @@ export function createApi(t: Transport) {
           vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
           revisionesPresupuesto: (d.revisionesPresupuesto ?? []).map(toRevPres),
-          migracion: d.migracion,
           fondos: (d.fondos ?? []).map(toFondo),
           fondosMeses: (d.fondosMeses ?? []).map(toFondoMes),
           plantillasFin: (d.plantillasFin ?? []).map(toPlantillaFin),
@@ -438,8 +402,6 @@ export function createApi(t: Transport) {
     },
     /** Revisión del presupuesto: SOLO agrega a REVISIONES_PRESUPUESTO (nunca fondos, gastos, cajas ni presupuestos). */
     async saveRevisionPresupuesto(i: RevisionPresInput): Promise<RevisionPres> { return toRevPres(parse(revPresRow, await t('saveRevisionPresupuesto', i))) },
-    /** Migra la hoja a Fondos del presupuesto (con respaldo previo; idempotente). */
-    async migrarAFondosPresupuesto(): Promise<MigracionResultado> { return parse(migracionResultado, await t('migrarAFondosPresupuesto', {})) },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })
     },
