@@ -48,6 +48,7 @@ async function gasto(page: Page, { monto, medio = 'Yape', desc, abrirModal = tru
 
 test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
   test('1–7: S/ 3,000 de noviembre, gasto de S/ 200, Extra 1, Ahorro asignado, mes anterior intacto, Yape/Plin sin saldo y reserva interna', async ({ page }) => {
+    test.slow()   // siete escenarios encadenados (≈20 s solo, más con varios workers): triplica el límite de 30 s
     await abrir(page)
     // Octubre antes de tocar nada (para el escenario 4).
     await page.getByRole('button', { name: 'Mes anterior', exact: true }).click()

@@ -92,7 +92,14 @@ test.describe('v1.17: filas compactas, swipe y alternativas', () => {
     const y = b.y + b.height / 2
     await toque(b.x + b.width * 0.8, y, b.x + b.width * 0.2, y)
     await expect(fila).toHaveAttribute('data-swipe-abierto', 'true')
-    await toque(b.x + b.width * 0.2, y, b.x + b.width * 0.8, y)
+    // Abierta, el contenido queda desplazado y solo asoma una franja a la izquierda; el resto de la fila son los botones de acción.
+    // Para cerrar deslizando hay que empezar el gesto sobre esa franja (no a un % fijo del ancho, que cae sobre un botón).
+    await fila.evaluate(el => Promise.all([el, ...el.querySelectorAll('*')].flatMap(n => n.getAnimations()).map(a => a.finished.catch(() => null))))
+    const b2 = (await fila.boundingBox())!
+    const panel = (await fila.getByRole('group', { name: /^Acciones de/ }).boundingBox())!
+    const franja = b2.x + (panel.x - b2.x) / 2, y2 = b2.y + b2.height / 2
+    expect(panel.x - b2.x).toBeGreaterThan(20)
+    await toque(franja, y2, b2.x + b2.width * 0.9, y2)
     await expect(fila).not.toHaveAttribute('data-swipe-abierto', 'true')
   })
 

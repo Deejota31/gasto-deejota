@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { Check, ChevronDown, Wand2 } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { ICONS } from '../lib/iconos'
-import { claveDeIcono, PALETA, soft, type Look } from '../lib/visual'
-import { IconPicker } from './IconPicker'
+import { claveDeIcono, PALETA, type Look } from '../lib/visual'
 
 /** Los 10 colores de uso rápido: una sola fila. El resto de la paleta (16 familias × 4 tonos) y el color libre van debajo de "Más colores". */
 export const COLORES_RAPIDOS = ['#E5484D', '#F76B15', '#F5A524', '#2F9E6B', '#0E8FA8', '#4F7BE8', '#6366F1', '#8B7CF6', '#DB5A9A', '#64748B']
@@ -76,22 +75,3 @@ export function useApariencia(inicial: { icono: string; color: string }, auto: L
   return { icono: esAuto ? '' : v.icono, color: look.color, look, esAuto, elegir, restablecer }
 }
 
-/** Icono + color con la opción de volver al automático. Se usa en Nueva/Editar fondo y Nueva/Editar caja. */
-export function AparienciaCampos({ ap, nombre, contexto, autoTexto }: {
-  ap: ReturnType<typeof useApariencia>; nombre: string; contexto: string[]; autoTexto: string
-}) {
-  return (
-    <div className="space-y-3" data-testid="apariencia">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted">Icono y color</p>
-        <button type="button" aria-pressed={ap.esAuto} onClick={ap.restablecer}
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition outline-none focus-visible:ring-2 focus-visible:ring-navy/40 ${ap.esAuto ? 'border-transparent' : 'border-line text-muted hover:bg-bg'}`}
-          style={ap.esAuto ? { background: soft(ap.look.color, '1F'), color: ap.look.color } : undefined}>
-          <Wand2 className="size-3" /> {ap.esAuto ? `Automático · ${autoTexto}` : `Usar el automático (${autoTexto})`}
-        </button>
-      </div>
-      <IconPicker value={ap.icono || claveDeIcono(ap.look.Icon)} onChange={k => ap.elegir({ icono: k })} color={ap.look.color} nombre={nombre} contexto={contexto} />
-      <ColorPicker value={ap.look.color} onChange={c => ap.elegir({ color: c })} />
-    </div>
-  )
-}

@@ -92,7 +92,9 @@ export function SwipeFila({ nombre, acciones, children, activo = true, className
     supr.current = true; setTimeout(() => { supr.current = false }, 0)                           // el soltar no cuenta como toque
     const dx = e.clientX - g.x
     const veloz = Math.abs(dx) / Math.max(e.timeStamp - g.t, 1) > 0.5
-    const actual = arrastre ?? g.base
+    // La posición final se calcula con el último evento, no con el estado `arrastre`: si los eventos llegan más rápido que el render
+    // (lista larga, dispositivo lento), ese estado aún vale null y un gesto de cerrar se interpretaba como "mantener abierta".
+    const actual = Math.min(Math.max(g.base - dx, 0), ancho)
     if (veloz) { if (dx < 0) abrir(); else cerrar() } else if (actual > ancho * 0.4) abrir(); else cerrar()
   }
   const onClickCapture = (e: React.MouseEvent) => {
