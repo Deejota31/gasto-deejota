@@ -352,8 +352,8 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     },
     diagnose: () => api.diagnose(),
     /** Ejecuta una función del backend por nombre; si pudo cambiar la hoja, relee los datos. */
-    async ejecutarFuncion(nombre: string, cambiaHoja: boolean) {
-      const r = await api.ejecutar(nombre)
+    async ejecutarFuncion(nombre: string, cambiaHoja: boolean, payload?: Record<string, unknown>) {
+      const r = await api.ejecutar(nombre, payload)
       if (cambiaHoja) await refresh(true)
       return r
     },

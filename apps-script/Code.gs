@@ -846,7 +846,8 @@ var ACTIONS = {
   crearTokenAtajo: function () { return { token: crearTokenAtajo() }; },
   revocarTokenAtajo: function () { return revocarTokenAtajo(); },
   autorizarRespaldos: function () { return autorizarRespaldos(); },
-  generarDatosPrueba: function () { return generarDatosPrueba(); },
+  generarDatosPrueba: function (p) { return generarDatosPrueba(p); },
+  generarCasosEspecialesPrueba: function () { return generarCasosEspecialesPrueba(); },
   borrarDatosPrueba: function () { return borrarDatosPrueba(); },
   migrarPlantillas: function () { return migrarPlantillas(); },
   actualizarCatalogo: function () { return actualizarCatalogo(); },
@@ -854,7 +855,7 @@ var ACTIONS = {
   repararHojas: function () { return repararHojas(); }
 };
 // Estas ya toman su propio candado (withLock_ no es reentrante): doPost no las envuelve.
-var SELF_LOCK = { generarDatosPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
+var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
 
 function saveGasto_(p, origen) {
   var ss = openSpreadsheet_(false);
@@ -1535,18 +1536,21 @@ function aplicarEntidadesMes_(p) {
   return { tipo: tipo, mes: mes, aplicadas: plan.length, escritas: escritas };
 }
 
-/* ===================== Datos de prueba (julio–septiembre 2026) ===================== */
+/* ===================== Datos de prueba ===================== */
 /*
- * generarDatosPrueba(): agrega ~25 gastos por mes en jul/ago/sep 2026 con todas las casuísticas de Salud financiera
+ * generarDatosPrueba({ cantidad, desde, hasta }): agrega `cantidad` gastos válidos repartidos en los meses de [desde, hasta]
+ * (formato AAAA-MM) más un presupuesto de prueba por mes. Ver más abajo.
+ *
+ * generarCasosEspecialesPrueba(): agrega ~25 gastos por mes en jul/ago/sep 2026 con todas las casuísticas de Salud financiera
  * (compromisos cubiertos, parciales, pendientes, sin monto, en USD y con exceso; errores de calidad; duplicados;
  * clasificación inválida e histórica; nuevos ámbitos, categorías, subcategorías y medios; un fondo de presupuesto).
  * Todo queda marcado: gastos con Origen = "prueba", y lo demás registrado en la propiedad PRUEBA_DATOS.
- * borrarDatosPrueba() elimina exactamente eso y nada más. Ambas hacen un respaldo antes. Ejecútalas desde el editor.
+ * borrarDatosPrueba() elimina exactamente eso y nada más (también lo de generarDatosPrueba). Todas hacen un respaldo antes. Ejecútalas desde el editor.
  */
 var PRUEBA_ORIGEN = 'prueba';
 var PRUEBA_FONDO = 'f-prueba-presupuesto';
 
-function generarDatosPrueba() {
+function generarCasosEspecialesPrueba() {
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('PRUEBA_DATOS')) throw new Error('Ya hay datos de prueba. Ejecuta borrarDatosPrueba() antes de volver a generarlos.');
   var ss = openSpreadsheet_(false);
@@ -1654,6 +1658,81 @@ function generarDatosPrueba() {
     invalidateCache_();
     var resumen = { gastos: gastos.length, vinculos: vinc.length, compromisos: reg.plantillas.length, catalogo: filasCat.length, medios: reg.medios.length, respaldo: respaldo.url };
     Logger.log('Datos de prueba creados: ' + JSON.stringify(resumen));
+    return resumen;
+  });
+}
+
+/* ---------- Datos de prueba a la medida: cantidad de registros y rango de meses ---------- */
+var PRUEBA_MAX_REGISTROS = 500;
+var PRUEBA_MAX_MESES = 24;
+
+// Lista los meses AAAA-MM de [desde, hasta] (ambos incluidos).
+function mesesEntre_(desde, hasta) {
+  var out = [], y = Number(desde.slice(0, 4)), m = Number(desde.slice(5, 7));
+  var yf = Number(hasta.slice(0, 4)), mf = Number(hasta.slice(5, 7));
+  while (y < yf || (y === yf && m <= mf)) {
+    out.push(y + '-' + (m < 10 ? '0' + m : m));
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+// Valida { cantidad, desde, hasta }. Sin parámetros (ejecución desde el editor) usa 60 registros de jul a sep de 2026.
+function parametrosPrueba_(p) {
+  p = p || {};
+  var cantidad = p.cantidad === undefined || p.cantidad === '' || p.cantidad === null ? 60 : Number(p.cantidad);
+  if (!isFinite(cantidad) || Math.floor(cantidad) !== cantidad || cantidad < 1 || cantidad > PRUEBA_MAX_REGISTROS)
+    throw appError_('VALIDATION', 'La cantidad de registros debe ser un entero entre 1 y ' + PRUEBA_MAX_REGISTROS + '.');
+  var desde = str_(p.desde) || '2026-07', hasta = str_(p.hasta) || '2026-09';
+  var re = /^(20\d\d)-(0[1-9]|1[0-2])$/;
+  if (!re.test(desde) || !re.test(hasta)) throw appError_('VALIDATION', 'El período debe indicarse como mes y año (AAAA-MM) entre 2000 y 2099.');
+  if (desde > hasta) throw appError_('VALIDATION', 'El mes inicial no puede ser posterior al mes final.');
+  var meses = mesesEntre_(desde, hasta);
+  if (meses.length > PRUEBA_MAX_MESES) throw appError_('VALIDATION', 'El rango puede abarcar como máximo ' + PRUEBA_MAX_MESES + ' meses.');
+  return { cantidad: cantidad, desde: desde, hasta: hasta, meses: meses };
+}
+
+function generarDatosPrueba(p) {
+  var par = parametrosPrueba_(p);
+  var ss = openSpreadsheet_(false);
+  // Combinaciones válidas del catálogo real (ámbito › categoría › subcategoría activas) y medios activos: nada inventado fuera de la hoja.
+  var combos = readRows_(ss, 'CATALOGO').filter(function (r) {
+    return str_(r[0]) && str_(r[1]) && str_(r[2]) && r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE';
+  }).map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2])]; });
+  if (!combos.length) throw appError_('VALIDATION', 'El catálogo no tiene subcategorías activas con las que generar datos de prueba.');
+  var medios = readRows_(ss, 'MEDIOS_PAGO').filter(function (r) { return r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE' && str_(r[0]); }).map(function (r) { return str_(r[0]); });
+  if (!medios.length) throw appError_('VALIDATION', 'No hay medios de pago activos con los que generar datos de prueba.');
+  var respaldo = backup_();
+  return withLock_(function () {
+    var now = new Date().toISOString();
+    var pick = function (xs) { return xs[Math.floor(Math.random() * xs.length)]; };
+    var gastos = [];
+    for (var i = 0; i < par.cantidad; i++) {
+      var mes = par.meses[i % par.meses.length];                                          // reparto parejo entre los meses del rango
+      var dias = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)), 0)).getUTCDate();
+      var dia = 1 + Math.floor(Math.random() * dias);
+      var c = pick(combos), r = Math.random();
+      var monto = Math.round((3 + r * r * 297) * 10) / 10;                                  // de 3 a 300, con más movimientos pequeños
+      var tipo = r > 0.95 ? 'Extraordinario' : r > 0.8 ? 'Fijo' : 'Variable';
+      gastos.push([mes + '-' + (dia < 10 ? '0' + dia : dia), monto, 'PEN', c[1], c[2], c[2], pick(medios), tipo, c[0], false, 'Activo', PRUEBA_ORIGEN, '', Utilities.getUuid(), now, now]);
+    }
+    appendRows_(ss.getSheetByName('GASTOS'), gastos);
+    // Presupuesto de prueba: un fondo de un solo mes con un importe propio por cada mes del rango (115 % de lo gastado, redondeado a 50).
+    var porMes = {};
+    var n = Math.max(lastDataRow_(ss.getSheetByName('GASTOS')) - 1, 0);
+    (n ? ss.getSheetByName('GASTOS').getRange(2, 1, n, SHEETS.GASTOS.length).getValues() : []).forEach(function (r) {
+      if (str_(r[G.ORIGEN]) !== PRUEBA_ORIGEN || str_(r[G.ESTADO] || 'Activo') === 'Anulado') return;
+      var m = fecha_(r[G.FECHA], tz_()).slice(0, 7);
+      porMes[m] = (porMes[m] || 0) + num_(r[G.MONTO]);
+    });
+    var presupuesto = function (m) { return Math.max(50, Math.ceil((porMes[m] || 0) * 1.15 / 50) * 50); };
+    var h = fondosSheets_();
+    if (!findRowByValue_(h.fondos, 1, PRUEBA_FONDO))
+      appendRows_(h.fondos, [[PRUEBA_FONDO, 'Presupuesto de prueba', presupuesto(par.desde), 'PEN', '#6366F1', '', true, 99, 'unica', par.desde, '', now, now, 'extra']]);
+    par.meses.forEach(function (m) { saveFondoMes_({ fondoId: PRUEBA_FONDO, mes: m, modo: 'solo', monto: presupuesto(m) }); });
+    invalidateCache_();
+    var resumen = { gastos: gastos.length, desde: par.desde, hasta: par.hasta, meses: par.meses.length, presupuestoPorMes: par.meses.map(function (m) { return [m, presupuesto(m)]; }), respaldo: respaldo.url };
+    Logger.log('Datos de prueba agregados: ' + JSON.stringify(resumen));
     return resumen;
   });
 }

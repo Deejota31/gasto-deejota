@@ -1,6 +1,7 @@
 import { formatearDescripcion } from './texto'
 import { aislaDesde } from './engine'
-import { shiftMonth } from './dates'
+import { daysInMonth, shiftMonth } from './dates'
+import { mesesEntre, validarPrueba } from './datosPrueba'
 import { mediosDeFondo } from './fondoMedios'
 import type { Transport } from './api'
 import { CATALOGO_INICIAL } from './catalogo'
@@ -580,8 +581,40 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     crearTokenAtajo: () => ({ token: 'atj_demo_no_real' }),
     revocarTokenAtajo: () => ({ revocado: true }),
     autorizarRespaldos: () => ({ carpeta: carpeta.nombre, url: carpeta.url }),
-    generarDatosPrueba: () => ({ plantillas: [], catalogo: [], medios: [], respaldo: 'https://docs.google.com/spreadsheets/', demo: true }),
-    borrarDatosPrueba: () => ({ gastos: 0, vinculos: 0, compromisos: 0, catalogo: 0, medios: 0, fondos: 0, respaldo: 'https://docs.google.com/spreadsheets/', demo: true }),
+    // Igual que el backend: `cantidad` gastos válidos repartidos en los meses de [desde, hasta] y un presupuesto de prueba por mes.
+    generarDatosPrueba: p => {
+      const v = validarPrueba({ cantidad: (p.cantidad as number | string | undefined) ?? 60, desde: String(p.desde ?? '2026-07'), hasta: String(p.hasta ?? '2026-09') })
+      if (!v.ok) throw fail('VALIDATION', v.errores.cantidad ?? v.errores.periodo ?? 'Parámetros inválidos.')
+      const { cantidad, desde, hasta } = v.valor
+      const meses = mesesEntre(desde, hasta)
+      const combos = db.catalogo.filter(c => c[0] && c[1] && c[2] && c[3] !== false)
+      const medios = db.medios.filter(m => m[1] !== false).map(m => String(m[0]))
+      if (!combos.length || !medios.length) throw fail('VALIDATION', 'El catálogo o los medios de pago no tienen elementos activos para generar datos de prueba.')
+      const now = new Date().toISOString()
+      const nuevas: unknown[][] = []
+      for (let i = 0; i < cantidad; i++) {
+        const mes = meses[i % meses.length], r = Math.random(), c = combos[Math.floor(Math.random() * combos.length)]
+        const dia = 1 + Math.floor(Math.random() * daysInMonth(mes))
+        nuevas.push([`${mes}-${String(dia).padStart(2, '0')}`, Math.round((3 + r * r * 297) * 10) / 10, 'PEN', c[1], c[2], c[2], medios[Math.floor(Math.random() * medios.length)],
+          r > 0.95 ? 'Extraordinario' : r > 0.8 ? 'Fijo' : 'Variable', c[0], false, 'Activo', 'prueba', '', crypto.randomUUID(), now, now])
+      }
+      db.gastos.push(...nuevas)
+      const porMes: Record<string, number> = {}
+      db.gastos.filter(g => g[11] === 'prueba' && g[10] !== 'Anulado').forEach(g => { const m = String(g[0]).slice(0, 7); porMes[m] = (porMes[m] ?? 0) + Number(g[1]) })
+      const presupuesto = (m: string) => Math.max(50, Math.ceil((porMes[m] ?? 0) * 1.15 / 50) * 50)
+      if (!db.fondos.some(f => f[0] === 'f-prueba-presupuesto'))
+        db.fondos.push(['f-prueba-presupuesto', 'Presupuesto de prueba', presupuesto(desde), 'PEN', '#6366F1', '', true, 99, 'unica', desde, '', now, now, 'extra'])
+      meses.forEach(m => handlers.saveFondoMes({ fondoId: 'f-prueba-presupuesto', mes: m, modo: 'solo', monto: presupuesto(m) }))
+      return { gastos: cantidad, desde, hasta, meses: meses.length, presupuestoPorMes: meses.map(m => [m, presupuesto(m)]), respaldo: 'https://docs.google.com/spreadsheets/', demo: true }
+    },
+    generarCasosEspecialesPrueba: () => ({ plantillas: [], catalogo: [], medios: [], respaldo: 'https://docs.google.com/spreadsheets/', demo: true }),
+    borrarDatosPrueba: () => {
+      const antes = db.gastos.length, antesF = db.fondos.length
+      db.gastos = db.gastos.filter(g => g[11] !== 'prueba')
+      db.fondos = db.fondos.filter(f => f[0] !== 'f-prueba-presupuesto')
+      db.fondosMeses = db.fondosMeses.filter(m => m[0] !== 'f-prueba-presupuesto')
+      return { gastos: antes - db.gastos.length, vinculos: 0, compromisos: 0, catalogo: 0, medios: 0, fondos: antesF - db.fondos.length, respaldo: 'https://docs.google.com/spreadsheets/', demo: true }
+    },
     migrarPlantillas: () => ({ cambios: 0, detalle: [] }),
     actualizarCatalogo: () => ({ sinCambios: db.catalogo.length }),
     repararIds: () => [],

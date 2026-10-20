@@ -407,7 +407,7 @@ export function createApi(t: Transport) {
     },
     diagnose: () => t('diagnose', {}) as Promise<Record<string, unknown>>,
     /** Ejecuta por nombre una función del backend (Configuración → Funciones del backend) y devuelve su respuesta tal cual. */
-    ejecutar: (nombre: string) => t(nombre, {}) as Promise<unknown>,
+    ejecutar: (nombre: string, payload: Record<string, unknown> = {}) => t(nombre, payload) as Promise<unknown>,
     /** Carpeta de Drive donde se guardan los respaldos. */
     carpetaRespaldo: () => t('carpetaRespaldo', {}) as Promise<CarpetaRespaldo>,
     /** Cambia la carpeta (enlace o ID de Drive); vacío = carpeta "Backup" junto a la hoja. */
