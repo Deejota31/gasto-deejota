@@ -1841,7 +1841,7 @@ test.describe('v1.12', () => {
     await expect(panel.getByRole('button', { name: /^Mantenimiento de la hoja/ })).toHaveAttribute('aria-expanded', 'false')
     await expect(page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true })).toHaveCount(0)
     for (const g of ['Mantenimiento de la hoja', 'Conexión y archivos', 'Atajo de iPhone', 'Datos de prueba']) await panel.getByRole('button', { name: new RegExp(`^${g}`) }).click()
-    for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'borrarDatosPrueba'])
+    for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba'])
       await expect(page.getByRole('button', { name: `Ejecutar ${f}`, exact: true })).toBeVisible()
     // respuesta simple en el área de resultado
     await page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true }).click()
@@ -1868,6 +1868,66 @@ test.describe('v1.12', () => {
     await page.getByRole('button', { name: 'Contraer resultado' }).click()
     await expect(res.locator('pre')).toHaveClass(/max-h-56/)
     await expect(res.getByRole('button', { name: 'Copiar resultado' })).toBeVisible()
+  })
+})
+
+test.describe('Datos de prueba a la medida', () => {
+  const abrir = async (page: Page) => {
+    await page.goto('/?demo=60')
+    await go(page, 'Configuración')
+    const panel = page.getByTestId('funciones-backend')
+    await panel.getByRole('button', { name: /^Datos de prueba/ }).click()
+    return panel
+  }
+  test('pide la cantidad y el período, valida antes de enviar y agrega exactamente lo pedido', async ({ page }) => {
+    const panel = await abrir(page)
+    await expect(panel.getByText('Agregar datos de prueba', { exact: false }).first()).toBeVisible()
+    await page.getByRole('button', { name: 'Ejecutar generarDatosPrueba', exact: true }).click()
+    const form = page.getByTestId('form-datos-prueba')
+    await expect(form).toBeVisible()
+    await expect(form.getByLabel('Cantidad de registros')).toHaveValue('60')
+    // valores inválidos: avisa sin llamar al backend
+    await form.getByLabel('Cantidad de registros').fill('0')
+    await form.getByRole('button', { name: 'Agregar datos de prueba' }).click()
+    await expect(form).toContainText('entre 1 y 500')
+    await form.getByLabel('Cantidad de registros').fill('30')
+    await form.getByLabel('Desde: mes').selectOption({ label: 'Diciembre' })
+    await form.getByLabel('Desde: año').selectOption('2025')
+    await form.getByLabel('Hasta: mes').selectOption({ label: 'Julio' })
+    await form.getByLabel('Hasta: año').selectOption('2025')
+    await form.getByRole('button', { name: 'Agregar datos de prueba' }).click()
+    await expect(form).toContainText('no puede ser posterior')
+    // período correcto: julio a diciembre de 2025
+    await form.getByLabel('Desde: mes').selectOption({ label: 'Julio' })
+    await form.getByLabel('Hasta: mes').selectOption({ label: 'Diciembre' })
+    await expect(form.getByTestId('resumen-datos-prueba')).toContainText('30 gastos entre julio de 2025 y diciembre de 2025 (6 meses)')
+    await form.getByRole('button', { name: 'Agregar datos de prueba' }).click()
+    const res = page.getByTestId('funcion-resultado')
+    await expect(res).toContainText('"gastos": 30')
+    await expect(res).toContainText('"desde": "2025-07"')
+    await expect(res).toContainText('"hasta": "2025-12"')
+    await expect(res).toContainText('"meses": 6')
+    await expect(page.getByTestId('form-datos-prueba')).toHaveCount(0)
+    // y se pueden borrar: borra exactamente los 30
+    await page.getByRole('button', { name: 'Ejecutar borrarDatosPrueba', exact: true }).click()
+    await page.getByRole('button', { name: 'Confirmar' }).click()
+    await expect(res).toContainText('"gastos": 30')
+  })
+  test('cancelar cierra el formulario sin ejecutar nada', async ({ page }) => {
+    const panel = await abrir(page)
+    await page.getByRole('button', { name: 'Ejecutar generarDatosPrueba', exact: true }).click()
+    await page.getByTestId('form-datos-prueba').getByRole('button', { name: 'Cancelar' }).click()
+    await expect(page.getByTestId('form-datos-prueba')).toHaveCount(0)
+    await expect(panel.getByTestId('funcion-resultado')).toContainText('sin resultados')
+  })
+  test('móvil 375 px: el formulario cabe sin desborde horizontal', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 })
+    await abrir(page)
+    await page.getByRole('button', { name: 'Ejecutar generarDatosPrueba', exact: true }).click()
+    const form = page.getByTestId('form-datos-prueba')
+    await form.scrollIntoViewIfNeeded()
+    await expect(form.getByLabel('Hasta: año')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
   })
 })
 

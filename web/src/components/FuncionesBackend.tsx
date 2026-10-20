@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, KeyRound, Loader2, Maximize2, Minimize2, Play, Terminal } from 'lucide-react'
 import { showToast } from '../lib/toast'
 import type { AppStore } from '../lib/store'
-import { Button, Card } from './ui'
+import { Button, Card, Field, SelectField, inputCls } from './ui'
+import { PRUEBA_MAX_MESES, PRUEBA_MAX_REGISTROS, mesesEntre, periodoPorDefecto, validarPrueba } from '../lib/datosPrueba'
+import { todayIn } from '../lib/dates'
 
 interface Funcion {
   nombre: string                  // nombre de la función en Code.gs
@@ -11,6 +13,7 @@ interface Funcion {
   grupo: 'Conexión y archivos' | 'Mantenimiento de la hoja' | 'Atajo de iPhone' | 'Datos de prueba'
   cambiaHoja?: boolean            // relee los datos al terminar
   confirmar?: string              // pide confirmación antes de ejecutar
+  parametros?: 'datosPrueba'      // abre un formulario (cantidad y período) en lugar de la confirmación simple
 }
 
 /** Todas las funciones de Code.gs que se ejecutaban desde el editor de Apps Script. */
@@ -27,7 +30,8 @@ export const FUNCIONES: Funcion[] = [
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
-  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', titulo: 'Generar datos de prueba', desc: 'Agrega movimientos, catálogo y fondos de ejemplo (marcados para borrarlos). Crea respaldo.', cambiaHoja: true,
+  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', titulo: 'Agregar datos de prueba', desc: 'Agrega la cantidad de gastos que indiques, repartidos en el período que elijas, con un presupuesto de prueba por mes. Se marcan para poder borrarlos. Crea respaldo.', cambiaHoja: true, parametros: 'datosPrueba' },
+  { grupo: 'Datos de prueba', nombre: 'generarCasosEspecialesPrueba', titulo: 'Agregar casos especiales de Salud financiera', desc: 'Agrega los casos de ejemplo de jul–sep 2026 (compromisos, errores de calidad, duplicados). Crea respaldo.', cambiaHoja: true,
     confirmar: 'Se agregarán datos de ejemplo a tu hoja real. ¿Continuar?' },
   { grupo: 'Datos de prueba', nombre: 'borrarDatosPrueba', titulo: 'Borrar datos de prueba', desc: 'Elimina solo lo marcado como prueba. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Se borrarán los datos de prueba marcados. ¿Continuar?' },
@@ -49,6 +53,65 @@ const GRUPO_DESC: Record<(typeof GRUPOS)[number], string> = {
   'Datos de prueba': 'Ejemplos que se pueden borrar',
 }
 
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+/** Mes + año en dos listas (el selector nativo de mes no existe en todos los navegadores). Valor: AAAA-MM. */
+function SelectorMes({ id, etiqueta, value, onChange, anios }: { id: string; etiqueta: string; value: string; onChange: (v: string) => void; anios: number[] }) {
+  const [y, m] = value.split('-')
+  return (
+    <fieldset className="min-w-0">
+      <legend className="mb-1 text-xs font-medium text-muted">{etiqueta}</legend>
+      <div className="grid grid-cols-[1fr_6.75rem] gap-1.5">
+        <SelectField id={`${id}-mes`} label={`${etiqueta}: mes`} value={m} onChange={v => onChange(`${y}-${v}`)}>
+          {MESES.map((n, i) => <option key={n} value={String(i + 1).padStart(2, '0')}>{n}</option>)}
+        </SelectField>
+        <SelectField id={`${id}-anio`} label={`${etiqueta}: año`} value={y} onChange={v => onChange(`${v}-${m}`)}>
+          {anios.map(a => <option key={a} value={String(a)}>{a}</option>)}
+        </SelectField>
+      </div>
+    </fieldset>
+  )
+}
+
+/** Formulario de «Agregar datos de prueba»: cuántos registros y para qué meses. Valida igual que el backend antes de enviar. */
+function FormDatosPrueba({ ocupado, onCancelar, onEnviar }: { ocupado: boolean; onCancelar: () => void; onEnviar: (p: { cantidad: number; desde: string; hasta: string }) => void }) {
+  const hoy = todayIn()
+  const [cantidad, setCantidad] = useState('60')
+  const [per, setPer] = useState(periodoPorDefecto(hoy))
+  const [intento, setIntento] = useState(false)
+  const anioActual = Number(hoy.slice(0, 4))
+  const anios = Array.from({ length: 12 }, (_, i) => anioActual - 9 + i)
+  const v = validarPrueba({ cantidad, desde: per.desde, hasta: per.hasta })
+  const err = !v.ok && intento ? v.errores : {}
+  const n = v.ok ? v.meses : mesesEntre(per.desde, per.hasta).length
+  const nombreMes = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1].toLowerCase()} de ${m.slice(0, 4)}`
+  return (
+    <form data-testid="form-datos-prueba" noValidate className="mt-2 space-y-3 border-t border-line pt-3"
+      onSubmit={e => { e.preventDefault(); setIntento(true); if (v.ok) onEnviar(v.valor) }}>
+      <Field label="Cantidad de registros" htmlFor="prueba-cantidad" error={err.cantidad} hint={`Entre 1 y ${PRUEBA_MAX_REGISTROS}. Se reparten parejo entre los meses del período.`}>
+        <input id="prueba-cantidad" inputMode="numeric" autoComplete="off" className={inputCls} value={cantidad} aria-invalid={!!err.cantidad || undefined}
+          onChange={e => setCantidad(e.target.value)} />
+      </Field>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <SelectorMes id="prueba-desde" etiqueta="Desde" value={per.desde} anios={anios} onChange={d => setPer(p => ({ ...p, desde: d }))} />
+        <SelectorMes id="prueba-hasta" etiqueta="Hasta" value={per.hasta} anios={anios} onChange={h => setPer(p => ({ ...p, hasta: h }))} />
+      </div>
+      {err.periodo && <p role="alert" className="text-xs text-danger">{err.periodo}</p>}
+      <p className="text-[11px] text-muted" data-testid="resumen-datos-prueba">
+        {v.ok
+          ? `Se agregarán ${v.valor.cantidad} gastos entre ${nombreMes(v.valor.desde)} y ${nombreMes(v.valor.hasta)} (${n} mes${n === 1 ? '' : 'es'}), más un presupuesto de prueba por mes. Máximo ${PRUEBA_MAX_MESES} meses.`
+          : 'Completa la cantidad y el período para ver el resumen.'}
+      </p>
+      <div className="flex justify-end gap-1.5">
+        <Button type="button" variant="ghost" className="!px-2.5 !py-1.5 text-xs" onClick={onCancelar} disabled={ocupado}>Cancelar</Button>
+        <Button type="submit" variant="primary" className="!px-2.5 !py-1.5 text-xs" disabled={ocupado}>
+          {ocupado ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Agregar datos de prueba
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 export function FuncionesBackend({ store, className = '' }: { store: AppStore; className?: string }) {
   const [busy, setBusy] = useState('')
   const [pide, setPide] = useState('')
@@ -61,16 +124,19 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
 
   const alternar = (g: string) => setAbiertos(a => { const n = new Set(a); if (!n.delete(g)) n.add(g); return n })
 
-  async function ejecutar(f: Funcion) {
+  async function ejecutar(f: Funcion, payload?: Record<string, unknown>) {
     setPide(''); setBusy(f.nombre); setConsola(true)
     const t0 = performance.now()
     try {
-      const r = f.nombre === 'completarVacios' ? await store.actions.completarVacios() : await store.actions.ejecutarFuncion(f.nombre, !!f.cambiaHoja)
+      const r = f.nombre === 'completarVacios' ? await store.actions.completarVacios() : await store.actions.ejecutarFuncion(f.nombre, !!f.cambiaHoja, payload)
       setEstados(e => ({ ...e, [f.nombre]: 'ok' }))
       setRes({ nombre: f.nombre, ok: true, texto: JSON.stringify(r ?? { ok: true }, null, 2), ms: Math.round(performance.now() - t0), secretos: secretos(r) })
       if (f.nombre === 'completarVacios') {
         const total = (r as { total?: number } | undefined)?.total ?? 0
         showToast('success', total ? `Hoja completada: ${total} fila(s) con valores que estaban vacíos.` : 'La hoja ya no tiene celdas vacías por completar.')
+      } else if (f.nombre === 'generarDatosPrueba') {
+        const x = r as { gastos?: number; desde?: string; hasta?: string } | undefined
+        showToast('success', `Se agregaron ${x?.gastos ?? 0} gastos de prueba (${x?.desde} a ${x?.hasta}). Puedes borrarlos con «Borrar datos de prueba».`)
       } else showToast('success', `${f.titulo}: ejecutada correctamente.`)
     } catch (e) {
       setEstados(e => ({ ...e, [f.nombre]: 'error' }))
@@ -109,22 +175,27 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                 {abierto && (
                   <ul className="space-y-1.5 border-t border-line p-2">
                     {fs.map(f => (
-                      <li key={f.nombre} className="flex items-center gap-2 rounded-lg bg-bg/50 px-2.5 py-2">
+                      <li key={f.nombre} className="rounded-lg bg-bg/50 px-2.5 py-2">
+                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-card px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code></p>
-                          <p className="text-[11px] text-muted">{pide === f.nombre ? <span className="font-medium text-warning"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
+                          <p className="text-[11px] text-muted">{pide === f.nombre && f.confirmar ? <span className="font-medium text-warning"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
                         </div>
-                        {pide === f.nombre ? (
+                        {pide === f.nombre && f.confirmar ? (
                           <span className="flex shrink-0 gap-1">
                             <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setPide('')}>Cancelar</Button>
                             <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => void ejecutar(f)}>Confirmar</Button>
                           </span>
                         ) : (
                           <Button variant="soft" className="shrink-0 !px-2.5 !py-1.5 text-xs" aria-label={`Ejecutar ${f.nombre}`} disabled={!!busy || !store.data}
-                            onClick={() => f.confirmar ? setPide(f.nombre) : void ejecutar(f)}>
+                            onClick={() => f.parametros || f.confirmar ? setPide(f.nombre) : void ejecutar(f)}>
                             {busy === f.nombre ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />} Ejecutar
                           </Button>
                         )}
+                       </div>
+                       {pide === f.nombre && f.parametros === 'datosPrueba' && (
+                         <FormDatosPrueba ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={p => void ejecutar(f, p)} />
+                       )}
                       </li>
                     ))}
                   </ul>

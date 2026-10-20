@@ -1099,10 +1099,10 @@ describe('backend Apps Script', () => {
     b.post('saveGasto', gasto())                                                               // un gasto "real" que no se debe tocar
     const fotos = () => JSON.stringify([...b.ss.sheets.entries()].map(([n, sh]) => [n, sh.rows.filter(r => r.some(v => v !== '' && v !== undefined))]))
     const antes = fotos()
-    const gen = b.g as unknown as { generarDatosPrueba: () => Record<string, number>; borrarDatosPrueba: () => Record<string, number> }
-    const r = gen.generarDatosPrueba()
+    const gen = b.g as unknown as { generarCasosEspecialesPrueba: () => Record<string, number>; borrarDatosPrueba: () => Record<string, number> }
+    const r = gen.generarCasosEspecialesPrueba()
     expect(r.gastos).toBeGreaterThanOrEqual(75)
-    expect(() => gen.generarDatosPrueba()).toThrow(/Ya hay datos de prueba/)              // no duplica
+    expect(() => gen.generarCasosEspecialesPrueba()).toThrow(/Ya hay datos de prueba/)              // no duplica
     const api = createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw new Error(x.error.message); return x.data })
     const d = await api.getData(true)
     const porMes = (m: string) => d.gastos.filter(x => x.origen === 'prueba' && x.fecha.startsWith(m)).length
@@ -1371,9 +1371,9 @@ describe('backend Apps Script', () => {
       expect(s.apiToken).toBeTruthy()
       expect(s.hojas).toBeGreaterThan(5)
       expect(b.post('repararIds').error).toBeUndefined()
-      const g = b.post('generarDatosPrueba')
+      const g = b.post('generarCasosEspecialesPrueba')
       expect(g.error, JSON.stringify(g.error)).toBeUndefined()
-      expect(b.post('generarDatosPrueba').error).toBeTruthy()            // ya hay datos de prueba
+      expect(b.post('generarCasosEspecialesPrueba').error).toBeTruthy()            // ya hay datos de prueba
       const d = b.post('borrarDatosPrueba')
       expect(d.error, JSON.stringify(d.error)).toBeUndefined()
       expect(d.data.gastos).toBeGreaterThanOrEqual(0)
@@ -2126,7 +2126,7 @@ describe('backend: contrato actual de fondos', () => {
   })
 
   it('la simulación crea fondos con tipo vigente', () => {
-    const r = b.post('generarDatosPrueba')
+    const r = b.post('generarCasosEspecialesPrueba')
     expect(r.ok).toBe(true)
     const d = b.post('data', { fresh: true })
     expect(d.ok).toBe(true)
@@ -2233,5 +2233,104 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
     await expect(a.saveGasto(gasto({ id: 'bbbbbbbb-1111-4222-8333-444444444444' }) as never, 'create')).rejects.toMatchObject({ code: 'BUSY' })
     b.setLock(true)
     expect(filas('GASTOS')).toHaveLength(0)
+  })
+})
+
+describe('backend: generarDatosPrueba con cantidad y período', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const filas = (n: string) => b.ss.sheets.get(n)!.rows.slice(1).filter(r => r.some(v => v !== '' && v !== undefined))
+  const prueba = () => filas('GASTOS').filter(r => r[11] === 'prueba')
+
+  it('60 registros de julio a diciembre de 2025: reparte 10 por mes, solo fechas del rango y combinaciones válidas del catálogo', () => {
+    const r = b.post('generarDatosPrueba', { cantidad: 60, desde: '2025-07', hasta: '2025-12' })
+    expect(r.ok, JSON.stringify(r.error)).toBe(true)
+    expect(r.data).toMatchObject({ gastos: 60, desde: '2025-07', hasta: '2025-12', meses: 6 })
+    const gs = prueba()
+    expect(gs).toHaveLength(60)
+    const porMes: Record<string, number> = {}
+    for (const g of gs) { const m = String(g[0]).slice(0, 7); porMes[m] = (porMes[m] ?? 0) + 1 }
+    expect(porMes).toEqual({ '2025-07': 10, '2025-08': 10, '2025-09': 10, '2025-10': 10, '2025-11': 10, '2025-12': 10 })
+    const cat = new Set(filas('CATALOGO').filter(c => c[1] && c[2] && c[3] !== false).map(c => `${c[0]}|${c[1]}|${c[2]}`))
+    const medios = new Set(filas('MEDIOS_PAGO').filter(m => m[1] !== false).map(m => m[0]))
+    for (const g of gs) {
+      expect(/^2025-(0[7-9]|1[0-2])-\d\d$/.test(String(g[0]))).toBe(true)
+      expect(cat.has(`${g[8]}|${g[3]}|${g[4]}`)).toBe(true)
+      expect(medios.has(g[6])).toBe(true)
+      expect(g[1]).toBeGreaterThanOrEqual(3)
+      expect(g[1]).toBeLessThanOrEqual(300)
+      expect(g[2]).toBe('PEN')
+      expect(g[10]).toBe('Activo')
+    }
+    expect(new Set(gs.map(g => g[13])).size).toBe(60)                                        // IDs únicos
+  })
+  it('un solo mes: desde = hasta', () => {
+    const r = b.post('generarDatosPrueba', { cantidad: 30, desde: '2026-03', hasta: '2026-03' })
+    expect(r.data.meses).toBe(1)
+    expect(prueba()).toHaveLength(30)
+    expect(prueba().every(g => String(g[0]).startsWith('2026-03-'))).toBe(true)
+  })
+  it('crea un fondo de prueba con un presupuesto por mes del rango, mayor que lo gastado, y la web lo lee', async () => {
+    b.post('generarDatosPrueba', { cantidad: 40, desde: '2025-07', hasta: '2025-09' })
+    expect(filas('FONDOS_PRESUPUESTO').filter(f => f[0] === 'f-prueba-presupuesto')).toHaveLength(1)
+    const meses = filas('FONDOS_PRESUPUESTO_MESES').filter(m => m[0] === 'f-prueba-presupuesto')
+    expect(meses.map(m => m[1]).sort()).toEqual(['2025-07', '2025-08', '2025-09'])
+    for (const m of meses) {
+      const gastado = prueba().filter(g => String(g[0]).startsWith(String(m[1]))).reduce((s, g) => s + Number(g[1]), 0)
+      expect(Number(m[2])).toBeGreaterThanOrEqual(gastado)
+      expect(Number(m[2]) % 50).toBe(0)
+    }
+    const api = createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw new Error(x.error.message); return x.data })
+    const d = await api.getData(true)
+    expect(d.gastos.filter(g => g.origen === 'prueba')).toHaveLength(40)
+    expect(d.fondos.find(f => f.id === 'f-prueba-presupuesto')?.tipo).toBe('extra')
+  })
+  it('sin parámetros (editor de Apps Script): 60 registros de julio a septiembre de 2026', () => {
+    const r = (b.g as unknown as { generarDatosPrueba: () => Record<string, unknown> }).generarDatosPrueba()
+    expect(r).toMatchObject({ gastos: 60, desde: '2026-07', hasta: '2026-09' })
+  })
+  it('rechaza parámetros inválidos sin escribir nada ni crear respaldo', () => {
+    const antes = JSON.stringify(filas('GASTOS'))
+    const casos: [Record<string, unknown>, RegExp][] = [
+      [{ cantidad: 0 }, /entero entre 1 y 500/], [{ cantidad: 501 }, /entero entre 1 y 500/], [{ cantidad: 2.5 }, /entero entre 1 y 500/], [{ cantidad: 'abc' }, /entero entre 1 y 500/],
+      [{ cantidad: 10, desde: '2025-12', hasta: '2025-07' }, /no puede ser posterior/],
+      [{ cantidad: 10, desde: '2025-13', hasta: '2025-14' }, /AAAA-MM/], [{ cantidad: 10, desde: 'julio', hasta: 'diciembre' }, /AAAA-MM/],
+      [{ cantidad: 10, desde: '2024-01', hasta: '2026-01' }, /máximo 24 meses/],
+    ]
+    for (const [p, re] of casos) {
+      const r = b.post('generarDatosPrueba', p)
+      expect(r.ok, JSON.stringify(p)).toBe(false)
+      expect(r.error.code).toBe('VALIDATION')
+      expect(r.error.message).toMatch(re)
+    }
+    expect(JSON.stringify(filas('GASTOS'))).toBe(antes)
+    expect(b.ss.copies).toHaveLength(0)
+  })
+  it('se puede agregar más de una vez: suma gastos, no duplica el fondo y actualiza (no repite) los meses', () => {
+    b.post('generarDatosPrueba', { cantidad: 12, desde: '2025-07', hasta: '2025-08' })
+    b.post('generarDatosPrueba', { cantidad: 12, desde: '2025-08', hasta: '2025-09' })
+    expect(prueba()).toHaveLength(24)
+    expect(filas('FONDOS_PRESUPUESTO').filter(f => f[0] === 'f-prueba-presupuesto')).toHaveLength(1)
+    expect(filas('FONDOS_PRESUPUESTO_MESES').filter(m => m[0] === 'f-prueba-presupuesto').map(m => m[1]).sort()).toEqual(['2025-07', '2025-08', '2025-09'])
+  })
+  it('borrarDatosPrueba elimina lo generado y conserva los gastos reales', () => {
+    b.post('saveGasto', gasto({ id: 'cccccccc-1111-4222-8333-444444444444', fecha: '2025-08-10' }))
+    b.post('generarDatosPrueba', { cantidad: 30, desde: '2025-07', hasta: '2025-09' })
+    expect(filas('GASTOS')).toHaveLength(31)
+    const d = b.post('borrarDatosPrueba')
+    expect(d.ok, JSON.stringify(d.error)).toBe(true)
+    expect(d.data.gastos).toBe(30)
+    expect(filas('GASTOS')).toHaveLength(1)
+    expect(filas('GASTOS')[0][13]).toBe('cccccccc-1111-4222-8333-444444444444')
+    expect(filas('FONDOS_PRESUPUESTO').filter(f => f[0] === 'f-prueba-presupuesto')).toHaveLength(0)
+    expect(filas('FONDOS_PRESUPUESTO_MESES').filter(m => m[0] === 'f-prueba-presupuesto')).toHaveLength(0)
+  })
+  it('con el catálogo sin subcategorías activas falla con un mensaje claro y no escribe', () => {
+    const cat = b.ss.sheets.get('CATALOGO')!
+    cat.rows = [cat.rows[0]]
+    const r = b.post('generarDatosPrueba', { cantidad: 10 })
+    expect(r.ok).toBe(false)
+    expect(r.error.message).toMatch(/catálogo no tiene subcategorías activas/)
+    expect(prueba()).toHaveLength(0)
   })
 })
