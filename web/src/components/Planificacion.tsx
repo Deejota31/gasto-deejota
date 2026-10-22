@@ -364,19 +364,19 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
   const totalesTxt = (t: Record<string, number>) => { const k = Object.keys(t); return k.length ? k.map(m => money(t[m], m)).join(' + ') : '—' }
   const libre = (() => { const k = Object.keys(real.fondos.totales); return k.length <= 1 && (k[0] ?? monedaBase) === monedaBase ? money((real.fondos.totales[monedaBase] ?? 0) - real.subcajas.reservado, monedaBase) : '—' })()
 
-  const Guardando = ({ e }: { e: Etapa }) => enCurso(e) ? (
+  const guardando = (e: Etapa) => enCurso(e) ? (
     <div className="flex items-center gap-2 rounded-xl border border-navy/30 bg-primary-soft px-3 py-2 text-xs font-medium text-navy" role="status" data-testid={`bg-${e}`}>
       <Loader2 className="size-3.5 animate-spin" /> Guardando {e === 'fondos' ? 'los fondos' : e === 'subcajas' ? 'las cajas' : 'los gastos'} en segundo plano… Puedes seguir navegando; esta pasará a «Completada» cuando Google Sheets lo confirme.
     </div>
   ) : null
-  const Aviso = ({ e }: { e: Etapa | 'final' }) => fallo[e] ? (
+  const aviso = (e: Etapa | 'final') => fallo[e] ? (
     <div className="space-y-2" data-testid={`error-${e}`}>
       <ErrorBox message={fallo[e]!.msg} onRetry={fallo[e]!.reintentar} />
       <p className="text-[11px] text-muted">Tu selección y tu avance se conservan. No se marcó nada como completado.</p>
     </div>
   ) : null
 
-  const Continuar = ({ e }: { e: Etapa }) => {
+  const continuar = (e: Etapa) => {
     if (plan.etapas[e] !== 1 || visual(e) !== 'completada') return null
     const s = sigTxt(e)
     const n = e === 'fondos' ? real.fondos.n : e === 'subcajas' ? real.subcajas.n : real.gastos.n
@@ -416,8 +416,8 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
 
         {etapa === 'fondos' && (
           <div className="space-y-2.5">
-            <Continuar e="fondos" />
-            <Guardando e="fondos" />
+            {continuar('fondos')}
+            {guardando('fondos')}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-ink">¿Qué fondos del presupuesto tendrás en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
@@ -426,14 +426,14 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               </div>
             </div>
             <ListaSel cands={cf} sel={selF} setSel={setSelF} tipo="fondo" />
-            <Aviso e="fondos" />
+            {aviso('fondos')}
             {itF.length > 0 && <Button className="h-9 text-xs" disabled={invalidoF || ocupado('fondos')} onClick={() => aplicarSeleccion('fondos')} data-testid="aplicar-fondos">{ocupado('fondos') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itF.length} fondo{itF.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
           </div>
         )}
         {etapa === 'subcajas' && (
           <div className="space-y-2.5">
-            <Continuar e="subcajas" />
-            <Guardando e="subcajas" />
+            {continuar('subcajas')}
+            {guardando('subcajas')}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-ink">¿Cuánto reservas en cada caja en {nombreMes(mes)}?</p>
               <div className="flex flex-wrap gap-1.5">
@@ -442,20 +442,20 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               </div>
             </div>
             <ListaSel cands={cs} sel={selS} setSel={setSelS} tipo="subcaja" />
-            <Aviso e="subcajas" />
+            {aviso('subcajas')}
             {itS.length > 0 && <Button className="h-9 text-xs" disabled={invalidoS || ocupado('subcajas')} onClick={() => aplicarSeleccion('subcajas')} data-testid="aplicar-subcajas">{ocupado('subcajas') && <Loader2 className="size-3.5 animate-spin" />} Aplicar {itS.length} subcaja{itS.length === 1 ? '' : 's'} a {nombreMes(mes)}</Button>}
           </div>
         )}
         {etapa === 'gastos' && (
           <div className="space-y-3">
-            <Continuar e="gastos" />
-            <Guardando e="gastos" />
+            {continuar('gastos')}
+            {guardando('gastos')}
             <p className="text-sm font-semibold text-ink">Gastos de {nombreMes(mes)}</p>
             <p className="text-xs text-muted">Avanzar aquí <b>no registra ningún gasto</b>. Los compromisos mensuales se registran desde “Gastos mensuales”, donde ves cada uno antes de confirmar.</p>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" className="h-9 text-xs" onClick={() => abrirHijo('gastos')}><ClipboardList className="size-3.5" /> Abrir gastos mensuales</Button>
             </div>
-            <Aviso e="gastos" />
+            {aviso('gastos')}
             <label className="flex items-center gap-2 rounded-xl border border-line p-3 text-sm">
               <input type="checkbox" className="size-4 accent-[var(--navy)]" checked={plan.etapas.gastos === 1} disabled={ocupado('gastos')}
                 onChange={e => persistir('gastos', e.target.checked ? 1 : 0, { pending: 'Guardando…', ok: e.target.checked ? `Gastos de ${nombreMes(mes)} marcados como revisados.` : 'Gastos vuelve a estar pendiente.' })} />
@@ -485,7 +485,7 @@ function Asistente({ store, mes, etapaInicial, o, onClose }: { store: AppStore; 
               <div><dt className="text-muted">Etapas completadas</dt><dd className="font-semibold text-ink">{nCompletadas}</dd></div>
               <div><dt className="text-muted">Etapas omitidas</dt><dd className="font-semibold text-ink">{nOmitidas}</dd></div>
             </dl>
-            <Aviso e="final" />
+            {aviso('final')}
             <p className="text-[11px] text-muted">Estado: <b>{ESTADO_TXT[plan.estado]}</b>{itF.length + itS.length > 0 ? ` · Al finalizar se aplicarán ${itF.length} fondo(s) y ${itS.length} caja(s) que elegiste.` : ''}. Finalizar solo guarda el estado: no vuelve a crear fondos, reservas ni gastos. Las etapas pendientes se pueden retomar desde la campana.</p>
           </div>
         )}

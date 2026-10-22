@@ -34,7 +34,10 @@ const ALCANCES: { value: Alcance; label: string; Icon: typeof Tag }[] = [
   { value: 'Subcategoría', label: 'Subcategoría', Icon: Tag },
   { value: 'Medio de pago', label: 'Medio de pago', Icon: CreditCard },
 ]
-const alcanceIcon = (c: FiltroCampo) => ALCANCES.find(a => a.value === c)?.Icon ?? Wallet
+function AlcanceIcono({ campo, className }: { campo: FiltroCampo; className?: string }) {
+  const Icon = ALCANCES.find(a => a.value === campo)?.Icon ?? Wallet
+  return <Icon className={className} />
+}
 type Orden = 'manual' | 'nombre' | 'monto' | 'mas' | 'menos' | 'uso'
 const TONO = {
   ok: { fg: 'var(--success)', bg: 'var(--success-soft)' }, atencion: { fg: 'var(--warning)', bg: 'var(--warning-soft)' }, alerta: { fg: 'var(--danger)', bg: 'var(--danger-soft)' },
@@ -288,7 +291,6 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, o
 }) {
   const { caja, r } = i
   const { Icon, color } = cajaLook(caja, catalogo)
-  const AIcon = alcanceIcon(caja.filtroCampo)
   const e = estadoDe(i, money)
   const activa = cajaActiva(caja) && !!r
   return (
@@ -301,7 +303,7 @@ function TarjetaCaja({ i, catalogo, money, solapes, busy, acciones, onAjustar, o
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl" style={{ background: `${color}1A`, color }}><Icon className="size-5" /></span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-ink">{caja.nombre}</p>
-            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted"><AIcon className="size-3 shrink-0" />{alcanceTxt(caja)}</p>
+            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted"><AlcanceIcono campo={caja.filtroCampo} className="size-3 shrink-0" />{alcanceTxt(caja)}</p>
           </div>
           {acciones}
         </div>

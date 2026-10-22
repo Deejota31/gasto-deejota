@@ -58,7 +58,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   /** Movimiento a revisar que llega desde Salud financiera: se resalta y se puede volver. */
   foco?: { id: string } | null; onVolverFoco?: () => void
 }) {
-  const cfg = store.data?.config ?? {}
+  const cfg = useMemo(() => store.data?.config ?? {}, [store.data?.config])
   const catalogo = useMemo(() => store.data?.catalogo ?? [], [store.data?.catalogo])
   const [qInput, setQInput] = useState('')
   const q = useDebounced(qInput)
@@ -184,10 +184,10 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   }
 
   const open = openGasto
-  const SortTh = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => {
+  const sortTh = (k: SortKey, children: React.ReactNode, right?: boolean) => {
     const Icon = sort.key !== k ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown
     return (
-      <th scope="col" className={`px-3 py-2.5 font-medium ${right ? 'text-right' : 'text-left'}`} aria-sort={sort.key === k ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}>
+      <th key={k} scope="col" className={`px-3 py-2.5 font-medium ${right ? 'text-right' : 'text-left'}`} aria-sort={sort.key === k ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}>
         <button className={`inline-flex items-center gap-1 hover:text-ink ${sort.key === k ? 'text-navy' : ''}`} onClick={() => toggleSort(k)}>{children}<Icon className="size-3" /></button>
       </th>
     )
@@ -293,10 +293,10 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                     <th scope="col" className="w-9 pl-3"><Checkbox label="Seleccionar los gastos de esta página" checked={selPagina.length > 0 && nSelPagina === selPagina.length} indeterminate={nSelPagina > 0 && nSelPagina < selPagina.length}
                       disabled={!selPagina.length} onChange={toggleTodos} /></th>
                     {personal && <th scope="col" className="w-8 px-1"><span className="sr-only">Mover</span></th>}
-                    <SortTh k="fecha">Fecha</SortTh><SortTh k="descripcion">Descripción</SortTh><SortTh k="categoria">Categoría / Subcategoría</SortTh>
+                    {sortTh('fecha', 'Fecha')}{sortTh('descripcion', 'Descripción')}{sortTh('categoria', 'Categoría / Subcategoría')}
                     <th scope="col" className="px-3 py-2.5 text-left font-medium">Ámbito</th>
                     <th scope="col" className="px-3 py-2.5 text-left font-medium">Medio de pago</th>
-                    <SortTh k="monto" right>Monto</SortTh>
+                    {sortTh('monto', 'Monto', true)}
                     <th scope="col" className="px-3 py-2.5 text-right font-medium">Acciones</th>
                   </tr>
                 </thead>

@@ -40,7 +40,7 @@ export function MenuAcciones({ label, acciones: sinOrden, ancho = 224, trigger, 
     window.addEventListener('resize', place)
     window.addEventListener('scroll', seguir, true)
     return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', seguir, true) }
-  }, [open, acciones.length])
+  }, [open, acciones.length, ancho])
 
   useEffect(() => {
     if (!open) return

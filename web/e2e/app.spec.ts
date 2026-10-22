@@ -46,7 +46,6 @@ async function abrirGrupo(page: Page, g: string) {
   if ((await b.getAttribute('aria-expanded')) !== 'true') await b.click()
 }
 const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', cajas: 'Cajas', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
-const TABS_HASH: Record<string, string> = { cajas: 'Cajas', gastos: 'Gastos', 'catálogo': 'Catálogo', catalogo: 'Catálogo' }
 /** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
 async function cons(page: Page, id: string) {
   const el = page.getByTestId(`cons-${id}`)
@@ -306,7 +305,6 @@ test('caso 10: Familia + Bebé + Yape → tabla y KPI muestran exactamente esos 
   expect(Math.abs((await totalFiltrado(page)) - suma)).toBeLessThanOrEqual(0.005 * n + 0.01)
 })
 
-const toastStack = (page: Page) => page.locator('[aria-live="polite"]').filter({ has: page.locator('[data-kind]') })
 
 test('Dashboard: "+ Nuevo gasto" abre el mismo formulario y actualiza los KPI sin cambiar de sección', async ({ page }) => {
   const antes = await total(page)
@@ -1372,7 +1370,8 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     test(`Presupuesto consolidado idéntico en Dashboard, Cajas y Salud (${q})`, async ({ page }) => {
       await page.goto(q)
       await expect(page.getByTestId('consolidado')).toBeVisible()
-      const dash = await celdas(page), dispDash = await page.getByTestId('disponible-consolidado').innerText()
+      const dash = await celdas(page)
+      await page.getByTestId('disponible-consolidado').innerText()
       await go(page, 'Cajas')                                                                   // Cajas ya no repite el panel: sus indicadores superiores coinciden con el Dashboard
       await expect(page.getByTestId('consolidado')).toHaveCount(0)
       const res = (l: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)

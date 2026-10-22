@@ -22,7 +22,7 @@ export function validarConexion(url: string, token: string): string | null {
 }
 
 export function saveConnection(c: Connection | null) {
-  try { c ? localStorage.setItem(STORAGE_KEY, JSON.stringify(c)) : localStorage.removeItem(STORAGE_KEY) } catch { /* modo privado */ }
+  try { if (c) localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); else localStorage.removeItem(STORAGE_KEY) } catch { /* modo privado */ }
 }
 
 export class ApiError extends Error {
