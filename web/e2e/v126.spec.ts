@@ -25,7 +25,7 @@ async function nuevoFondo(page: Page, { nombre, monto, tipo }: { nombre: string;
   await page.getByRole('button', { name: 'Nuevo fondo' }).click()
   const d = dialog(page)
   await d.getByLabel('Nombre del fondo').fill(nombre)
-  await d.getByLabel('Monto').fill(monto)
+  await d.getByLabel('Importe').fill(monto)
   await d.getByRole('radiogroup', { name: 'Tipo de fondo' }).getByRole('radio', { name: tipo, exact: true }).click()
   if (tipo !== 'Mensual') await d.getByRole('radio', { name: 'Solo un mes' }).click()
   await d.getByRole('button', { name: 'Crear fondo' }).click()
@@ -47,7 +47,7 @@ async function gasto(page: Page, { monto, medio = 'Yape', desc, abrirModal = tru
 }
 
 test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
-  test('1–7: S/ 3,000 de noviembre, gasto de S/ 200, Extra 1, Ahorro asignado, mes anterior intacto, Yape/Plin sin saldo y reserva interna', async ({ page }) => {
+  test('1–6: S/ 3,000 de noviembre, gasto de S/ 200, Extra 1, Ahorro asignado, mes anterior intacto, Yape/Plin sin saldo', async ({ page }) => {
     test.slow()   // siete escenarios encadenados (≈20 s solo, más con varios workers): triplica el límite de 30 s
     await abrir(page)
     // Octubre antes de tocar nada (para el escenario 4).
@@ -83,19 +83,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await gasto(page, { monto: '15', medio: 'Plin', desc: 'Escenario 6' })
     await expect.poll(() => cifra(page, 'gastado-del-período')).toBeCloseTo(g0 + 225, 2)
 
-    // Escenario 7: una reserva interna de S/ 500 no aumenta el presupuesto total.
-    await go(page, 'Presupuestos')
-    const reservado0 = money(await page.getByTestId('cajas-resumen').locator('div', { hasText: 'Reservado en cajas' }).locator('dd').innerText())
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    await d.getByLabel('Nombre').fill('Reserva interna 500')
-    await d.getByRole('radio', { name: 'Ámbito', exact: true }).click()
-    await page.locator('#caja-valor').click()
-    await page.getByRole('listbox').getByRole('option', { name: 'Amigos', exact: true }).click()
-    await d.getByLabel('Monto asignado por mes').fill('500')
-    await d.getByRole('button', { name: 'Crear caja' }).click()
-    await expect(page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: 'Reserva interna 500' })).toHaveCount(1, { timeout: 15_000 })
-    await expect.poll(async () => money(await page.getByTestId('cajas-resumen').locator('div', { hasText: 'Reservado en cajas' }).locator('dd').innerText())).toBeCloseTo(reservado0 + 500, 2)
+    // (v1.28: el escenario 7 — reserva interna de una caja — se retiró con las Cajas; ver docs/PRESUPUESTOS-1.28.md)
     expect(await cifra(page, 'presupuesto-consolidado')).toBe(p0 + 4500)
 
     // Escenario 4: los fondos nuevos de noviembre no tocaron octubre.
@@ -148,7 +136,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     await d.getByLabel('Nombre del fondo').fill('Fondo lento')
-    await d.getByLabel('Monto').fill('250')
+    await d.getByLabel('Importe').fill('250')
     await d.getByRole('button', { name: 'Crear fondo' }).dblclick()
     await expect(d).toHaveCount(0)
     await go(page, 'Gastos')
@@ -180,7 +168,7 @@ test.describe('v1.26 terminología e interfaz', () => {
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     await d.getByLabel('Nombre del fondo').fill('Ahorro tesis nuevo')
-    await d.getByLabel('Monto').fill('300')
+    await d.getByLabel('Importe').fill('300')
     await d.getByRole('radio', { name: 'Ahorro asignado', exact: true }).click()
     await expect(d.getByTestId('fondo-tipo-ayuda')).toContainText('Dinero ya separado')
     await expect(d.getByRole('radio', { name: 'Todos los meses' })).toBeChecked()     // elegir tipo no cambia la recurrencia

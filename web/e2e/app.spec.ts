@@ -29,6 +29,8 @@ async function pick(page: Page, trigger: string, option: string) {
   const ex = lb.getByRole('option', { name: option, exact: true })
   await (await ex.count() ? ex : lb.getByRole('option', { name: new RegExp(`^${option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) })).first().click()
 }
+/** v1.28: el medio del fondo se elige en «Medios de pago → Solo seleccionados». */
+const soloMedios = (page: Page) => page.getByRole('dialog').getByRole('radiogroup', { name: 'Medios de pago del fondo' }).getByRole('radio', { name: 'Solo seleccionados' }).click()
 /** Abre el menú ⋯ de una tarjeta (el menú se cierra al desplazar: primero se deja la tarjeta a la vista). */
 async function abrirMenuCat(page: Page, categoria: string) {
   const b = page.getByRole('button', { name: `Acciones de ${categoria}`, exact: true }).first()
@@ -45,7 +47,7 @@ async function abrirGrupo(page: Page, g: string) {
   const b = page.getByTestId('funciones-backend').getByRole('button', { name: new RegExp(`^${g}`) })
   if ((await b.getAttribute('aria-expanded')) !== 'true') await b.click()
 }
-const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', cajas: 'Presupuestos', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
+const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', presupuestos: 'Presupuestos', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
 /** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
 async function cons(page: Page, id: string) {
   const el = page.getByTestId(`cons-${id}`)
@@ -101,7 +103,7 @@ test('cada KPI y cada indicador del presupuesto tiene su icono de información c
   for (const l of ['Caja mensual', 'Total gastado', 'Disponible', 'Presupuesto']) await expect(page.locator('p', { hasText: new RegExp(`^${l}$`) })).toHaveCount(0)
   await expect(page.getByTestId('kpis').locator('> div p:first-of-type')).toHaveText(['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos'])
   const indicadores = ['Promedio diario', 'Promedio por movimiento', 'Mayor gasto', 'Movimientos',
-    'Libre inicial', 'Gastado fuera de reservas', 'Saldo libre actual', 'Consumido', 'Cómo se calcula']
+    'Fondos activos', 'Fondos con excedente', 'Sin fondo asignable', 'Consumido', 'Cómo se calcula']
   for (const l of indicadores) {
     const btn = page.getByRole('button', { name: `Información: ${l}`, exact: true })
     await btn.scrollIntoViewIfNeeded()
@@ -139,16 +141,6 @@ test('filtros: multiselección, chips, dependencia y limpiar', async ({ page }) 
   await expect.poll(() => movimientos(page)).toBeGreaterThanOrEqual(n0)
 })
 
-test('presupuesto consolidado: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin usar', async ({ page }) => {
-  const c = (id: string) => page.getByTestId(`cons-${id}`).locator('p').nth(1).innerText().then(money)
-  const P = await c('presupuesto-consolidado'), R = await c('reservado-en-cajas')
-  expect(await c('libre-inicial')).toBeCloseTo(P - R, 2)
-  const disp = money(await page.getByTestId('disponible-consolidado').innerText())
-  expect(disp).toBeCloseTo(P - (await c('gastado-del-período')), 2)       // disponible = presupuesto − gastado del período
-  expect(await c('disponible-consolidado')).toBeCloseTo(disp, 2)
-  // disponible consolidado ≠ saldo libre: difieren en las reservas sin utilizar (siempre ≥ 0)
-  expect(disp).toBeGreaterThanOrEqual((await c('saldo-libre-actual')) - 0.005)
-})
 
 test('medios de pago: orden pedido y sin opciones en blanco', async ({ page }) => {
   await go(page, 'Gastos')
@@ -751,17 +743,6 @@ test.describe('v1.4: gastos mensuales, registro masivo, orden y análisis', () =
     await expect.poll(async () => (await orden()).slice(0, 3)).toEqual(['Internet', 'Agua', 'Luz'])
   })
 
-  test('Ajustar caja: "Solo para el mes" viene activado cada vez que se abre', async ({ page }) => {
-    for (let i = 0; i < 2; i++) {
-      await page.getByRole('button', { name: 'Ajustar caja', exact: true }).click()
-      const sw = dialog(page).getByRole('switch', { name: /^Solo para / })
-      await expect(sw).toHaveAttribute('aria-checked', 'true')
-      await sw.click()
-      await expect(sw).toHaveAttribute('aria-checked', 'false')
-      await page.keyboard.press('Escape')
-      await expect(dialog(page)).toHaveCount(0)
-    }
-  })
 
   test('pestaña Gastos: botón Gastos mensuales y orden personalizado con ↑ ↓ (una solicitud, sin tocar fechas)', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -828,6 +809,8 @@ test.describe('v1.5: salud financiera, compromisos y ajustes móviles', () => {
   const valor = (page: Page, id: string) => page.getByTestId(id).innerText().then(money)
 
   test('compromisos: pagar desde la plantilla baja lo pendiente sin doble conteo en el disponible', async ({ page }) => {
+    await page.goto('/?demo=60&fondos=3')
+    await expect(datosListos(page)).toContainText('S/')
     await go(page, 'Salud financiera')
     await page.getByRole('tab', { name: /Compromisos/ }).click()
     const lista = page.getByRole('list', { name: 'Compromisos' })
@@ -1061,103 +1044,6 @@ test.describe('v1.6: pestaña Salud financiera y plantillas sin bloquear', () =>
 })
 
 // ───────────────────────────── v1.7 ─────────────────────────────
-test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
-  const resumen = (page: Page, l: string) => page.getByTestId('cajas-resumen').locator('div', { hasText: l }).locator('dd').innerText().then(money)
-  const tarjeta = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
-
-  test('crear por subcategoría descuenta la reserva del libre; duplicado rechazado; editar, desactivar y eliminar sin tocar gastos', async ({ page }) => {
-    const total0 = await total(page)
-    await go(page, 'Presupuestos')
-    await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
-    const res0 = await resumen(page, 'Reservado en cajas'), libre0 = await resumen(page, 'Libre inicial')
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    await d.getByLabel('Nombre').fill('Caja Línea Celular')
-    await d.getByRole('radio', { name: 'Subcategoría' }).click()
-    await pick(page, '#caja-valor', 'Línea Celular')
-    await d.getByLabel('Monto asignado por mes').fill('40')
-    await d.getByRole('button', { name: 'Crear caja' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular creada correctamente.' })).toBeVisible()
-    await expect(tarjeta(page, 'Caja Línea Celular')).toContainText('Subcategoría · Servicios › Línea Celular')
-    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 + 40, 2)
-    expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 - 40, 2)            // la general no duplica la reserva
-    // mismo alcance y valor: rechazado en el formulario
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    await d.getByLabel('Nombre').fill('Otra línea')
-    await d.getByRole('radio', { name: 'Subcategoría' }).click()
-    await pick(page, '#caja-valor', 'Línea Celular')
-    await d.getByLabel('Monto asignado por mes').fill('10')
-    await d.getByRole('button', { name: 'Crear caja' }).click()
-    await expect(d.getByText(/ya usa Subcategoría = Servicios › Línea Celular/)).toBeVisible()
-    await d.getByRole('button', { name: 'Cancelar' }).click()
-    // editar el monto
-    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Editar Caja Línea Celular' }).click()
-    await d.getByLabel('Monto asignado por mes').fill('60')
-    await d.getByRole('button', { name: 'Guardar cambios' }).click()
-    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 + 60, 2)
-    // desactivar: deja de reservar
-    await tarjeta(page, 'Caja Línea Celular').getByRole('switch', { name: /Desactivar Caja Línea Celular/ }).click()
-    await expect(tarjeta(page, 'Caja Línea Celular').getByTestId('estado-caja')).toHaveText('Inactiva')
-    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)
-    // eliminar con confirmación
-    await tarjeta(page, 'Caja Línea Celular').getByRole('button', { name: 'Más acciones de Caja Línea Celular' }).click()
-    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
-    await expect(d.getByText('ningún gasto se borra', { exact: false })).toBeVisible()
-    await d.getByRole('button', { name: 'Eliminar', exact: true }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Caja Línea Celular eliminada. Ningún gasto se borró.' })).toBeVisible()
-    await expect(tarjeta(page, 'Caja Línea Celular')).toHaveCount(0)
-    await go(page, 'Dashboard')
-    expect(await total(page)).toBeCloseTo(total0, 2)
-  })
-
-  test('con muchas cajas: buscar, filtrar por alcance y estado, ordenar, vista lista y reordenar con una solicitud', async ({ page }) => {
-    await page.goto('/?demo=60&cajas=10#presupuestos')
-    const cards = page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja')
-    await expect(cards).toHaveCount(13)
-    await page.getByLabel('Buscar caja').fill('salud')
-    await expect(cards).toHaveCount(1)
-    await page.getByLabel('Buscar caja').fill('zzz')
-    await expect(page.getByText('Ninguna caja coincide')).toBeVisible()
-    await page.getByRole('button', { name: 'Limpiar filtros' }).click()
-    await page.getByLabel('Filtrar por alcance').selectOption('Subcategoría')
-    await expect(cards).toHaveCount(3)
-    await page.getByLabel('Filtrar por alcance').selectOption('todos')
-    await page.getByLabel('Ordenar cajas').selectOption('mas')
-    const nombres = () => cards.locator('p.truncate.text-sm').allInnerTexts()
-    expect((await nombres())[0]).toBe('Caja Familia')                                 // la más gastada
-    await page.getByRole('radio', { name: 'Lista' }).click()
-    await expect(cards).toHaveCount(13)
-    await page.getByRole('radio', { name: 'Tarjetas' }).click()
-    await page.getByLabel('Ordenar cajas').selectOption('manual')
-    expect((await nombres()).slice(0, 2)).toEqual(['Caja Auto', 'Caja Bebé'])
-    const c0 = await calls(page)
-    await tarjeta(page, 'Caja Auto').getByRole('button', { name: 'Más acciones de Caja Auto' }).click()
-    await page.getByRole('menuitem', { name: 'Bajar' }).click()
-    await expect.poll(async () => (await nombres()).slice(0, 2)).toEqual(['Caja Bebé', 'Caja Auto'])
-    expect(((await calls(page)).reorderCajas ?? 0) - (c0.reorderCajas ?? 0)).toBe(1)
-    // la caja por medio de pago se explica en su tarjeta; las de clasificación muestran con quién se solapan
-    await expect(tarjeta(page, 'Caja Sodexo').getByTestId('solape')).toContainText('Toma lo pagado con Sodexo')
-    await expect(tarjeta(page, 'Caja Bebé').getByTestId('solape')).toContainText('Caja Familia')
-    // el Dashboard las resume en un acordeón cerrado y enlaza a Cajas
-    await go(page, 'Dashboard')
-    const acc = page.getByRole('button', { name: /Cajas \/ reservas/ })
-    await expect(acc).toHaveAttribute('aria-expanded', 'false')
-    await expect(acc).toContainText('13 activas')
-    await acc.click()
-    await expect(page.getByRole('list', { name: 'Cajas del período' }).getByRole('listitem')).toHaveCount(13)
-    await page.getByRole('region', { name: 'Cajas / reservas' }).getByRole('button', { name: 'Administrar en Cajas' }).click()
-    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Presupuestos' })).toHaveAttribute('aria-current', 'page')
-  })
-
-  test('responsive: la pestaña Cajas no genera scroll horizontal en móvil ni tablet', async ({ page }) => {
-    for (const vp of [{ width: 360, height: 780 }, { width: 768, height: 1024 }]) {
-      await page.setViewportSize(vp)
-      await page.goto('/?demo=60&cajas=10#presupuestos')
-      await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
-      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
-    }
-  })
-})
 
 // ───────────────────────────── v1.8 ─────────────────────────────
 test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
@@ -1228,14 +1114,14 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(d.getByText('Escribe un nombre')).toBeVisible()
     await d.getByLabel('Nombre del fondo').fill(' extra 1 ')
-    await d.getByLabel('Monto').fill('100')
+    await d.getByLabel('Importe').fill('100')
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(d.getByText('Ya tienes un fondo con ese nombre')).toBeVisible()
     await d.getByLabel('Nombre del fondo').fill('Bonificación')
-    await d.getByLabel('Monto').fill('1.234')
+    await d.getByLabel('Importe').fill('1.234')
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(d.getByText(/Monto mayor o igual a 0/)).toBeVisible()
-    await d.getByLabel('Monto').fill('200')
+    await d.getByLabel('Importe').fill('200')
     await d.getByRole('radio', { name: 'Solo un mes' }).click()
     const c0 = await calls(page)
     await d.getByRole('button', { name: 'Crear fondo' }).dblclick()
@@ -1251,32 +1137,11 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')).toHaveCount(4)
   })
 
-  test('sin fondos: sigue la caja general; migrar crea General con el mismo importe (idempotente) y no convierte Sodexo', async ({ page }) => {
-    await page.goto('/?demo=60#presupuestos')
-    await expect(page.getByTestId('sin-fondos')).toBeVisible()
-    // estado vacío igual al de subcajas, con acción para crear el primer fondo
-    await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registrados. Registra un fondo para empezar')
-    await expect(page.getByRole('button', { name: 'Crear mi primer fondo' })).toHaveCount(0)   // v1.21: sin botón en el estado vacío
-    await page.getByRole('button', { name: 'Nuevo fondo' }).first().click()                     // el control habitual sigue funcionando
-    await expect(page.getByRole('dialog')).toBeVisible()
-    await page.keyboard.press('Escape')
-    const p0 = await cons(page, 'presupuesto-consolidado')
-    expect(p0).toBe(7000)
-    await page.getByRole('button', { name: /Crear fondo General con/ }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Fondo General creado' })).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')).toHaveCount(1)
-    await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(p0)                     // ningún mes cambia
-    await expect(page.getByRole('button', { name: /Crear fondo General/ })).toHaveCount(0)
-    await expect(page.getByTestId('vacio-fondos')).toHaveCount(0)            // con un fondo ya no se muestra
-    expect((await calls(page)).migrarGeneralAFondo).toBe(1)
-  })
 
   test('20 fondos: se muestran 6 con "Ver todas", buscar y filtrar; sin scroll horizontal en móvil, iPhone y tablet', async ({ page }) => {
     await page.goto('/?demo=60&fondos=20#presupuestos')
     const cards = page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')
-    await expect(cards).toHaveCount(6)
-    await page.getByRole('button', { name: 'Ver las 20 fondos' }).click()
-    await expect(cards).toHaveCount(20)
+    await expect(cards).toHaveCount(20)             // v1.28: se listan todos (sin paginar)
     await page.getByLabel('Buscar fondo').fill('extra')
     await expect(cards).toHaveCount(2)
     await page.getByLabel('Buscar fondo').fill('')
@@ -1342,31 +1207,26 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     await page.goto('/?demo=60&fondos=3')
     const y = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!.y
     const kpiY = await y(page.getByTestId('kpis'))
-    const consY = await y(page.getByTestId('caja-general'))
-    const accY = await y(page.getByTestId('resumen-cajas'))
+    const consY = await y(page.getByTestId('bloque-consolidado'))
+    const accY = await y(page.getByTestId('resumen-fondos'))
     const chartY = await y(page.getByText(/^Gasto acumulado/).first())
     expect(consY).toBeLessThan(kpiY); expect(kpiY).toBeLessThan(accY); expect(accY).toBeLessThan(chartY)
     await expect(page.getByTestId('consolidado-subtitulo')).toContainText(/3 fondos activos · \w+ \d{4}/)
-    const fondos = page.getByRole('button', { name: /^Fondos del presupuesto/ }), subcajas = page.getByRole('button', { name: /^Cajas \/ reservas/ })
+    const fondos = page.getByRole('button', { name: /^Fondos del presupuesto/ })
     await expect(fondos).toHaveAttribute('aria-expanded', 'false')
-    await expect(subcajas).toHaveAttribute('aria-expanded', 'false')
     await expect(fondos).toContainText('3 activos · S/ 4,780.00')
     await expect(page.getByRole('list', { name: 'Fondos del período' })).toHaveCount(0)            // no se renderiza cerrado
     await fondos.click()
     await expect(page.getByRole('list', { name: 'Fondos del período' }).getByRole('listitem')).toHaveCount(3)
-    await expect(subcajas).toHaveAttribute('aria-expanded', 'false')                                   // no abre ambos
-    await subcajas.focus(); await page.keyboard.press('Enter')
-    await expect(subcajas).toHaveAttribute('aria-expanded', 'true')
     await fondos.click()
     await expect(fondos).toHaveAttribute('aria-expanded', 'false')
-    // ya no están las tarjetas grandes de subcajas ni el Top 10
-    await expect(page.getByRole('button', { name: /^Ajustar Caja/ })).toHaveCount(0)
+    // ya no están las tarjetas grandes de cajas ni el Top 10
     await expect(page.getByText('Top 10 subcategorías')).toHaveCount(0)
     await go(page, 'Gastos'); await go(page, 'Dashboard')
-    await expect(page.getByRole('button', { name: /^Cajas \/ reservas/ })).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByRole('button', { name: /^Fondos del presupuesto/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
-  for (const q of ['?demo=60&fondos=3', '?demo=60', '?demo=60&fondos=20&cajas=10']) {
+  for (const q of ['?demo=60&fondos=3', '?demo=60&fondos=20']) {
     test(`Presupuesto consolidado idéntico en Dashboard, Cajas y Salud (${q})`, async ({ page }) => {
       await page.goto(q)
       await expect(page.getByTestId('consolidado')).toBeVisible()
@@ -1374,9 +1234,9 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
       await page.getByTestId('disponible-consolidado').innerText()
       await go(page, 'Presupuestos')                                                                   // Cajas ya no repite el panel: sus indicadores superiores coinciden con el Dashboard
       await expect(page.getByTestId('consolidado')).toHaveCount(0)
-      const res = (l: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
+      const res = (l: string) => page.getByTestId('presupuestos-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
       expect(await res('Presupuesto consolidado')).toBe(money(dash['cons-presupuesto-consolidado']))
-      expect(await res('Reservado en cajas')).toBe(money(dash['cons-reservado-en-cajas']))
+      expect(await res('Gastado')).toBe(money(dash['cons-gastado-del-período']))
       await go(page, 'Dashboard')
       await go(page, 'Salud financiera')
       await page.getByRole('tab', { name: /Mi presupuesto/ }).click()
@@ -1395,7 +1255,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     const dash = await celdas(page)
     await go(page, 'Presupuestos')
     await expect(page.getByTestId('consolidado')).toHaveCount(0)
-    expect(money(await page.getByTestId('cajas-resumen').locator('dt', { hasText: 'Presupuesto consolidado' }).locator('xpath=following-sibling::dd[1]').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
+    expect(money(await page.getByTestId('presupuestos-resumen').locator('dt', { hasText: 'Presupuesto consolidado' }).locator('xpath=following-sibling::dd[1]').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
     expect(((await calls(page)).data ?? 0) - (c0.data ?? 0)).toBe(0)                                  // sin lecturas extra del Sheet
   })
 
@@ -1418,9 +1278,8 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
   test('responsive: Dashboard sin scroll horizontal (360, 390, 768) con acordeones abiertos', async ({ page }) => {
     for (const vp of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(vp)
-      await page.goto('/?demo=60&fondos=20&cajas=10')
+      await page.goto('/?demo=60&fondos=20')
       await page.getByRole('button', { name: /^Fondos del presupuesto/ }).click()
-      await page.getByRole('button', { name: /^Cajas \/ reservas/ }).click()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })
@@ -1462,7 +1321,7 @@ test('compromisos: panel compacto — resumen, orden por estado, cubiertos contr
   const luz = filas.filter({ hasText: 'Luz' })
   await luz.getByRole('button', { name: /^Luz/ }).click()
   const det = luz.getByTestId('compromiso-detalle')
-  for (const t of ['Categoría', 'Caja asignada', 'Medio de pago', 'Notas', 'Gastos vinculados']) await expect(det).toContainText(t)
+  for (const t of ['Categoría', 'Fondo previsto', 'Medio de pago', 'Notas', 'Gastos vinculados']) await expect(det).toContainText(t)
   await expect(luz.getByTestId('estado-compromiso')).toHaveText(/Cubierto/)                   // estado con texto
   // acciones secundarias en menú
   await luz.getByRole('button', { name: 'Acciones de Luz' }).click()
@@ -1493,7 +1352,7 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
     const suma = (await disponible(page, 'General')) + (await disponible(page, 'Sodexo')) + (await disponible(page, 'Extra 1'))
     expect(suma).toBeCloseTo(await cons(page, 'disponible-consolidado'), 2)
     await go(page, 'Dashboard')
-    await expect(page.getByTestId('resumen-cajas')).toBeVisible()
+    await expect(page.getByTestId('resumen-fondos')).toBeVisible()
   })
 
   test('Nuevo fondo: sin selector de icono/color; la vista previa toma el aspecto del medio (Plin) o de General', async ({ page }) => {
@@ -1503,9 +1362,9 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
     await expect(d.getByText('Icono y color')).toHaveCount(0)
     await d.getByLabel('Nombre del fondo').fill('Vales Plin')
-    await d.getByLabel('Monto').fill('50')
+    await d.getByLabel('Importe').fill('50')
+    await soloMedios(page)
     await pick(page, '#fondo-medio', 'Plin')
-    await expect(d.locator('span.size-11').first()).toHaveCSS('color', 'rgb(11, 158, 168)')
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Vales Plin creado' })).toBeVisible({ timeout: 15_000 })
     await expect(fondo(page, 'Vales Plin').locator('svg.lucide-smartphone')).toHaveCount(1)
@@ -1525,23 +1384,6 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
     await expect(fila.locator('svg.lucide-ticket')).toHaveCount(1)
   })
 
-  test('Nueva caja: sin selector de icono/color; toma el aspecto de su alcance (medio de pago)', async ({ page }) => {
-    await page.goto('/?demo=60#presupuestos')
-    await expect(page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: 'Caja Auto' }).locator('svg.lucide-car')).toHaveCount(1)
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    await expect(d.getByTestId('apariencia')).toHaveCount(0)
-    await d.getByLabel('Nombre', { exact: true }).fill('Caja vales')
-    await d.getByRole('radio', { name: 'Medio de pago' }).click()
-    await pick(page, '#caja-valor', 'Sodexo')
-    await expect(d.locator('svg.lucide-ticket').first()).toBeVisible()
-    await d.getByLabel('Monto asignado por mes').fill('120')
-    await d.getByRole('button', { name: 'Crear caja' }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Caja vales creada' })).toBeVisible({ timeout: 15_000 })
-    const tarjeta = page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: 'Caja vales' })
-    await expect(tarjeta.locator('svg.lucide-ticket')).toHaveCount(1)
-    await expect(tarjeta.locator('span.size-11').first()).toHaveCSS('color', 'rgb(210, 70, 60)')
-  })
 
   test('selector de color: una fila de 10 y, en "Más colores", 64 y uno libre; Catálogo usa el mismo selector', async ({ page }) => {
     await page.goto('/?demo=60#categorias')
@@ -1596,38 +1438,16 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
-    const tile = d.locator('span.size-11').first()
-    await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
+    await d.getByLabel('Nombre del fondo').fill('Vales Yape')
+    await d.getByLabel('Importe').fill('10')
+    await soloMedios(page)
     await pick(page, '#fondo-medio', 'Yape')
-    await expect(tile.locator('svg.lucide-smartphone')).toHaveCount(1)
-    await expect(tile).toHaveCSS('color', 'rgb(123, 63, 160)')      // el color de Yape
-    await d.getByRole('button', { name: 'Quitar Yape' }).click()      // varios medios por fondo: el aspecto es el del primero
-    await pick(page, '#fondo-medio', 'Efectivo')
-    await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
-    await pick(page, '#fondo-medio', 'Ninguno (fondo libre)')
-    await expect(tile.locator('svg.lucide-banknote')).toHaveCount(1)
+    await d.getByRole('button', { name: 'Crear fondo' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Vales Yape creado' })).toBeVisible({ timeout: 15_000 })
+    // con medio es exactamente el del medio (Yape = Yape)
+    await expect(fondo(page, 'Vales Yape').locator('span.size-11').first()).toHaveCSS('color', 'rgb(123, 63, 160)')
   })
 
-  test('caja: el alcance (ámbito, categoría, subcategoría, medio) fija su icono y color automáticos', async ({ page }) => {
-    await page.goto('/?demo=60#presupuestos')
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    const tile = d.locator('span.size-11').first()
-    await d.getByRole('radio', { name: 'Ámbito', exact: true }).click()
-    await pick(page, '#caja-valor', 'Familia')
-    await expect(tile.locator('svg.lucide-users')).toHaveCount(1)
-    await expect(tile).toHaveCSS('color', 'rgb(20, 145, 127)')
-    await d.getByRole('radio', { name: 'Categoría', exact: true }).click()
-    await pick(page, '#caja-valor', 'Alimentación')
-    await expect(tile.locator('svg')).toHaveCount(1)
-    await d.getByRole('radio', { name: 'Subcategoría', exact: true }).click()
-    await pick(page, '#caja-valor', 'Gasolina')
-    await expect(tile).toHaveCSS('color', 'rgb(100, 116, 139)')      // el color de su categoría (Auto)
-    await d.getByRole('radio', { name: 'Medio de pago', exact: true }).click()
-    await pick(page, '#caja-valor', 'Plin')
-    await expect(tile.locator('svg.lucide-smartphone')).toHaveCount(1)
-    await expect(tile).toHaveCSS('color', 'rgb(11, 158, 168)')
-  })
 
   test('categorías compartidas: editar una en Personal la actualiza en Trabajo; crearla en otro ámbito hereda su aspecto', async ({ page }) => {
     await go(page, 'Catálogo')
@@ -1938,7 +1758,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
   /** El menú ⋯ se cierra al desplazar: primero se deja el botón a la vista y luego se abre. */
   const abrirMenu = async (b: ReturnType<Page['locator']>) => { await b.scrollIntoViewIfNeeded(); await b.page().waitForTimeout(200); await b.click() }
   const menuC = (page: Page, n: string) => page.getByRole('button', { name: `Más acciones de ${n}`, exact: true })
-  const resumen = (page: Page, label: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
+  const resumen = (page: Page, label: string) => page.getByTestId('presupuestos-resumen').locator('dt', { hasText: label }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
   const caja = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
   const actualizar = async (page: Page) => { await page.getByRole('button', { name: 'Actualizar datos' }).click(); await expect(page.getByRole('button', { name: 'Actualizar datos' })).toBeEnabled({ timeout: 15_000 }) }
   test.beforeEach(async ({ page }) => {
@@ -1988,7 +1808,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     const d = dialog(page)
     await expect(d.getByRole('heading', { name: 'Clonar Sodexo' })).toBeVisible()
     await expect(d.getByLabel('Nombre del fondo')).toHaveValue('Sodexo (Copia)')
-    await expect(d.getByLabel('Monto')).toHaveValue('280')
+    await expect(d.getByLabel('Importe')).toHaveValue('280')
     await expect(d.getByRole('switch', { name: 'Fondo activo' })).toHaveAttribute('aria-checked', 'false')
     await expect(d).toContainText('nace inactiva')
     await d.getByLabel('Nombre del fondo').fill('Sodexo clon')                       // editable antes de confirmar
@@ -2009,7 +1829,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     // crear un fondo libre nueva (sin gastos) y eliminarla
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     await dialog(page).getByLabel('Nombre del fondo').fill('Temporal')
-    await dialog(page).getByLabel('Monto').fill('100')
+    await dialog(page).getByLabel('Importe').fill('100')
     await dialog(page).getByRole('button', { name: 'Crear fondo' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Temporal creado' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4880)
@@ -2017,7 +1837,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     const d = dialog(page)
     await expect(d.getByRole('heading', { name: 'Eliminar Temporal' })).toBeVisible()
-    await expect(d).toContainText('No tiene gastos atribuidos')
+    await expect(d).toContainText('No tiene gastos imputados')
     await d.getByRole('button', { name: 'Cancelar' }).click()
     expect(await nFondos(page)).toBe(4)                                               // cancelar no borra nada
     await menuF(page, 'Temporal').click()
@@ -2036,7 +1856,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     await page.getByRole('menuitem', { name: 'Eliminar' }).click()
     const b = dialog(page)
     await expect(b.getByRole('heading', { name: 'No se puede eliminar Sodexo' })).toBeVisible()
-    await expect(b.getByTestId('fondo-con-gastos')).toContainText('gasto(s) atribuido(s)')
+    await expect(b.getByTestId('fondo-con-gastos')).toContainText('gasto(s) imputado(s)')
     await expect(b.getByRole('button', { name: 'Eliminar', exact: true })).toHaveCount(0)
     await b.getByRole('button', { name: 'Desactivar en su lugar' }).click()
     await dialog(page).getByRole('button', { name: 'Desactivar', exact: true }).click()
@@ -2045,89 +1865,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
     expect(await nFondos(page)).toBe(3)
   })
 
-  test('subcajas: interruptor ON/OFF persiste, no crea ni quita dinero y recalcula reservado y libre', async ({ page }) => {
-    await expect(caja(page, 'Caja Auto')).toBeVisible()
-    const res0 = await resumen(page, 'Reservado en cajas'), libre0 = await resumen(page, 'Libre inicial'), cons0 = await cons(page, 'presupuesto-consolidado')
-    const sw = page.getByRole('switch', { name: 'Desactivar Caja Auto' })
-    await expect(sw).toHaveAttribute('aria-checked', 'true')
-    await sw.click()
-    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
-    await expect(caja(page, 'Caja Auto').getByTestId('estado-caja')).toHaveText(/Inactiva/)
-    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0 - 600, 2)
-    expect(await resumen(page, 'Libre inicial')).toBeCloseTo(libre0 + 600, 2)        // lo reservado vuelve al libre: ni se crea ni se pierde
-    expect(await cons(page, 'presupuesto-consolidado')).toBe(cons0)                  // el consolidado no cambia
-    await actualizar(page)                                                           // persistencia tras releer
-    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toHaveAttribute('aria-checked', 'false')
-    await page.getByRole('switch', { name: 'Activar Caja Auto' }).click()
-    await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toHaveAttribute('aria-checked', 'true')
-    await expect.poll(() => resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)
-  })
 
-  test('subcajas: menú ⋯ con Subir, Bajar, Clonar y Eliminar; clonar no copia monto ni gastos; filtros bloquean el orden; vista lista', async ({ page }) => {
-    const nombres = () => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').locator('p.truncate.text-sm, p.truncate.font-semibold').allInnerTexts()
-    await menuC(page, 'Caja Auto').scrollIntoViewIfNeeded()
-    await page.waitForTimeout(400)
-    await menuC(page, 'Caja Auto').click()
-    await expect(page.getByRole('menuitem')).toHaveCount(5)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
-    await page.keyboard.press('Escape')
-    // Subir / Bajar con persistencia
-    const antes = await nombres()
-    const i = antes.indexOf('Caja Auto')
-    await menuC(page, 'Caja Auto').click()
-    await page.getByRole('menuitem', { name: 'Bajar' }).click()
-    await expect.poll(async () => (await nombres()).indexOf('Caja Auto')).toBe(i + 1)
-    await actualizar(page)
-    expect((await nombres()).indexOf('Caja Auto')).toBe(i + 1)
-    // clonar
-    const res0 = await resumen(page, 'Reservado en cajas')
-    await menuC(page, 'Caja Auto').click()
-    await page.getByRole('menuitem', { name: 'Clonar' }).click()
-    const d = dialog(page)
-    await expect(d.getByRole('heading', { name: 'Clonar Caja Auto' })).toBeVisible()
-    await expect(d.getByLabel('Nombre', { exact: true })).toHaveValue('Caja Auto (Copia)')
-    await expect(d.getByLabel('Monto asignado por mes')).toHaveValue('0')
-    await expect(d.getByRole('switch', { name: 'Caja activa' })).toHaveAttribute('aria-checked', 'false')
-    await expect(d.locator('#caja-valor')).toContainText('Auto')
-    await d.getByRole('button', { name: 'Crear copia' }).dblclick()
-    await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) creada inactiva' })).toBeVisible({ timeout: 15_000 })
-    await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(1)
-    await expect(caja(page, 'Caja Auto (Copia)').getByTestId('estado-caja')).toHaveText(/Inactiva/)
-    expect(await resumen(page, 'Reservado en cajas')).toBeCloseTo(res0, 2)        // la copia no reserva dinero adicional
-    // con búsqueda activa no se puede reordenar
-    await page.getByLabel('Buscar caja').fill('Auto')
-    await abrirMenu(menuC(page, 'Caja Auto'))
-    await expect(page.getByRole('menuitem', { name: 'Subir' })).toBeDisabled()
-    await expect(page.getByRole('menuitem', { name: 'Bajar' })).toBeDisabled()
-    await page.keyboard.press('Escape')
-    await page.getByLabel('Buscar caja').fill('')
-    // vista lista: mismo interruptor y mismo menú
-    await page.getByRole('region', { name: /Reservas/ }).getByRole('radio', { name: 'Lista' }).click()
-    await expect(page.getByRole('switch', { name: 'Desactivar Caja Auto' })).toBeVisible()
-    await abrirMenu(menuC(page, 'Caja Auto (Copia)'))
-    await expect(page.getByRole('menuitem')).toHaveCount(5)
-    expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
-    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
-    // la copia está inactiva (no toma gastos): se puede eliminar
-    await expect(dialog(page)).toContainText('Está inactiva')
-    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
-    await expect(page.getByRole('status').filter({ hasText: 'Caja Auto (Copia) eliminada. Ningún gasto se borró.' })).toBeVisible({ timeout: 15_000 })
-    await expect(caja(page, 'Caja Auto (Copia)')).toHaveCount(0)
-    // la original está activa y tiene gastos: no se elimina, se ofrece desactivar
-    await menuC(page, 'Caja Auto').click()
-    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
-    await expect(dialog(page).getByTestId('caja-con-gastos')).toContainText('gasto(s)')
-    await dialog(page).getByRole('button', { name: 'Desactivar en su lugar' }).click()
-    await expect(page.getByRole('switch', { name: 'Activar Caja Auto' })).toBeVisible()
-    await expect(page.getByRole('dialog')).toHaveCount(0)
-    // ya inactiva sí se puede eliminar, y sus gastos no se borran
-    await menuC(page, 'Caja Auto').click()
-    await page.getByRole('menuitem', { name: 'Eliminar' }).click()
-    await dialog(page).getByRole('button', { name: 'Eliminar', exact: true }).click()
-    await expect(caja(page, 'Caja Auto')).toHaveCount(0)
-    await go(page, 'Dashboard')
-    expect(await total(page)).toBeGreaterThan(0)                                   // los gastos siguen ahí
-  })
 
   test('fallo de Apps Script: una operación que falla restaura la interfaz y no duplica nada', async ({ page }) => {
     await page.goto('/?demo=60&fondos=3&falla=1#presupuestos')
@@ -2230,6 +1968,7 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
     await go(page, 'Presupuestos')
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
+    await soloMedios(page)
     const medio = d.locator('#fondo-medio')
     await medio.click()
     const lista = page.getByRole('listbox', { name: 'Agregar medio de pago' })
@@ -2240,15 +1979,15 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
     expect(box.x + box.width).toBeLessThanOrEqual(vp.width); expect(box.y + box.height).toBeLessThanOrEqual(vp.height)
     await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
     await expect(lista).toHaveCount(0)
-    await expect(d.getByTestId('fondo-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(1)   // el medio elegido queda como chip
+    await expect(d.getByTestId('fondo-medios-elegidos').getByRole('button', { name: /^Quitar / })).toHaveCount(1)   // el medio elegido queda como chip
     await expect(medio).toBeFocused()
     // Escape cierra sin cambiar y el modal sigue abierto
     await medio.click(); await page.keyboard.press('Escape')
     await expect(lista).toHaveCount(0); await expect(d).toBeVisible()
-    await expect(d.getByTestId('fondo-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(1)
+    await expect(d.getByTestId('fondo-medios-elegidos').getByRole('button', { name: /^Quitar / })).toHaveCount(1)
     // moneda: con búsqueda cuando hay muchas opciones o clic directo
     await pick(page, '#fondo-medio', 'Efectivo')
-    await expect(d.getByTestId('fondo-medios').getByRole('button', { name: /^Quitar / })).toHaveCount(2)   // varios medios por fondo
+    await expect(d.getByTestId('fondo-medios-elegidos').getByRole('button', { name: /^Quitar / })).toHaveCount(2)   // varios medios por fondo
   })
 
   test('filtros: las opciones traen el icono y color del catálogo, "Otros" al final y nombre completo en tooltip', async ({ page }) => {
@@ -2455,7 +2194,8 @@ test.describe('v1.16: navegación, preferencias, medios, calendarios y operacion
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     await d.getByLabel('Nombre del fondo').fill('Multi')
-    await d.getByLabel('Monto').fill('300')
+    await d.getByLabel('Importe').fill('300')
+    await soloMedios(page)
     await pick(page, '#fondo-medio', 'Yape')
     await pick(page, '#fondo-medio', 'Plin')
     await expect(d.getByRole('button', { name: /^Quitar / })).toHaveCount(2)

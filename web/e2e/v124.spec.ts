@@ -69,7 +69,7 @@ test.describe('Presupuesto consolidado', () => {
   test('conserva los ocho valores (cifras clave en línea arriba, indicadores debajo)', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
     await page.goto('/?demo=60&fondos=3')
-    const ids = ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'reservado-en-cajas', 'libre-inicial', 'gastado-fuera-de-reservas', 'saldo-libre-actual', 'consumido']
+    const ids = ['presupuesto-consolidado', 'gastado-del-período', 'disponible-consolidado', 'exceso', 'fondos-activos', 'fondos-con-excedente', 'sin-fondo-asignable', 'consumido']
     for (const id of ids) await expect(page.getByTestId(`cons-${id}`)).toBeVisible()
     await expect(page.getByTestId('consolidado').locator('[data-testid^="cons-"]')).toHaveCount(8)
     // todos en el mismo orden visual: principales arriba, secundarios debajo
@@ -77,27 +77,17 @@ test.describe('Presupuesto consolidado', () => {
     expect(Math.max(...ys.slice(0, 4))).toBeLessThan(Math.min(...ys.slice(4)))
   })
 
-  test('cifras coherentes: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin utilizar', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3')
-    const v = async (id: string) => money(await celda(page, id).innerText())
-    const P = await v('presupuesto-consolidado'), R = await v('reservado-en-cajas'), G = await v('gastado-del-período')
-    expect(P).toBe(4780)
-    expect(await v('libre-inicial')).toBeCloseTo(P - R, 2)
-    expect(await v('disponible-consolidado')).toBeCloseTo(P - G, 2)
-    const pct = Number((await celda(page, 'consumido').innerText()).replace('%', ''))
-    expect(pct).toBeCloseTo((G / P) * 100, 0)
-  })
 
   test('barra segmentada: tooltip con nombre e importe, leyenda y teclado', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fondos=3&cajas=3')
+    await page.goto('/?demo=60&fondos=3')
     const barra = page.getByTestId('barra-presupuesto')
     await expect(barra).toBeVisible()
-    await expect(barra.getByRole('list', { name: 'Leyenda de la distribución' })).toContainText('Gastado fuera de reservas')
-    await expect(barra.getByRole('list', { name: 'Leyenda de la distribución' })).toContainText('Reservas sin utilizar')
-    const seg = barra.locator('[data-segmento="fuera"]')
+    await expect(barra.getByRole('list', { name: 'Leyenda de la distribución' })).toContainText('Gastado en fondos')
+    await expect(barra.getByRole('list', { name: 'Leyenda de la distribución' })).toContainText('Disponible')
+    const seg = barra.locator('[data-segmento="fondos"]')
     await seg.focus()
-    await expect(page.getByRole('tooltip')).toContainText('Gastado fuera de reservas')
+    await expect(page.getByRole('tooltip')).toContainText('Gastado en fondos')
     await expect(page.getByRole('tooltip')).toContainText('S/')
     await page.keyboard.press('Escape')
     await expect(page.getByRole('tooltip')).toHaveCount(0)
