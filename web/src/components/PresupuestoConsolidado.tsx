@@ -1,12 +1,12 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import { AlertTriangle, ArrowUpRight, CheckCircle2, Gauge, Info, Lock, Scale, Wallet } from 'lucide-react'
-import type { CajasResumen } from '../lib/engine'
+import { AlertTriangle, CheckCircle2, CircleDollarSign, Gauge, Info, Lock, Shuffle, Unlink } from 'lucide-react'
+import type { PresupuestoResumen } from '../lib/engine'
 import { barraPresupuesto, estadoPresupuesto, type ClaveSegmento, type TonoEstado } from '../lib/presupuestoVista'
 import { InfoTooltip } from './ui'
 
 /**
  * Bloque único de "Presupuesto consolidado" del Dashboard: protagonista de la pantalla, en dos niveles.
- * No calcula nada: todo sale de `aggregate().cajas` (mismo fondo que antes, mismas cifras y mismos nombres).
+ * No calcula nada: todo sale de `aggregate().presupuesto` (motor de fondos, lib/presupuesto.ts).
  * El presupuesto usa el período completo (sin filtros de categoría, ámbito o medio), por eso su "Gastado del período"
  * puede diferir de los KPIs inferiores cuando hay filtros.
  *
@@ -19,16 +19,15 @@ const TONO_VAR: Record<TonoEstado, string> = { ok: ESTADO.ok, atencion: ESTADO.a
 // El chip de estado va sobre fondo blanco en ambos temas: colores fijos con contraste suficiente.
 const CHIP: Record<TonoEstado, string> = { ok: '#0B7A5E', atencion: '#92610F', alerta: '#B42318', neutro: '#475569' }
 const COLOR_GASTO = '#E8664F'
-const COLOR_RESERVA = '#6D5DD3'
+const COLOR_FONDOS = '#6D5DD3'
 
 const idCelda = (etiqueta: string) => `cons-${etiqueta.toLowerCase().replace(/\s+/g, '-')}`
 
 const SEGMENTO: Record<ClaveSegmento, { color: string; estilo: CSSProperties }> = {
-  fuera: { color: COLOR_GASTO, estilo: { background: COLOR_GASTO } },
-  cajas: { color: COLOR_RESERVA, estilo: { background: COLOR_RESERVA } },
-  // Rayado: las reservas sin usar se distinguen también por textura, no solo por color.
-  reservas: { color: COLOR_RESERVA, estilo: { background: `repeating-linear-gradient(135deg, color-mix(in srgb, ${COLOR_RESERVA} 55%, transparent) 0 4px, color-mix(in srgb, ${COLOR_RESERVA} 14%, transparent) 4px 8px)` } },
-  libre: { color: 'var(--success)', estilo: { background: 'color-mix(in srgb, var(--success) 40%, transparent)' } },
+  fondos: { color: COLOR_FONDOS, estilo: { background: COLOR_FONDOS } },
+  // Rayado: lo gastado sin fondo asignable se distingue también por textura, no solo por color.
+  sinFondo: { color: COLOR_GASTO, estilo: { background: `repeating-linear-gradient(135deg, color-mix(in srgb, ${COLOR_GASTO} 70%, transparent) 0 4px, color-mix(in srgb, ${COLOR_GASTO} 20%, transparent) 4px 8px)` } },
+  disponible: { color: 'var(--success)', estilo: { background: 'color-mix(in srgb, var(--success) 40%, transparent)' } },
 }
 
 /** Métrica complementaria (nivel 4): promedio diario, promedio por movimiento, mayor gasto y movimientos. */
@@ -44,19 +43,16 @@ function IconoIndicador({ icono, color }: { icono: ReactNode; color: string }) {
   )
 }
 
-export function PresupuestoConsolidado({ c, money, periodo, accion, complementarios }: { c: CajasResumen; money: (n: number) => string; periodo: string; accion?: ReactNode; complementarios?: Complementario[] }) {
+export function PresupuestoConsolidado({ c, money, periodo, accion, complementarios }: { c: PresupuestoResumen; money: (n: number) => string; periodo: string; accion?: ReactNode; complementarios?: Complementario[] }) {
   const P = c.presupuesto
-  const def = P > 0 || c.origen === 'fondos'
+  const def = c.fondos.length > 0
   const v = (n: number) => (def ? money(n) : '—')
   const estado = estadoPresupuesto(c, money)
-  const origen = c.origen === 'fondos'
-    ? `${c.fondos.activas} fondo${c.fondos.activas === 1 ? '' : 's'} activo${c.fondos.activas === 1 ? '' : 's'}`
-    : `Desde ${c.general?.nombre ?? 'la caja general'}`
-  const tonoSaldo = (n: number) => (def ? (n < 0 ? ESTADO.alerta : ESTADO.ok) : undefined)
+  const origen = def ? `${c.activos} fondo${c.activos === 1 ? '' : 's'} activo${c.activos === 1 ? '' : 's'}` : 'Sin fondos registrados'
   const IconoEstado = estado.tono === 'ok' ? CheckCircle2 : estado.tono === 'neutro' ? Info : AlertTriangle
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)]" aria-label="Presupuesto consolidado" data-testid="caja-general">
+    <section className="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)]" aria-label="Presupuesto consolidado" data-testid="bloque-consolidado">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-[linear-gradient(120deg,#294690,#4F6FC8)] px-4 py-3.5 text-white sm:px-5">
         <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-white/15"><Lock className="size-5" /></span>
         <div className="min-w-0 flex-1">
@@ -64,10 +60,9 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
             <h2 className="truncate text-base font-semibold">Presupuesto consolidado</h2>
             <span className="rounded-full bg-white/15 [&_button]:text-white [&_button:hover]:bg-white/20">
               <InfoTooltip title="Cómo se calcula" align="left">
-                <p>Presupuesto consolidado = suma de lo que aportan los fondos activos del período (sin fondos: la caja general). Es el 100 % contra el que se mide todo lo demás.</p>
+                <p>Presupuesto consolidado = suma de lo que aportan los fondos activos del período. Es el 100 % contra el que se mide todo lo demás.</p>
                 <p><b>Gastado:</b> todos los gastos activos del período, cada uno una sola vez. No usa los filtros de ámbito, categoría, subcategoría, medio ni tipo.</p>
-                <p><b>Reservado en cajas:</b> lo asignado a las cajas activas. Es una parte del presupuesto, no dinero adicional.</p>
-                <p><b>Disponible consolidado</b> = presupuesto − gastado. <b>Saldo libre</b> = libre inicial − gastado fuera de reservas − excesos de cajas. Siempre se cumple: disponible = saldo libre + reservas sin utilizar.</p>
+                <p><b>Disponible consolidado</b> = presupuesto − gastado. Siempre se cumple: gastado = imputado a fondos + sin fondo asignable.</p>
                 <p><b>Consumido</b> = gastado ÷ presupuesto. Pasa de 100 % cuando se excede.</p>
               </InfoTooltip>
             </span>
@@ -82,12 +77,12 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
       </div>
 
       <div data-testid="consolidado">
-        {/* Cifras clave en una línea (sin tarjetas): presupuesto, gastado, disponible y reservado. */}
+        {/* Cifras clave en una línea (sin tarjetas): presupuesto, gastado, disponible y exceso. */}
         <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 pt-3 sm:px-5" data-testid="consolidado-resumen">
           <Cifra etiqueta="Presupuesto consolidado" valor={v(P)} />
           <Cifra etiqueta="Gastado del período" valor={money(c.gastadoPeriodo)} color={COLOR_GASTO} />
           <Cifra etiqueta="Disponible consolidado" valor={v(c.disponible)} color={def ? (c.disponible < 0 ? ESTADO.alerta : ESTADO.ok) : undefined} testidValor="disponible-consolidado" />
-          <Cifra etiqueta="Reservado en cajas" valor={money(c.reservado)} color={COLOR_RESERVA} />
+          <Cifra etiqueta="Exceso" valor={money(c.exceso)} color={c.exceso > 0 ? ESTADO.alerta : undefined} />
         </div>
 
         {/* Distribución */}
@@ -95,13 +90,15 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
 
         {/* Ocho indicadores con el mismo diseño: icono | título + ⓘ / valor */}
         <div className={`${REJILLA} border-t`} data-testid="indicadores">
-          <Indicador etiqueta="Libre inicial" icono={<Wallet />} valor={v(c.libreInicial)} color={def && c.libreInicial < 0 ? ESTADO.alerta : undefined} tinte="var(--color-navy)"
-            info="Presupuesto consolidado − reservado en cajas: lo que queda sin asignar a ninguna caja antes de gastar." />
-          <Indicador etiqueta="Gastado fuera de reservas" icono={<ArrowUpRight />} valor={money(c.gastadoLibre)} color={COLOR_GASTO}
-            info="Gastos que no caen en ninguna caja activa. Cada gasto cae como máximo en una caja." />
-          <Indicador etiqueta="Saldo libre actual" icono={<Scale />} valor={v(c.saldoLibre)} color={tonoSaldo(c.saldoLibre)} tinte={tonoSaldo(c.saldoLibre) ?? 'var(--muted)'}
-            info={<><p>Libre inicial − gastado fuera de reservas − excesos de cajas (lo que una caja gastó por encima de lo asignado).</p>
-              <p>Es lo que queda sin comprometer en reservas. Se diferencia del disponible consolidado porque no cuenta las reservas sin utilizar.</p></>} />
+          <Indicador etiqueta="Fondos activos" icono={<CircleDollarSign />} valor={String(c.activos)} tinte="var(--color-navy)"
+            pista={c.agotados ? `${c.agotados} agotado${c.agotados === 1 ? '' : 's'}` : undefined}
+            info="Fondos activos aplicados al período. Su suma es el presupuesto consolidado." />
+          <Indicador etiqueta="Fondos con excedente" icono={<Shuffle />} valor={String(c.desbordados)} color={c.desbordados ? ESTADO.atencion : undefined} tinte={c.desbordados ? ESTADO.atencion : 'var(--muted)'}
+            pista={c.sobregirados ? `${c.sobregirados} sobregirado${c.sobregirados === 1 ? '' : 's'}` : undefined}
+            info="Fondos que se agotaron y pasaron el resto de sus gastos a otro fondo compatible (normalmente al que cubre todos los gastos)." />
+          <Indicador etiqueta="Sin fondo asignable" icono={<Unlink />} valor={money(c.sinFondo.cents)} color={c.sinFondo.count ? ESTADO.atencion : undefined} tinte={c.sinFondo.count ? ESTADO.atencion : 'var(--muted)'}
+            pista={c.sinFondo.count ? `${c.sinFondo.count} gasto(s)` : undefined}
+            info="Gastos que ningún fondo activo cubre. Siguen descontando del presupuesto consolidado; revisa la cobertura de tus fondos." />
           <Indicador etiqueta="Consumido" icono={<Gauge />} valor={c.pct === null ? '—' : `${c.pct}%`} color={c.pct === null ? undefined : TONO_VAR[estado.tono]}
             info="Gastado del período ÷ presupuesto consolidado. Menos de 70 %: holgado; desde 70 %: cerca del límite; más de 100 %: presupuesto excedido."
             barra={c.pct === null ? undefined : { pct: c.pct, color: TONO_VAR[estado.tono] }} />
@@ -114,11 +111,6 @@ export function PresupuestoConsolidado({ c, money, periodo, accion, complementar
         )}
       </div>
 
-      {c.sobreasignado && (
-        <p className="flex items-center gap-1.5 border-t border-line px-4 py-2.5 text-xs font-medium sm:px-5" style={{ color: ESTADO.atencion }}>
-          <AlertTriangle className="size-3.5 shrink-0" /> Las reservas ({money(c.reservado)}) superan el presupuesto consolidado.
-        </p>
-      )}
     </section>
   )
 }
@@ -160,7 +152,7 @@ function Indicador({ etiqueta, icono, valor, color, tinte, info, pista, barra, t
 }
 
 /** Barra segmentada: cada tramo tiene color, textura, tooltip (nombre, importe y % del presupuesto) y entrada en la leyenda. */
-function Barra({ c, money }: { c: CajasResumen; money: (n: number) => string }) {
+function Barra({ c, money }: { c: PresupuestoResumen; money: (n: number) => string }) {
   const [foco, setFoco] = useState<ClaveSegmento | null>(null)
   const b = barraPresupuesto(c)
   if (!b.segmentos.length) return null

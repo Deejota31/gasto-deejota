@@ -10,7 +10,7 @@ async function ir(page: Page, ruta: string) {
 const main = (page: Page) => page.locator('main')
 
 test.describe('v1.21 sin conexión: nada de datos de ejemplo', () => {
-  for (const [hash, testid] of [['#dashboard', 'desconectado-dashboard'], ['#cajas', 'desconectado-cajas'], ['#gastos', 'desconectado-gastos'], ['#salud', 'desconectado-salud'], ['#catalogo', 'desconectado-catalogo']] as const) {
+  for (const [hash, testid] of [['#dashboard', 'desconectado-dashboard'], ['#presupuestos', 'desconectado-presupuestos'], ['#gastos', 'desconectado-gastos'], ['#salud', 'desconectado-salud'], ['#catalogo', 'desconectado-catalogo']] as const) {
     test(`${hash}: estado vacío sin datos ni gráficos`, async ({ page }) => {
       await ir(page, `/${hash}`)
       await expect(page.getByTestId(testid)).toBeVisible()
@@ -30,12 +30,11 @@ test.describe('v1.21 sin conexión: nada de datos de ejemplo', () => {
 })
 
 test.describe('v1.21 conectado sin registros: cada sección con su estado vacío', () => {
-  test('Fondos y Cajas sin botones «Crear mi primera…»; Gastos, Dashboard y Salud sin gráficos', async ({ page }) => {
-    await ir(page, '/?demo=1&vacio=1&latencia=0#cajas')
+  test('Fondos sin botones «Crear mi primera…»; Gastos, Dashboard y Salud sin gráficos', async ({ page }) => {
+    await ir(page, '/?demo=1&vacio=1&latencia=0#presupuestos')
     await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registrados. Registra un fondo para empezar')
-    await expect(page.getByText('Aún no tienes cajas registradas. Añade una caja para empezar')).toBeVisible()
     await expect(page.getByRole('button', { name: /Crear mi primera/ })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Nueva caja' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Nuevo fondo' }).first()).toBeVisible()
     await page.goto('/?demo=1&vacio=1&latencia=0#gastos')
     await expect(page.getByText('Aún no has registrado gastos')).toBeVisible()
     await page.goto('/?demo=1&vacio=1&latencia=0#dashboard')
@@ -46,12 +45,12 @@ test.describe('v1.21 conectado sin registros: cada sección con su estado vacío
     await page.goto('/?demo=1&vacio=1&latencia=0#catalogo')
     await expect(page.getByText('Aún no tienes elementos en tu catálogo')).toBeVisible()
   })
-  test('terminología: la interfaz dice «Caja/Cajas», no «Subcaja»', async ({ page }) => {
-    await ir(page, '/?demo=60&fondos=3&cajas=3&latencia=0#cajas')
-    await expect(page.getByRole('button', { name: 'Nueva caja' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Cajas mensuales' })).toBeVisible()
-    await expect(main(page)).not.toContainText(/subcaja/i)
-    await page.goto('/?demo=60&fondos=3&cajas=3&latencia=0#dashboard')
-    await expect(main(page)).not.toContainText(/subcaja/i)
+  test('terminología v1.28: la interfaz dice «Presupuestos» y «fondos»; no hay Cajas, Subcajas ni Reservas', async ({ page }) => {
+    await ir(page, '/?demo=60&fondos=3&latencia=0#presupuestos')
+    await expect(page.getByRole('button', { name: 'Nuevo fondo' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Nueva caja' })).toHaveCount(0)
+    await expect(main(page)).not.toContainText(/subcaja|\bcajas?\b|reservas?/i)
+    await page.goto('/?demo=60&fondos=3&latencia=0#dashboard')
+    await expect(main(page)).not.toContainText(/subcaja|\bcajas?\b|reservas?/i)
   })
 })

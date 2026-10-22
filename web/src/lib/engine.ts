@@ -1,33 +1,31 @@
-import { mediosDeFondo } from './fondoMedios'
 import { addDays, daysBetween, monthsInRange } from './dates'
 import { percent, toBaseCents } from './money'
-import type { Caja, Filters, Fondo, FondoMes, Gasto, Presupuesto } from './types'
+import { aislaDesde, AISLAMIENTO_DEFECTO, asignarMes, conflictosConfig, fondoMontoMes, ordenFondos, reglaEn, type ResultadoMes } from './presupuesto'
+import type { Filters, Fondo, FondoMes, Gasto, ParteManual, ReglaFondo } from './types'
+
+export { aislaDesde, AISLAMIENTO_DEFECTO, fondoMontoMes, ordenFondos }
 
 /**
  * Motor único de agregaciones. Una pasada por los gastos por cada combinación de filtros;
- * KPIs, cajas y gráficos salen del mismo resultado, así que siempre cuadran entre sí.
+ * KPIs, presupuesto y gráficos salen del mismo resultado, así que siempre cuadran entre sí.
  *
  * Reglas:
  *  - Los anulados no cuentan. Los montos en otra moneda se convierten con el tipo de cambio de Configuración;
  *    si falta, se excluyen y se informa cuántos (no se suman como si fueran PEN).
- *  - KPIs de gasto y gráficos usan todos los filtros. Presupuesto, disponible, consumido y cajas usan solo el
+ *  - KPIs de gasto y gráficos usan todos los filtros. Presupuesto, disponible, consumido y fondos usan solo el
  *    período: un presupuesto no se puede "filtrar" por categoría sin volverse incoherente.
- *  - Cajas: la general es el presupuesto total (P). Las subcajas son reservas dentro de P, no dinero extra.
- *    Cada gasto se imputa como máximo a una subcaja (la primera que coincide, por orden).
- *  - Fondos (v1.8): si hay al menos un fondo, P = Σ aportes del período de los fondos ACTIVOS (las reservas no suman).
- *    Sin fondos, P sigue siendo el presupuesto de la caja general (compatibilidad con hojas anteriores).
- *    Cada gasto se atribuye en cascada: primero el fondo de su medio de pago, luego los fondos libres en orden (la
- *    principal hasta su tope, después la siguiente). Un fondo solo queda en negativo si el consolidado también lo está.
+ *  - Presupuesto consolidado P = Σ aportes del período de los fondos ACTIVOS. El reparto de cada gasto entre fondos lo decide
+ *    lib/presupuesto.ts (mes a mes); repartir nunca cambia P, el gastado ni el disponible consolidado.
  */
 
 export interface Ctx {
   base: string
   rates: Record<string, number>
   today: string // AAAA-MM-DD en la zona horaria del usuario
-  cajas: Caja[]
-  presupuestos: Presupuesto[]
   fondos?: Fondo[]
   fondosMeses?: FondoMes[]
+  /** Asignaciones manuales (ID de gasto en minúsculas → partes). */
+  asignaciones?: Record<string, ParteManual[]>
   /** Mes de corte del aislamiento mensual (ver aislaDesde). Sin valor = comportamiento histórico. */
   aislarDesde?: string
 }
@@ -37,58 +35,59 @@ export interface SubItem extends Item { categoria: string; subcategoria: string;
 /** Subcategoría identificada por ámbito + categoría + subcategoría: "Otros" de dos categorías o ámbitos nunca se mezclan. */
 export interface RankSub extends SubItem { ambito: string }
 export interface DayPoint { date: string; label: string; diario: number; acumulado: number | null; ideal: number | null; proyeccion: number | null }
-export interface SubcajaResumen { caja: Caja; asignado: number; gastado: number; count: number; disponible: number; pct: number | null; excedido: boolean; /** ¿Aplicada explícitamente en el período? (false = solo plantilla/definición: no reserva dinero) */ aplicada: boolean }
-export interface CajasResumen {
-  general: Caja | null
-  presupuesto: number        // P
-  reservado: number          // R = Σ asignaciones de cajas
-  libreInicial: number       // P − R
-  gastadoSubcajas: number    // Gs
-  gastadoLibre: number       // Gl
-  excesoSubcajas: number     // gasto de cajas por encima de lo asignado: sale del saldo libre
-  saldoLibre: number         // P − R − Gl − exceso
-  disponible: number         // P − Gs − Gl
-  /** Gs + Gl: todo lo gastado del período (sin filtros de dimensión), cada movimiento una vez. */
-  gastadoPeriodo: number
-  /** Σ max(0, asignado − gastado) de las subcajas activas. Cuadre: disponible = saldoLibre + reservasSinUsar. */
-  reservasSinUsar: number
-  pct: number | null
-  sobreasignado: boolean     // R > P
-  subcajas: SubcajaResumen[]
-  /** Subcajas desactivadas: no reservan ni toman gastos. */
-  inactivas: Caja[]
-  /** De dónde sale P: suma de fondos activos o, sin fondos, la caja general. */
-  origen: 'fondos' | 'caja-general'
-  fondos: FondosResumen
-}
-
+export type EstadoFondo = 'inactivo' | 'sin_importe' | 'disponible' | 'cerca' | 'agotado' | 'sobregirado'
 export interface FondoResumen {
   fondo: Fondo
-  /** Importe del período en moneda base (aunque esté inactiva, para mostrar cuánto aportaría). */
+  /** Regla vigente al final del período (la que se muestra). */
+  regla: ReglaFondo
+  /** Importe del período en moneda base (aunque esté inactivo, para mostrar cuánto aportaría). */
   asignado: number
-  /** Lo que suma a P: asignado si está activa y tiene tipo de cambio; si no, 0. */
+  /** Lo que suma a P: asignado si está activo y tiene tipo de cambio; si no, 0. */
   aporta: number
+  /** Importe imputado (partes de gastos que cubre este fondo). */
   gastado: number
+  /** Gastos con alguna parte en este fondo (un gasto repartido cuenta en cada fondo que lo cubre). */
   count: number
   disponible: number
   pct: number | null
-  principal: boolean
   sinTipoCambio: boolean
   /** Algún mes del período tiene un importe propio (FONDOS_PRESUPUESTO_MESES). */
   ajustado: boolean
-  /** ¿Aplicada al período (importe del mes o fondo de ese mes)? false = solo definición: no suma dinero */
+  /** ¿Aplicado al período (importe del mes o fondo de ese mes)? false = solo definición: no suma dinero */
   aplicada: boolean
+  /** Parte de gastos de su cobertura que pasó a otro fondo porque este se agotó. */
+  enviado: number
+  /** Excedentes de otros fondos que recibió. */
+  recibido: number
+  /** Fondos que recibieron lo que este no pudo cubrir. */
+  destinos: string[]
+  /** Parte imputada por asignación manual. */
+  manual: number
+  estado: EstadoFondo
 }
-export interface FondosResumen {
-  lista: FondoResumen[]
-  total: number
-  activas: number
-  /** Gastos pagados con el medio de un fondo inactivo: siguen descontando de P (gastos por revisar). */
-  gastadoInactivas: number
-  countInactivas: number
-  /** Gastos sin fondo válida (no hay fondo principal activo): también descuentan de P. */
-  gastadoSinFondo: number
-  countSinFondo: number
+/** Fondos con exactamente la misma cobertura: su capacidad se suma (p. ej. dos fondos de Auto). */
+export interface GrupoCobertura { clave: string; fondos: FondoResumen[]; asignado: number; gastado: number; enviado: number }
+export interface PresupuestoResumen {
+  presupuesto: number        // P = Σ aportes de los fondos activos
+  gastadoPeriodo: number     // todo lo gastado del período (sin filtros de dimensión), cada movimiento una vez
+  disponible: number         // P − gastado
+  pct: number | null
+  /** Céntimos por encima del presupuesto consolidado (0 si no se excede). */
+  exceso: number
+  fondos: FondoResumen[]
+  total: number              // = presupuesto (compatibilidad de lectura)
+  activos: number
+  agotados: number
+  desbordados: number
+  sobregirados: number
+  sinFondo: { cents: number; count: number }
+  /** Gastos cuyo medio viola una restricción configurada (anteriores a la regla). */
+  incompatibles: number
+  /** Asignaciones manuales que dejaron de ser válidas. */
+  conflictos: number
+  grupos: GrupoCobertura[]
+  /** Avisos de configuración del último mes del período. */
+  avisosConfig: string[]
 }
 
 export interface FlowLink { medio: string; ambito: string; cents: number; count: number }
@@ -125,7 +124,7 @@ export interface Aggregates {
   resumen: ResumenPeriodo
   dias: DayPoint[]
   estado: 'pasado' | 'en-curso' | 'futuro'
-  cajas: CajasResumen
+  presupuesto: PresupuestoResumen
 }
 
 const sortDesc = <T extends Item>(a: T, b: T) => b.cents - a.cents || a.name.localeCompare(b.name)
@@ -148,86 +147,6 @@ export function matchesDims(g: Gasto, f: Filters): boolean {
 export const hasDimFilters = (f: Filters) =>
   !!(f.ambitos.length || f.categorias.length || f.subcategorias.length || f.medios.length || f.tipos.length)
 
-/**
- * Prioridad entre cajas que se solapan: gana la más específica (Subcategoría > Categoría > Ámbito > Medio de pago);
- * a igual nivel, la primera en el orden manual. Así cada gasto cae en UNA sola subcaja y nunca se cuenta dos veces.
- */
-export const ESPECIFICIDAD: Record<Caja['filtroCampo'], number> = { 'Subcategoría': 4, 'Categoría': 3, 'Ámbito': 2, 'Medio de pago': 1, Todos: 0 }
-export const cajaActiva = (c: Caja) => c.activo !== false
-export function prioridadCajas(cajas: Caja[]): Caja[] {
-  return cajas.filter(c => c.filtroCampo !== 'Todos' && cajaActiva(c))
-    .sort((a, b) => ESPECIFICIDAD[b.filtroCampo] - ESPECIFICIDAD[a.filtroCampo] || a.orden - b.orden)
-}
-/** La subcaja que se queda con el gasto (o undefined: va a "gastado fuera de subcajas"). */
-export const cajaDe = (priorizadas: Caja[], g: Pick<Gasto, 'ambito' | 'categoria' | 'subcategoria' | 'medioPago'>) => priorizadas.find(c => cajaMatches(c, g))
-
-const nrm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
-export function cajaMatches(c: Caja, g: Pick<Gasto, 'ambito' | 'categoria' | 'subcategoria' | 'medioPago'>): boolean {
-  const v = nrm(c.filtroValor)
-  switch (c.filtroCampo) {
-    case 'Todos': return true
-    case 'Ámbito': return nrm(g.ambito) === v
-    case 'Categoría': return nrm(g.categoria) === v
-    // "Categoría › Subcategoría" identifica una sola subcategoría ("Otros" existe en muchas); solo el nombre, todas las de ese nombre.
-    case 'Subcategoría': {
-      const [cat, sub] = v.includes(' › ') ? v.split(' › ') : [null, v]
-      return nrm(g.subcategoria) === sub && (cat === null || nrm(g.categoria) === cat)
-    }
-    case 'Medio de pago': return nrm(g.medioPago) === v
-  }
-}
-
-
-/** Presupuesto de una caja para un mes: el de PRESUPUESTOS si existe; si no, el de la caja. */
-export function budgetCents(caja: Caja, periodo: string, presupuestos: Presupuesto[], aislar?: string): number {
-  const override = presupuestos.find(p => p.periodo === periodo && p.cajaId === caja.id)
-  // Aislamiento mensual (v1.19): desde el mes de corte, una subcaja solo reserva en los meses donde se aplicó explícitamente.
-  if (!override && aislar && periodo >= aislar && caja.filtroCampo !== 'Todos') return 0
-  return Math.round((override ? override.monto : caja.presupuesto) * 100)
-}
-
-/**
- * Mes desde el cual fondos y subcajas NO se trasladan solas de un mes a otro (v1.19). Antes de ese mes se conserva el
- * comportamiento histórico (así los meses ya vividos no cambian ni un centavo); desde ese mes cuenta solo lo aplicado
- * explícitamente (FONDOS_PRESUPUESTO_MESES modo 'solo' / PRESUPUESTOS). Configurable en CONFIG → aislamiento_desde ('9999-12' = apagado).
- */
-export const AISLAMIENTO_DEFECTO = '2026-11'
-export const aislaDesde = (config?: Record<string, string>): string => /^\d{4}-\d{2}$/.test(config?.aislamiento_desde ?? '') ? config!.aislamiento_desde : AISLAMIENTO_DEFECTO
-/** ¿Esta subcaja tiene una aplicación explícita en el mes? (en meses anteriores al corte, siempre cuenta como aplicada) */
-export const cajaAplicada = (caja: Caja, periodo: string, presupuestos: Presupuesto[], aislar?: string) =>
-  !aislar || periodo < aislar || caja.filtroCampo === 'Todos' || presupuestos.some(p => p.periodo === periodo && p.cajaId === caja.id)
-
-/** Presupuesto de una caja para un rango: suma de los meses que toca (meses completos). */
-export function budgetForRange(caja: Caja, desde: string, hasta: string, presupuestos: Presupuesto[], aislar?: string): number {
-  return monthsInRange(desde, hasta).reduce((s, p) => s + budgetCents(caja, p, presupuestos, aislar), 0)
-}
-
-/**
- * Importe de un fondo para un mes, en su moneda: un importe "solo ese mes" manda; si no, el último "desde" vigente
- * (solo fondos mensuales); si no, el importe habitual (mensual: desde su mes de aplicación; única: solo en su mes).
- */
-export function fondoMontoMes(f: Fondo, mes: string, meses: FondoMes[], aislar?: string): { monto: number; ajustado: boolean; aplicada: boolean } {
-  let solo: FondoMes | undefined, desde: FondoMes | undefined
-  if (aislar && mes >= aislar) {
-    // Aislamiento mensual: solo cuenta lo aplicado a ESE mes (importe "solo ese mes") o un fondo de un único mes.
-    const s = meses.find(m => m.fondoId === f.id && m.modo === 'solo' && m.mes === mes)
-    if (s) return { monto: s.monto, ajustado: true, aplicada: true }
-    const propia = f.recurrencia === 'unica' && mes === f.mes
-    return { monto: propia ? f.monto : 0, ajustado: false, aplicada: propia }
-  }
-  for (const m of meses) {
-    if (m.fondoId !== f.id) continue
-    if (m.modo === 'solo' && m.mes === mes) solo = m
-    else if (m.modo === 'desde' && m.mes <= mes && (!desde || m.mes > desde.mes)) desde = m
-  }
-  if (solo) return { monto: solo.monto, ajustado: true, aplicada: true }
-  if (f.recurrencia === 'unica') return { monto: mes === f.mes ? f.monto : 0, ajustado: false, aplicada: true }
-  if (desde) return { monto: desde.monto, ajustado: true, aplicada: true }
-  return { monto: !f.mes || mes >= f.mes ? f.monto : 0, ajustado: false, aplicada: true }
-}
-
-export const ordenFondos = (fs: Fondo[]) => [...fs].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre))
-
 /** Días que cuentan para el promedio diario: hasta hoy si el período está en curso, completo si ya pasó, 0 si es futuro. */
 export function diasDelPeriodo(desde: string, hasta: string, today: string): number {
   if (today < desde) return 0
@@ -246,52 +165,18 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
   const catAmb = new Map<string, Map<string, number>>()
   const monedas = new Set<string>()
   let primerFecha: string | null = null, ultimaFecha: string | null = null
-  const ordered = [...ctx.cajas].sort((a, b) => a.orden - b.orden)
-  const general = ordered.find(c => c.filtroCampo === 'Todos') ?? null
-  const subcajas = ordered.filter(c => c !== general && c.filtroCampo !== 'Todos' && cajaActiva(c))
-  const inactivas = ordered.filter(c => c.filtroCampo !== 'Todos' && !cajaActiva(c))
-  const priorizadas = prioridadCajas(subcajas)
-  const indice = new Map(subcajas.map((c, i) => [c, i]))
-  const subGastado = new Array<number>(subcajas.length).fill(0)
-  const subCount = new Array<number>(subcajas.length).fill(0)
-  let total = 0, count = 0, maxCents = 0, max: Gasto | null = null, excluidos = 0, totalPeriodo = 0, gastadoLibre = 0
-
-  // Fondos: importe del período por fondo y a qué fondo se atribuye cada gasto (una sola).
-  const fondos = ordenFondos(ctx.fondos ?? [])
+  let total = 0, count = 0, maxCents = 0, max: Gasto | null = null, excluidos = 0, totalPeriodo = 0
   const meses = monthsInRange(f.desde, f.hasta)
-  const fMeses = ctx.fondosMeses ?? []
-  const fResumen: FondoResumen[] = fondos.map(fu => {
-    let monto = 0, ajustado = false, aplicada = false
-    for (const m of meses) { const x = fondoMontoMes(fu, m, fMeses, ctx.aislarDesde); monto += x.monto; ajustado ||= x.ajustado; aplicada ||= x.aplicada }
-    const cents = toBaseCents(monto, fu.moneda, ctx.base, ctx.rates)
-    const asignado = cents ?? 0
-    return { fondo: fu, asignado, aporta: fu.activo ? asignado : 0, gastado: 0, count: 0, disponible: 0, pct: null, principal: false, sinTipoCambio: cents === null && monto > 0, ajustado, aplicada }
-  })
-  // Un fondo puede tener 0, 1 o varios medios y varios fondos pueden compartir un medio: el grupo de un medio son
-  // sus fondos en el orden definido por el usuario (el medio no es una clave).
-  const porMedio = new Map<string, FondoResumen[]>()
-  for (const r of fResumen) {
-    for (const m of mediosDeFondo(r.fondo.medioPago)) {
-      const k = nrm(m)
-      porMedio.set(k, [...(porMedio.get(k) ?? []), r])
-    }
-  }
-  const libres = fResumen.filter(r => r.fondo.activo && !mediosDeFondo(r.fondo.medioPago).length)
-  const principal = libres.find(r => r.aporta > 0) ?? libres[0] ?? null
-  if (principal) principal.principal = true
-  let gastadoInactivas = 0, countInactivas = 0, gastadoSinFondo = 0, countSinFondo = 0
-  const elegibles: { g: Gasto; cents: number }[] = []
+  const delPeriodo: Gasto[] = []
 
   for (const g of gastos) {
     if (g.estado === 'Anulado' || g.fecha < f.desde || g.fecha > f.hasta) continue
     const cents = toBaseCents(g.monto, g.moneda, ctx.base, ctx.rates)
     if (cents === null) { excluidos++; continue }
 
-    // Presupuesto: solo período. Cada gasto va a una sola subcaja o al saldo libre.
+    // Presupuesto: solo período (sin filtros de dimensión). El reparto entre fondos se hace después, mes a mes.
     totalPeriodo += cents
-    const dueña = cajaDe(priorizadas, g)
-    if (dueña) { const i = indice.get(dueña)!; subGastado[i] += cents; subCount[i]++ } else gastadoLibre += cents
-    if (fResumen.length) elegibles.push({ g, cents })
+    delPeriodo.push(g)
 
     if (!matchesDims(g, f)) continue
     total += cents
@@ -324,65 +209,8 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
     if (!ultimaFecha || g.fecha > ultimaFecha) ultimaFecha = g.fecha
   }
 
-  // Cascada de fondos (v1.10). En orden cronológico, cada gasto toma primero el fondo de su medio de pago (Sodexo…) y,
-  // si no tiene o ya se agotó, los fondos libres en orden: la principal hasta su tope, luego la siguiente. Un gasto que
-  // cruza un tope se reparte (cuenta como movimiento en el primer fondo que lo recibe). Lo que sobra tras agotar todo
-  // queda en la última fondo libre: un fondo solo muestra saldo negativo si el presupuesto consolidado también lo es.
-  // El resultado por fondo no depende del orden de los gastos; solo cambia cuántos movimientos cuenta cada una.
-  if (fResumen.length) {
-    const libresOrden = principal ? [principal, ...libres.filter(r => r !== principal)] : []
-    const cupo = new Map(fResumen.map(r => [r, Math.max(0, r.aporta)]))
-    const cronologico = elegibles.sort((a, b) => a.g.fecha.localeCompare(b.g.fecha) || a.g.creadoEn.localeCompare(b.g.creadoEn) || a.g.id.localeCompare(b.g.id))
-    for (const { g, cents } of cronologico) {
-      const grupo = porMedio.get(nrm(g.medioPago)) ?? []
-      const activas = grupo.filter(r => r.fondo.activo)
-      // Todos los fondos de ese medio están inactivas: el gasto va al cubo de "inactivas" (a la primera del grupo).
-      if (grupo.length && !activas.length) { gastadoInactivas += cents; countInactivas++; grupo[0].gastado += cents; grupo[0].count++; continue }
-      let resto = cents, contado = false
-      const poner = (r: FondoResumen, monto: number) => {
-        if (monto <= 0) return
-        r.gastado += monto
-        cupo.set(r, (cupo.get(r) ?? 0) - monto)
-        if (!contado) { r.count++; contado = true }
-        resto -= monto
-      }
-      // Cada centavo se coloca una sola vez: primero los fondos de su medio (en orden), luego las libres.
-      for (const r of activas) {
-        if (resto <= 0) break
-        poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
-      }
-      for (const r of libresOrden) {
-        if (resto <= 0) break
-        poner(r, Math.min(resto, Math.max(0, cupo.get(r) ?? 0)))
-      }
-      if (resto > 0) {
-        const ultimo = libresOrden[libresOrden.length - 1] ?? activas[activas.length - 1]
-        if (ultimo) poner(ultimo, resto)
-        else { gastadoSinFondo += resto; countSinFondo++ }
-      }
-    }
-  }
-
-  // Cajas (P, R, Gs, Gl). El exceso de una subcaja sobre su asignación se descuenta del saldo libre.
-  const origen = fResumen.length ? 'fondos' as const : 'caja-general' as const
-  for (const r of fResumen) { r.disponible = r.aporta - r.gastado; r.pct = percent(r.gastado, r.aporta) }
-  const totalFondos = fResumen.reduce((s, r) => s + r.aporta, 0)
-  const P = origen === 'fondos' ? totalFondos : general ? budgetForRange(general, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde) : 0
-  const subResumen: SubcajaResumen[] = subcajas.map((caja, i) => {
-    const asignado = budgetForRange(caja, f.desde, f.hasta, ctx.presupuestos, ctx.aislarDesde)
-    const gastado = subGastado[i]
-    return { caja, asignado, gastado, count: subCount[i], disponible: asignado - gastado, pct: percent(gastado, asignado), excedido: gastado > asignado, aplicada: meses.some(m => cajaAplicada(caja, m, ctx.presupuestos, ctx.aislarDesde)) }
-  })
-  const R = subResumen.reduce((s, x) => s + x.asignado, 0)
-  const Gs = subResumen.reduce((s, x) => s + x.gastado, 0)
-  const exceso = subResumen.reduce((s, x) => s + Math.max(0, x.gastado - x.asignado), 0)
-  const cajas: CajasResumen = {
-    general, presupuesto: P, reservado: R, libreInicial: P - R, gastadoSubcajas: Gs, gastadoLibre, excesoSubcajas: exceso,
-    saldoLibre: P - R - gastadoLibre - exceso, disponible: P - Gs - gastadoLibre,
-    gastadoPeriodo: Gs + gastadoLibre, reservasSinUsar: subResumen.reduce((s, x) => s + Math.max(0, x.asignado - x.gastado), 0), pct: percent(Gs + gastadoLibre, P),
-    sobreasignado: R > P, subcajas: subResumen, inactivas, origen,
-    fondos: { lista: fResumen, total: totalFondos, activas: fResumen.filter(r => r.fondo.activo).length, gastadoInactivas, countInactivas, gastadoSinFondo, countSinFondo },
-  }
+  const presupuesto = resumirPresupuesto(delPeriodo, meses, totalPeriodo, ctx)
+  const P = presupuesto.presupuesto
 
   // Serie diaria: real hasta hoy (o el último gasto si hay fechas futuras), ritmo ideal y proyección solo si está en curso.
   const estado = ctx.today < f.desde ? 'futuro' : ctx.today > f.hasta ? 'pasado' : 'en-curso'
@@ -431,6 +259,56 @@ export function aggregate(gastos: Gasto[], f: Filters, ctx: Ctx): Aggregates {
       ...c, ambitos: [...(catAmb.get(c.name) ?? new Map<string, number>()).entries()].sort((x, y) => y[1] - x[1]).map(([n]) => n),
     })),
     resumen: { primerFecha, ultimaFecha, diaMax, medioDominante: medios[0] ?? null, monedas: [...monedas].sort() },
-    dias, estado, cajas,
+    dias, estado, presupuesto,
+  }
+}
+
+/**
+ * Presupuesto del período: P (Σ aportes de fondos activos, igual que antes de v1.28) y el reparto de los gastos entre fondos,
+ * calculado mes a mes por lib/presupuesto.ts (así un mes nunca depende de los gastos de otro). Repartir no cambia P ni el gastado.
+ */
+export function resumirPresupuesto(gastos: Gasto[], meses: string[], gastadoPeriodo: number, ctx: Ctx): PresupuestoResumen {
+  const fondos = ordenFondos(ctx.fondos ?? [])
+  const fMeses = ctx.fondosMeses ?? []
+  const reparto: ResultadoMes[] = meses.map(m => asignarMes(m, gastos, fondos, { base: ctx.base, rates: ctx.rates, fondosMeses: fMeses, aislarDesde: ctx.aislarDesde, asignaciones: ctx.asignaciones }))
+  const ultimo = meses[meses.length - 1] ?? ''
+  const lista: FondoResumen[] = fondos.map(fu => {
+    let monto = 0, ajustado = false, aplicada = false, gastado = 0, count = 0, enviado = 0, recibido = 0, manual = 0
+    const destinos = new Set<string>()
+    for (const m of meses) { const x = fondoMontoMes(fu, m, fMeses, ctx.aislarDesde); monto += x.monto; ajustado ||= x.ajustado; aplicada ||= x.aplicada }
+    for (const r of reparto) {
+      const c = r.porFondo.get(fu.id)
+      if (c) { gastado += c.imputado; count += c.count; enviado += c.enviado; recibido += c.recibido; manual += c.manual; c.destinos.forEach(d => destinos.add(d)) }
+    }
+    const cents = toBaseCents(monto, fu.moneda, ctx.base, ctx.rates)
+    const asignado = cents ?? 0
+    const aporta = fu.activo ? asignado : 0
+    const pct = percent(gastado, aporta)
+    const estado: EstadoFondo = !fu.activo ? 'inactivo' : gastado > aporta ? 'sobregirado' : !aporta ? 'sin_importe' : gastado === aporta ? 'agotado' : (pct ?? 0) >= 90 ? 'cerca' : 'disponible'
+    return { fondo: fu, regla: reglaEn(fu, ultimo || ctx.today.slice(0, 7)), asignado, aporta, gastado, count, disponible: aporta - gastado, pct, sinTipoCambio: cents === null && monto > 0, ajustado, aplicada, enviado, recibido, destinos: [...destinos], manual, estado }
+  })
+  const P = lista.reduce((s, r) => s + r.aporta, 0)
+  // Grupos: fondos activos con la misma cobertura y medios (capacidad comparable) y al menos dos integrantes.
+  const porClave = new Map<string, FondoResumen[]>()
+  for (const r of lista) {
+    if (!r.fondo.activo || !r.aplicada || r.regla.cobertura === 'todos') continue
+    const k = JSON.stringify([r.regla.cobertura, r.regla.rutas.map(x => [x.ambito, x.categoria, x.subcategoria].map(v => v.trim().toLowerCase()).join('|')).sort(), r.regla.medios, r.regla.listaMedios.map(m => m.trim().toLowerCase()).sort()])
+    porClave.set(k, [...(porClave.get(k) ?? []), r])
+  }
+  const grupos: GrupoCobertura[] = [...porClave.entries()].filter(([, xs]) => xs.length > 1).map(([clave, xs]) => ({
+    clave, fondos: xs, asignado: xs.reduce((s, x) => s + x.aporta, 0), gastado: xs.reduce((s, x) => s + x.gastado, 0), enviado: xs.reduce((s, x) => s + x.enviado, 0),
+  }))
+  return {
+    presupuesto: P, gastadoPeriodo, disponible: P - gastadoPeriodo, pct: percent(gastadoPeriodo, P), exceso: Math.max(0, gastadoPeriodo - P),
+    fondos: lista, total: P,
+    activos: lista.filter(r => r.fondo.activo).length,
+    agotados: lista.filter(r => r.estado === 'agotado').length,
+    desbordados: lista.filter(r => r.fondo.activo && r.enviado > 0).length,
+    sobregirados: lista.filter(r => r.estado === 'sobregirado').length,
+    sinFondo: reparto.reduce((s, r) => ({ cents: s.cents + r.sinFondo.cents, count: s.count + r.sinFondo.count }), { cents: 0, count: 0 }),
+    incompatibles: reparto.reduce((s, r) => s + r.incompatibles, 0),
+    conflictos: reparto.reduce((s, r) => s + r.conflictos, 0),
+    grupos,
+    avisosConfig: ultimo ? conflictosConfig(fondos, ultimo) : [],
   }
 }

@@ -6,7 +6,7 @@ import {
   calcularCompromisos, calcularPresupuesto, clasificar, compararPeriodos, esDiscrecional, evaluarCalidad, gruposSimilares, indexarCatalogo,
   nivelPresupuesto, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
 } from './salud'
-import type { Caja, CatalogoItem, Filters, Gasto, Medio, Plantilla, Revision } from './types'
+import type { CatalogoItem, Filters, Fondo, FondoMes, Gasto, Medio, Plantilla, ReglaFondo, Revision } from './types'
 
 let seq = 0
 const hex = () => `aaaaaaaa-0000-4000-8000-${String(++seq).padStart(12, '0')}`
@@ -27,8 +27,11 @@ const CATALOGO: CatalogoItem[] = [
 const MEDIOS: Medio[] = ['Yape', 'Plin', 'Efectivo', 'Transferencia'].map(nombre => ({ nombre, activo: true }))
 const base = { catalogo: CATALOGO, medios: MEDIOS, monedas: ['PEN', 'USD'], revisiones: [] as Revision[] }
 const rates = { USD: 3.75 }
-const caja = (id: string, presupuesto: number, filtroCampo: Caja['filtroCampo'] = 'Todos', filtroValor = '', orden = 1): Caja =>
-  ({ id, nombre: id, presupuesto, filtroCampo, filtroValor, color: '#000', orden })
+// v1.28: el presupuesto sale solo de los fondos (las cajas se retiraron).
+const fondo = (id: string, monto: number, orden = 1, reglas: ReglaFondo[] = []): Fondo => ({
+  id, nombre: id, monto, moneda: 'PEN', color: '#000', icono: '', activo: true, orden, recurrencia: 'mensual', mes: '', medioPago: '', tipo: 'mensual', creadoEn: '', actualizadoEn: '', reglas,
+})
+const porCat = (categoria: string): ReglaFondo[] => [{ desde: '', medios: 'todos', listaMedios: [], cobertura: 'categoria', rutas: [{ ambito: '', categoria, subcategoria: '' }], restringeMedio: false }]
 const pl = (p: Partial<Plantilla> = {}): Plantilla => ({
   id: `pl-${hex()}`, ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', creadoEn: '', actualizadoEn: '',
   monto: 120, moneda: 'PEN', medioPago: 'Yape', orden: 1, esCompromiso: true, ...p,
@@ -45,7 +48,7 @@ describe('salud de datos', () => {
     expect(c0.duplicados).toBe(100)                                        // …pero no penaliza
     expect(c0.indice).toBe(100)
     expect(c0.pendientes).toBe(1)
-    expect(aggregate(gastos, f({ categorias: ['Apoyo Familiar'] }), { base: 'PEN', rates, today: '2026-10-09', cajas: [], presupuestos: [] }).total).toBe(30000)
+    expect(aggregate(gastos, f({ categorias: ['Apoyo Familiar'] }), { base: 'PEN', rates, today: '2026-10-09' }).total).toBe(30000)
     // marcar como legítima: deja de estar pendiente y sigue sin penalizar; los tres registros siguen ahí
     const legit: Revision = { id: 'rev-1', tipo: 'duplicado', ids: c0.similares[0].ids, estado: 'legitimo', firma: c0.similares[0].clave, creadoEn: '', actualizadoEn: '' }
     const c1 = evaluarCalidad({ gastos, f: f(), ...base, revisiones: [legit] })
@@ -125,7 +128,8 @@ describe('salud de datos', () => {
 })
 
 describe('compromisos y presupuesto', () => {
-  const ctx = (cajas: Caja[]) => ({ base: 'PEN', rates, today: '2026-10-09', cajas, presupuestos: [] })
+  const ctx = (fondos: Fondo[], fondosMeses: FondoMes[] = []) => ({ base: 'PEN', rates, today: '2026-10-09', fondos, fondosMeses })
+  const MES = '2026-10'
 
   it('pagos parciales se suman; anular deja de cubrir y restaurar vuelve a cubrir; un pago de más no cubre otro mes', () => {
     const apoyo = pl({ categoria: 'Apoyo Familiar', subcategoria: 'Madre', descripcion: 'Apoyo Madre', monto: 300 })
@@ -159,49 +163,50 @@ describe('compromisos y presupuesto', () => {
   })
 
   it('no hay doble conteo: pagar S/ 100 de un compromiso sube lo gastado y baja lo pendiente; el disponible tras compromisos no cambia', () => {
-    const cajas = [caja('general', 3000)]
+    const cajas = [fondo('general', 3000)]
     const compromiso = pl({ monto: 400, categoria: 'Apoyo Familiar', subcategoria: 'Madre' })
     const gastado = g({ monto: 2000 })
     const antes = calcularPresupuesto(aggregate([gastado], f(), ctx(cajas)),
-      calcularCompromisos({ gastos: [gastado], plantillas: [compromiso], vinculos: new Map(), desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }))
+      calcularCompromisos({ gastos: [gastado], plantillas: [compromiso], vinculos: new Map(), desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }), MES)
     expect(antes).toMatchObject({ presupuesto: 300000, gastado: 200000, pendiente: 40000, disponible: 100000, disponibleTrasCompromisos: 60000, pctUsado: 66.7 })
     const pago = g({ monto: 100, ambito: 'Familia', categoria: 'Apoyo Familiar', subcategoria: 'Madre' })
     const vinc = new Map([[pago.id.toLowerCase(), compromiso.id]])
     const gs = [gastado, pago]
     const despues = calcularPresupuesto(aggregate(gs, f(), ctx(cajas)),
-      calcularCompromisos({ gastos: gs, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }))
+      calcularCompromisos({ gastos: gs, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }), MES)
     expect(despues).toMatchObject({ gastado: 210000, pendiente: 30000, disponibleTrasCompromisos: 60000 })
     // editar el monto del pago (100 → 150): sigue sin doble conteo
     const editado = [gastado, { ...pago, monto: 150 }]
     const e = calcularPresupuesto(aggregate(editado, f(), ctx(cajas)),
-      calcularCompromisos({ gastos: editado, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }))
+      calcularCompromisos({ gastos: editado, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }), MES)
     expect(e).toMatchObject({ gastado: 215000, pendiente: 25000, disponibleTrasCompromisos: 60000 })
     // clonar el pago (ID nuevo, sin vínculo): es un gasto más, no crea ni cubre compromisos
     const clon = [gastado, pago, { ...pago, id: hex() }]
     const cl = calcularPresupuesto(aggregate(clon, f(), ctx(cajas)),
-      calcularCompromisos({ gastos: clon, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }))
+      calcularCompromisos({ gastos: clon, plantillas: [compromiso], vinculos: vinc, desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates }), MES)
     expect(cl).toMatchObject({ gastado: 220000, pendiente: 30000, disponibleTrasCompromisos: 50000 })
   })
 
-  it('subcajas: no se suman al general, muestran su pendiente y respetan ajustes mensuales; presupuesto sin gastos y excedido', () => {
-    const cajas = [caja('general', 3000), caja('bebe', 700, 'Categoría', 'Bebé', 2)]
+  it('fondos: cada uno suma al presupuesto, muestra su pendiente y respeta importes por mes; presupuesto sin gastos y excedido', () => {
+    const fondos = [fondo('general', 3000), fondo('bebe', 700, 2, porCat('Bebé'))]
     const leche = pl({ categoria: 'Bebé', subcategoria: 'Leche', descripcion: 'Leche', monto: 200 })
     const c0 = calcularCompromisos({ gastos: [], plantillas: [leche], vinculos: new Map(), desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates })
-    const vacio = calcularPresupuesto(aggregate([], f(), { ...ctx(cajas), presupuestos: [{ periodo: '2026-10', cajaId: 'general', monto: 3500 }] }), c0)
+    const vacio = calcularPresupuesto(aggregate([], f(), ctx(fondos, [{ fondoId: 'general', mes: MES, monto: 2800, modo: 'solo' }])), c0, MES)
     expect(vacio).toMatchObject({ presupuesto: 350000, gastado: 0, disponible: 350000, disponibleTrasCompromisos: 330000, nivel: 'ok' })
-    expect(vacio.cajas[0]).toMatchObject({ asignado: 70000, pendiente: 20000, disponibleTrasCompromisos: 50000 })
-    const excedido = calcularPresupuesto(aggregate([g({ monto: 3100 })], f(), ctx(cajas)), c0)
+    expect(vacio.fondos.map(x => [x.fondo.id, x.asignado, x.pendiente, x.disponibleTrasCompromisos])).toEqual([['general', 280000, 0, 280000], ['bebe', 70000, 20000, 50000]])
+    const excedido = calcularPresupuesto(aggregate([g({ monto: 3800 })], f(), ctx(fondos)), c0, MES)
     expect(excedido.nivel).toBe('excedido')
     expect(excedido.disponible).toBe(-10000)
-    expect(calcularPresupuesto(aggregate([], f(), ctx([])), c0).nivel).toBe('sin-presupuesto')
+    expect(calcularPresupuesto(aggregate([], f(), ctx([])), c0, MES).nivel).toBe('sin-presupuesto')
   })
 
-  it('un compromiso se imputa a una sola subcaja (la primera que coincide, como el motor)', () => {
-    const cajas = [caja('general', 3000), caja('bebe', 700, 'Categoría', 'Bebé', 2), caja('yape', 500, 'Medio de pago', 'Yape', 3)]
+  it('un compromiso se cuenta en UN solo fondo: el que cubriría el gasto según el motor (el más específico)', () => {
+    const fondos = [fondo('general', 3000), fondo('bebe', 700, 2, porCat('Bebé')), fondo('familia', 500, 3, [{ desde: '', medios: 'todos', listaMedios: [], cobertura: 'ambito', rutas: [{ ambito: 'Familia', categoria: '', subcategoria: '' }], restringeMedio: false }])]
     const leche = pl({ categoria: 'Bebé', subcategoria: 'Leche', descripcion: 'Leche', monto: 200, medioPago: 'Yape' })
-    const c = calcularCompromisos({ gastos: [], plantillas: [leche], vinculos: new Map(), desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates })
-    const p = calcularPresupuesto(aggregate([], f(), ctx(cajas)), c)
-    expect(p.cajas.map(x => x.pendiente)).toEqual([20000, 0])
+    const luz = pl({ monto: 120 })
+    const c = calcularCompromisos({ gastos: [], plantillas: [leche, luz], vinculos: new Map(), desde: '2026-10-01', hasta: '2026-10-31', base: 'PEN', rates })
+    const p = calcularPresupuesto(aggregate([], f(), ctx(fondos)), c, MES)
+    expect(p.fondos.map(x => [x.fondo.id, x.pendiente])).toEqual([['general', 0], ['bebe', 20000], ['familia', 12000]])
   })
 
   it('alertas por porcentaje: <70 ok, 70–90 atención, 90–100 cerca, ≥100 excedido', () => {

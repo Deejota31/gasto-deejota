@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { aggregate, budgetCents, diasDelPeriodo, subKey, type Ctx } from './engine'
+import { aggregate, diasDelPeriodo, subKey, type Ctx } from './engine'
 import { percent, ratesFromConfig, toBaseCents, toCents } from './money'
 import { daysBetween, daysInMonth, formatDate, monthsInRange, presetRange, rangeLabel, shiftMonth, singleMonth, todayIn } from './dates'
 import { sortMedios } from './visual'
-import type { Caja, Filters, Gasto } from './types'
+import type { Filters, Fondo, Gasto, ReglaFondo, Ruta } from './types'
 
 const g = (over: Partial<Gasto>): Gasto => ({
   fecha: '2026-10-05', monto: 10, moneda: 'PEN', categoria: 'Alimentación', subcategoria: 'Almuerzo', descripcion: '',
@@ -11,12 +11,16 @@ const g = (over: Partial<Gasto>): Gasto => ({
   comprobanteUrl: '', id: crypto.randomUUID(), creadoEn: '', actualizadoEn: '', ...over,
 })
 
-const caja = (id: string, presupuesto: number, filtroCampo: Caja['filtroCampo'] = 'Todos', filtroValor = '', orden = 1): Caja =>
-  ({ id, nombre: id, presupuesto, filtroCampo, filtroValor, color: '#000000', orden })
-
-const CAJAS = [caja('general', 5000), caja('bebe', 600, 'Categoría', 'Bebé', 2), caja('auto', 400, 'Categoría', 'Auto', 3), caja('plan-nube', 200, 'Categoría', 'Plan Nube', 4)]
+// v1.28: los fondos son la única estructura de presupuesto (las cajas y subcajas se retiraron).
+const regla = (cobertura: ReglaFondo['cobertura'], rutas: Partial<Ruta>[] = []): ReglaFondo[] =>
+  [{ desde: '', medios: 'todos', listaMedios: [], cobertura, rutas: rutas.map(r => ({ ambito: '', categoria: '', subcategoria: '', ...r })), restringeMedio: false }]
+const fondo = (id: string, monto: number, orden: number, reglas: ReglaFondo[] = []): Fondo => ({
+  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden, recurrencia: 'mensual', mes: '', medioPago: '', tipo: 'mensual', creadoEn: '', actualizadoEn: '', reglas,
+})
+const FONDOS = [fondo('general', 5000, 1), fondo('bebe', 600, 2, regla('categoria', [{ categoria: 'Bebé' }])), fondo('auto', 400, 3, regla('categoria', [{ categoria: 'Auto' }])),
+  fondo('plan-nube', 200, 4, regla('categoria', [{ categoria: 'Plan Nube' }]))]
 const f = (over: Partial<Filters> = {}): Filters => ({ preset: 'mes', desde: '2026-10-01', hasta: '2026-10-31', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [], ...over })
-const ctx = (over: Partial<Ctx> = {}): Ctx => ({ base: 'PEN', rates: { USD: 3.8 }, today: '2026-10-10', cajas: CAJAS, presupuestos: [], ...over })
+const ctx = (over: Partial<Ctx> = {}): Ctx => ({ base: 'PEN', rates: { USD: 3.8 }, today: '2026-10-10', fondos: [FONDOS[0]], fondosMeses: [], ...over })
 
 describe('dinero', () => {
   it('evita errores de coma flotante sumando en céntimos', () => {
@@ -78,89 +82,59 @@ describe('fechas y períodos', () => {
   })
 })
 
-describe('cajas: la general es el total y las subcajas son reservas (casos 4, 5 y 6)', () => {
-  it('caso 4: P 5.000 con reservas 600 + 400 + 200 → libre inicial 3.800, no 6.200', () => {
-    const c = aggregate([], f(), ctx()).cajas
-    expect(c.presupuesto).toBe(500000)
-    expect(c.reservado).toBe(120000)
-    expect(c.libreInicial).toBe(380000)
-    expect(c.saldoLibre).toBe(380000)
-    expect(c.disponible).toBe(500000)
+describe('fondos: el presupuesto es la suma de los fondos y cada gasto va al fondo más específico', () => {
+  const c4 = () => ctx({ fondos: FONDOS })
+  it('P = suma de los fondos activos (5.000 + 600 + 400 + 200 = 6.200); no hay reservas que resten', () => {
+    const p = aggregate([], f(), c4()).presupuesto
+    expect([p.presupuesto, p.disponible, p.activos]).toEqual([620000, 620000, 4])
   })
-  it('caso 5: S/ 100 de Bebé baja Bebé a 500 y el global a 4.900; el saldo libre sigue en 3.800', () => {
-    const c = aggregate([g({ categoria: 'Bebé', monto: 100, ambito: 'Familia' })], f(), ctx()).cajas
-    const bebe = c.subcajas.find(s => s.caja.id === 'bebe')!
-    expect(bebe.disponible).toBe(50000)
-    expect(c.saldoLibre).toBe(380000)
-    expect(c.disponible).toBe(490000)
+  it('S/ 100 de Bebé baja Bebé a 500 y el global a 6.100; General no se toca', () => {
+    const p = aggregate([g({ categoria: 'Bebé', monto: 100, ambito: 'Familia' })], f(), c4()).presupuesto
+    const por = Object.fromEntries(p.fondos.map(x => [x.fondo.id, x.disponible]))
+    expect([por.bebe, por.general, p.disponible]).toEqual([50000, 500000, 610000])
   })
-  it('caso 6: S/ 150 sin subcaja baja el saldo libre a 3.650 y el global a 4.750', () => {
-    const c = aggregate([g({ categoria: 'Bebé', monto: 100 }), g({ categoria: 'Alimentación', monto: 150 })], f(), ctx()).cajas
-    expect(c.saldoLibre).toBe(365000)
-    expect(c.disponible).toBe(475000)
-    expect(c.gastadoLibre).toBe(15000)
-    expect(c.gastadoSubcajas).toBe(10000)
+  it('S/ 150 sin fondo específico va a General (cubre todos los gastos)', () => {
+    const p = aggregate([g({ categoria: 'Bebé', monto: 100 }), g({ categoria: 'Alimentación', monto: 150 })], f(), c4()).presupuesto
+    expect(p.fondos.find(x => x.fondo.id === 'general')!.gastado).toBe(15000)
+    expect(p.fondos.find(x => x.fondo.id === 'bebe')!.gastado).toBe(10000)
   })
-  it('el exceso de una subcaja sale del saldo libre y la suma sigue cuadrando', () => {
-    const c = aggregate([g({ categoria: 'Plan Nube', monto: 260 })], f(), ctx()).cajas
-    const nube = c.subcajas.find(s => s.caja.id === 'plan-nube')!
-    expect(nube.excedido).toBe(true)
-    expect(nube.disponible).toBe(-6000)
-    expect(c.saldoLibre).toBe(380000 - 6000)
-    const subDisponible = c.subcajas.reduce((s, x) => s + Math.max(0, x.disponible), 0)
-    expect(c.saldoLibre + subDisponible).toBe(c.disponible)
+  it('el exceso de un fondo específico pasa a General como excedente y la suma sigue cuadrando', () => {
+    const p = aggregate([g({ categoria: 'Plan Nube', monto: 260 })], f(), c4()).presupuesto
+    const nube = p.fondos.find(x => x.fondo.id === 'plan-nube')!
+    expect([nube.gastado, nube.disponible, nube.enviado, nube.destinos]).toEqual([20000, 0, 6000, ['general']])
+    expect(p.fondos.find(x => x.fondo.id === 'general')!.recibido).toBe(6000)
+    expect(p.fondos.reduce((s, x) => s + x.gastado, 0)).toBe(26000)
   })
-  it('un gasto se imputa a una sola subcaja aunque coincida con dos', () => {
-    const doble = [...CAJAS, caja('familia', 300, 'Ámbito', 'Familia', 5)]
-    const c = aggregate([g({ categoria: 'Bebé', ambito: 'Familia', monto: 50 })], f(), ctx({ cajas: doble })).cajas
-    expect(c.subcajas.find(s => s.caja.id === 'bebe')!.gastado).toBe(5000)
-    expect(c.subcajas.find(s => s.caja.id === 'familia')!.gastado).toBe(0)
-    expect(c.disponible).toBe(500000 - 5000)
+  it('un gasto se imputa al fondo más específico aunque coincida con varios', () => {
+    const doble = [...FONDOS, fondo('familia', 300, 5, regla('ambito', [{ ambito: 'Familia' }]))]
+    const p = aggregate([g({ categoria: 'Bebé', ambito: 'Familia', monto: 50 })], f(), ctx({ fondos: doble })).presupuesto
+    expect(p.fondos.find(x => x.fondo.id === 'bebe')!.gastado).toBe(5000)
+    expect(p.fondos.find(x => x.fondo.id === 'familia')!.gastado).toBe(0)
   })
-  it('v1.7 prioridad por especificidad: Subcategoría > Categoría > Ámbito > Medio de pago, sin importar el orden manual', () => {
-    const cajas = [caja('general', 5000), caja('familia', 300, 'Ámbito', 'Familia', 2), caja('yape', 200, 'Medio de pago', 'Yape', 3),
-      caja('bebe', 600, 'Categoría', 'Bebé', 4), caja('leche', 100, 'Subcategoría', 'Bebé › Leche', 5)]
-    const gastos = [
-      g({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Leche', medioPago: 'Yape', monto: 10 }),   // → leche
-      g({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Pañales', medioPago: 'Yape', monto: 20 }), // → bebe
-      g({ ambito: 'Familia', categoria: 'Hogar', subcategoria: 'Limpieza', medioPago: 'Yape', monto: 30 }), // → familia
-      g({ ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', medioPago: 'Yape', monto: 40 }), // → yape
-      g({ ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', medioPago: 'Plin', monto: 50 }), // → fuera
-    ]
-    const c = aggregate(gastos, f(), ctx({ cajas })).cajas
-    const por = (id: string) => c.subcajas.find(s => s.caja.id === id)!
-    expect(['leche', 'bebe', 'familia', 'yape'].map(id => [por(id).gastado, por(id).count])).toEqual([[1000, 1], [2000, 1], [3000, 1], [4000, 1]])
-    expect(c.gastadoLibre).toBe(5000)
-    expect(c.gastadoSubcajas + c.gastadoLibre).toBe(15000)          // sin doble conteo
-    expect(c.reservado).toBe(120000)                                  // 300 + 200 + 600 + 100
-    expect(c.libreInicial).toBe(500000 - 120000)
+  it('prioridad por especificidad: Subcategoría > Categoría > Ámbito > Todos, sin importar el orden manual', () => {
+    const fs = [fondo('todos', 100, 1), fondo('amb', 100, 2, regla('ambito', [{ ambito: 'Familia' }])), fondo('cat', 100, 3, regla('categoria', [{ categoria: 'Servicios' }])),
+      fondo('sub', 100, 4, regla('subcategoria', [{ categoria: 'Servicios', subcategoria: 'Línea Celular' }]))]
+    const quien = (gs: Partial<Gasto>) => aggregate([g({ monto: 10, ...gs })], f(), ctx({ fondos: fs })).presupuesto.fondos.find(x => x.gastado > 0)!.fondo.id
+    expect(quien({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Línea Celular' })).toBe('sub')
+    expect(quien({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua' })).toBe('cat')
+    expect(quien({ ambito: 'Familia', categoria: 'Auto' })).toBe('amb')
+    expect(quien({ ambito: 'Personal', categoria: 'Auto' })).toBe('todos')
   })
-
-  it('v1.7 subcategoría con categoría ("Servicios › Línea Celular") o solo por nombre; caja inactiva no reserva ni toma gastos', () => {
-    const linea = g({ ambito: 'Personal', categoria: 'Servicios', subcategoria: 'Línea Celular', monto: 40 })
-    const otros = g({ ambito: 'Personal', categoria: 'Auto', subcategoria: 'Otros', monto: 5 })
-    const cajas = [caja('general', 1000), caja('linea', 50, 'Subcategoría', 'servicios › línea celular', 2), caja('otros', 20, 'Subcategoría', 'Otros', 3),
-      { ...caja('salud', 300, 'Categoría', 'Auto', 4), activo: false }]
-    const c = aggregate([linea, otros], f(), ctx({ cajas })).cajas
-    expect(c.subcajas.map(s => [s.caja.id, s.gastado])).toEqual([['linea', 4000], ['otros', 500]])
-    expect(c.inactivas.map(x => x.id)).toEqual(['salud'])
-    expect(c.reservado).toBe(7000)                                    // la inactiva no reserva
+  it('un fondo inactivo no suma ni toma gastos', () => {
+    const fs = [FONDOS[0], { ...FONDOS[1], activo: false }]
+    const p = aggregate([g({ categoria: 'Bebé', monto: 40 })], f(), ctx({ fondos: fs })).presupuesto
+    expect(p.presupuesto).toBe(500000)
+    expect(p.fondos.find(x => x.fondo.id === 'general')!.gastado).toBe(4000)
   })
-
-  it('detecta reservas mayores que el presupuesto general', () => {
-    expect(aggregate([], f(), ctx({ cajas: [caja('general', 1000), caja('bebe', 1500, 'Categoría', 'Bebé', 2)] })).cajas.sobreasignado).toBe(true)
+  it('rango de varios meses: suma el presupuesto de cada mes', () => {
+    expect(aggregate([], f({ desde: '2026-09-01', hasta: '2026-10-31' }), c4()).presupuesto.presupuesto).toBe(620000 * 2)
   })
-  it('presupuesto del mes con override y suma de meses en rangos', () => {
-    expect(budgetCents(CAJAS[1], '2026-11', [{ periodo: '2026-11', cajaId: 'bebe', monto: 700 }])).toBe(70000)
-    const c = aggregate([], f({ desde: '2026-09-01', hasta: '2026-10-31' }), ctx({ presupuestos: [{ periodo: '2026-10', cajaId: 'general', monto: 6000 }] })).cajas
-    expect(c.presupuesto).toBe(500000 + 600000)
-  })
-  it('los filtros de dimensión no cambian presupuesto ni cajas', () => {
+  it('los filtros de dimensión no cambian presupuesto ni fondos', () => {
     const data = [g({ categoria: 'Bebé', monto: 100 }), g({ monto: 150 })]
     const a = aggregate(data, f({ categorias: ['Bebé'] }), ctx())
     expect(a.total).toBe(10000)
     expect(a.totalPeriodo).toBe(25000)
-    expect(a.cajas.disponible).toBe(475000)
+    expect(a.presupuesto.disponible).toBe(475000)
     expect(a.filtrado).toBe(true)
   })
 })
@@ -241,7 +215,7 @@ describe('motor de agregación', () => {
 
   it('ritmo ideal llega al presupuesto el último día y no existe sin presupuesto', () => {
     expect(aggregate(data, f(), ctx()).dias.at(-1)!.ideal).toBe(500000)
-    expect(aggregate(data, f(), ctx({ cajas: [] })).dias[0].ideal).toBeNull()
+    expect(aggregate(data, f(), ctx({ fondos: [] })).dias[0].ideal).toBeNull()
   })
 
   it('rango de varios meses: una serie diaria continua', () => {

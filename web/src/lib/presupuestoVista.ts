@@ -1,8 +1,8 @@
-import type { CajasResumen } from './engine'
+import type { PresupuestoResumen } from './engine'
 
 /**
- * Presentación del Presupuesto consolidado (Dashboard). No calcula dinero nuevo: solo decide qué estado mostrar
- * y cómo repartir el ancho de la barra a partir de `aggregate().cajas`. Las fórmulas siguen viviendo en `engine.ts`.
+ * Presentación del Presupuesto consolidado (Dashboard y Presupuestos). No calcula dinero nuevo: solo decide qué estado mostrar
+ * y cómo repartir el ancho de la barra a partir de `aggregate().presupuesto`. Las fórmulas viven en engine.ts / presupuesto.ts.
  */
 
 export type TonoEstado = 'ok' | 'atencion' | 'alerta' | 'neutro'
@@ -15,7 +15,7 @@ export interface EstadoPresupuesto {
 }
 
 /** Estado financiero consolidado: texto + tono (el color nunca va solo). */
-export function estadoPresupuesto(c: CajasResumen, money: (cents: number) => string): EstadoPresupuesto {
+export function estadoPresupuesto(c: PresupuestoResumen, money: (cents: number) => string): EstadoPresupuesto {
   if (c.presupuesto <= 0 || c.pct === null) return { tono: 'neutro', etiqueta: 'Sin presupuesto definido', exceso: 0 }
   if (c.disponible < 0) return { tono: 'alerta', etiqueta: `Presupuesto excedido en ${money(-c.disponible)}`, exceso: -c.disponible }
   if (c.pct >= 100) return { tono: 'atencion', etiqueta: 'Presupuesto agotado', exceso: 0 }
@@ -23,7 +23,7 @@ export function estadoPresupuesto(c: CajasResumen, money: (cents: number) => str
   return { tono: 'ok', etiqueta: 'Dentro del presupuesto', exceso: 0 }
 }
 
-export type ClaveSegmento = 'fuera' | 'cajas' | 'reservas' | 'libre'
+export type ClaveSegmento = 'fondos' | 'sinFondo' | 'disponible'
 
 export interface Segmento {
   clave: ClaveSegmento
@@ -38,24 +38,23 @@ export interface Segmento {
 
 export interface BarraPresupuesto {
   segmentos: Segmento[]
-  /** Los segmentos suman más que el presupuesto (consumo > 100 % o saldo libre negativo). */
+  /** Lo gastado supera el presupuesto consolidado. */
   excedido: boolean
   /** Posición del límite del presupuesto en % del ancho; solo existe cuando hay exceso. */
   limite: number | null
 }
 
 /**
- * Reparto de la barra. En el caso normal gastado fuera + gastado en cajas + reservas sin usar + saldo libre = presupuesto
- * (identidad del motor), así que la barra se llena exactamente. Con saldo libre negativo el segmento libre no se dibuja
- * (no existe) y la suma supera al presupuesto: el ancho se calcula sobre esa suma y una marca indica dónde estaba el límite.
+ * Reparto de la barra: gastado imputado a fondos + gastado sin fondo asignable + disponible = presupuesto (identidad del motor:
+ * Σ imputado + sin fondo = gastado del período). Con exceso el disponible no se dibuja y una marca indica dónde estaba el límite.
  */
-export function barraPresupuesto(c: CajasResumen): BarraPresupuesto {
+export function barraPresupuesto(c: PresupuestoResumen): BarraPresupuesto {
   const P = c.presupuesto
+  const enFondos = c.gastadoPeriodo - c.sinFondo.cents
   const brutos: [ClaveSegmento, string, number][] = [
-    ['fuera', 'Gastado fuera de reservas', c.gastadoLibre],
-    ['cajas', 'Gastado en cajas', c.gastadoSubcajas],
-    ['reservas', 'Reservas sin utilizar', c.reservasSinUsar],
-    ['libre', 'Saldo libre', Math.max(0, c.saldoLibre)],
+    ['fondos', 'Gastado en fondos', enFondos],
+    ['sinFondo', 'Gastado sin fondo asignable', c.sinFondo.cents],
+    ['disponible', 'Disponible', Math.max(0, c.disponible)],
   ]
   const suma = brutos.reduce((s, [, , v]) => s + v, 0)
   const base = Math.max(P, suma)

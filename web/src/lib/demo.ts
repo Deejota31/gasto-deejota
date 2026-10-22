@@ -2,8 +2,9 @@ import { formatearDescripcion } from './texto'
 import { aislaDesde } from './engine'
 import { daysInMonth, shiftMonth } from './dates'
 import { mesesEntre, validarPrueba } from './datosPrueba'
-import { mediosDeFondo } from './fondoMedios'
-import type { Transport } from './api'
+import { leerReglas, type Transport } from './api'
+import { validarAsignacion, validarMedioGasto, validarRegla } from './presupuesto'
+import type { Fondo, Gasto, ParteManual, ReglaFondo } from './types'
 import { CATALOGO_INICIAL } from './catalogo'
 import { nextOrden, normName, ordenCanonico, ordenTrasReordenarCategorias } from './orden'
 
@@ -65,32 +66,24 @@ function demoSalud(today: string): unknown[][] {
   ]
 }
 
-// Cajas de ejemplo para ver la pestaña Cajas con muchas subcajas (?cajas=10).
-const CAJAS_EXTRA: unknown[][] = [
-  ['caja-salud', 'Caja Salud', 250, 'Categoría', 'Salud', '#16A085'], ['caja-transporte', 'Caja Transporte', 180, 'Categoría', 'Transporte', '#0EA5E9'],
-  ['caja-streaming', 'Caja Streaming', 120, 'Categoría', 'Suscripciones', '#E25563'], ['caja-familia', 'Caja Familia', 900, 'Ámbito', 'Familia', '#F59E0B'],
-  ['caja-linea', 'Caja Línea Celular', 40, 'Subcategoría', 'Servicios › Línea Celular', '#4F7BE8'], ['caja-delivery', 'Caja Delivery', 150, 'Subcategoría', 'Alimentación › Delivery', '#E8664F'],
-  ['caja-sodexo', 'Caja Sodexo', 280, 'Medio de pago', 'Sodexo', '#84CC16'], ['caja-educacion', 'Caja Educación', 300, 'Categoría', 'Educación', '#8B7CF6'],
-  ['caja-viajes', 'Caja Viajes', 0, 'Ámbito', 'Amigos', '#64748B'], ['caja-emergencia', 'Caja Emergencia', 200, 'Subcategoría', 'Otros › Imprevistos', '#C0362C'],
-]
-
-// Fondos de ejemplo (?fondos=N): las tres primeras son el caso real (General + Sodexo + Extra 1 = S/ 4,780 en el mes).
+// Fondos de ejemplo (?fondos=N): las tres primeras son el caso real (General + Sodexo + Extra 1 = S/ 4,780 en el mes). Sin reglas
+// guardadas (columna 15 vacía), igual que los fondos anteriores a v1.28: Sodexo solo acepta Sodexo y todos cubren todos los gastos.
 const FONDOS_EXTRA = ['Bonificación', 'Reembolso', 'Trabajo independiente', 'Extra 2', 'Ingreso adicional', 'Otro ingreso', 'Freelance', 'Venta', 'Premio',
   'Devolución', 'Aguinaldo', 'Gratificación', 'CTS', 'Comisión', 'Regalo', 'Alquiler', 'Intereses', 'Dividendos', 'Extra 3', 'Extra 4', 'Extra 5', 'Extra 6']
 const COLORES_FONDO = ['#14917F', '#0E8FA8', '#C2569B', '#6B8E23', '#4F7BE8', '#B4693C', '#8B7CF6', '#64748B', '#6366F1', '#2F9E6B']
 function demoFondos(n: number, mes: string): unknown[][] {
   const t = '2026-01-01T00:00:00.000Z'
   const base: unknown[][] = [
-    ['fondo-general', 'General', 3500, 'PEN', '#1e3a8a', '', true, 1, 'mensual', '', '', t, t, 'mensual'],
-    ['f-sodexo', 'Sodexo', 280, 'PEN', '#6B8E23', '', true, 2, 'mensual', '', 'Sodexo', t, t, 'mensual'],
-    ['f-extra-1', 'Extra 1', 1000, 'PEN', '#B4693C', '', true, 3, 'unica', mes, '', t, t, 'extra'],
+    ['fondo-general', 'General', 3500, 'PEN', '#1e3a8a', '', true, 1, 'mensual', '', '', t, t, 'mensual', ''],
+    ['f-sodexo', 'Sodexo', 280, 'PEN', '#6B8E23', '', true, 2, 'mensual', '', 'Sodexo', t, t, 'mensual', ''],
+    ['f-extra-1', 'Extra 1', 1000, 'PEN', '#B4693C', '', true, 3, 'unica', mes, '', t, t, 'extra', ''],
   ]
-  const extra = FONDOS_EXTRA.map((nombre, i): unknown[] => [`f-demo-${i + 1}`, nombre, 50 * (i + 1), 'PEN', COLORES_FONDO[i % COLORES_FONDO.length], '', i % 4 !== 3, i + 4, i % 2 ? 'unica' : 'mensual', i % 2 ? mes : '', '', t, t, i % 2 ? 'extra' : 'mensual'])
+  const extra = FONDOS_EXTRA.map((nombre, i): unknown[] => [`f-demo-${i + 1}`, nombre, 50 * (i + 1), 'PEN', COLORES_FONDO[i % COLORES_FONDO.length], '', i % 4 !== 3, i + 4, i % 2 ? 'unica' : 'mensual', i % 2 ? mes : '', '', t, t, i % 2 ? 'extra' : 'mensual', ''])
   return [...base, ...extra].slice(0, n)
 }
 
 /** `vacio`: simula una hoja conectada pero sin ningún registro (solo pruebas / ?demo&vacio=1). */
-export function demoTransport(today: string, n = 400, latencyMs = 250, extraCajas = 0, nFondos = 0, vacio = false): Transport {
+export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos = 0, vacio = false): Transport {
   const db = {
     // + un gasto con una subcategoría que ya no está en el catálogo (histórico): debe verse y filtrarse igual.
     gastos: [...generateGastoRows(n, today), [`${today.slice(0, 8)}01`, 12.5, 'PEN', 'Alimentación', 'Antojos', 'Gasto histórico', 'Yape', 'Variable',
@@ -98,16 +91,10 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       ...demoSalud(today)] as unknown[][],
     catalogo: demoCatalogo(),
     medios: MEDIOS.map(m => [m, true]) as unknown[][],
-    cajas: [
-      ['general', 'Caja general', 7000, 'Todos', '', '#1e3a8a', 1],
-      ['auto', 'Caja Auto', 600, 'Categoría', 'Auto', '#64748b', 2],
-      ['bebe', 'Caja Bebé', 800, 'Categoría', 'Bebé', '#ec4899', 3],
-      ['plan-nube', 'Caja Plan Nube', 150, 'Categoría', 'Plan Nube', '#8b5cf6', 4],
-      ...CAJAS_EXTRA.slice(0, Math.max(0, extraCajas)).map((r, i) => [...r, i + 5, true, '']),
-    ] as unknown[][],
-    presupuestos: [] as unknown[][],
     fondos: demoFondos(nFondos, today.slice(0, 7)),
     fondosMeses: [] as unknown[][],
+    // [gastoId (minúsculas), JSON de partes]: asignaciones manuales (como ASIGNACIONES_GASTOS).
+    asignaciones: [] as unknown[][],
     // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
     plantillasFin: [] as unknown[][],
     // [id, ámbito, categoría, subcategoría, descripción, creado, actualizado, monto, moneda, medio, orden]
@@ -134,7 +121,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     revisionesPresupuesto: [] as unknown[][],
     config: { moneda: 'PEN', monedas: 'PEN,USD', tipo_cambio_USD: '3.75', zona_horaria: 'America/Lima', formato_fecha: 'dd/MM/yyyy', tema: 'claro', notificaciones: 'true' } as Record<string, string>,
   }
-  if (vacio) { db.gastos = []; db.catalogo = []; db.medios = []; db.cajas = []; db.fondos = []; db.plantillas = []; db.vinculos = [] }
+  if (vacio) { db.gastos = []; db.catalogo = []; db.medios = []; db.fondos = []; db.plantillas = []; db.vinculos = [] }
   const upsert = (rows: unknown[][], keyLen: number, row: unknown[]) => {
     const key = JSON.stringify(row.slice(0, keyLen)).toLowerCase()
     const i = rows.findIndex(r => JSON.stringify(r.slice(0, keyLen)).toLowerCase() === key)
@@ -149,14 +136,25 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
   let carpeta = { ...CARPETA_DEMO }
   const fail = (code: string, message: string) => Object.assign(new Error(message), { code })
 
-  // ---- Plantillas de fondos y de subcajas (misma lógica que el backend) ----
+  // ---- Fondos como objetos (mismas reglas que el backend, vía lib/presupuesto.ts) ----
+  const fondosObj = (): Fondo[] => db.fondos.map(r => ({
+    id: String(r[0]), nombre: String(r[1]), monto: Number(r[2]), moneda: String(r[3]), color: String(r[4]), icono: String(r[5]), activo: r[6] !== false, orden: Number(r[7]),
+    recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: String(r[9] ?? ''), medioPago: String(r[10] ?? ''), tipo: 'mensual', creadoEn: '', actualizadoEn: '', reglas: leerReglas(String(r[14] ?? ''), String(r[10] ?? '')),
+  }))
+  const gastoObj = (p: Record<string, unknown>) => ({ fecha: String(p.fecha), medioPago: String(p.medioPago ?? ''), ambito: String(p.ambito ?? ''), categoria: String(p.categoria ?? ''), subcategoria: String(p.subcategoria ?? '') })
+  const exigirMedio = (p: Record<string, unknown>, prefijo = '') => {
+    const v = validarMedioGasto(gastoObj(p), fondosObj())
+    if (!v.ok) throw fail('MEDIO_RESTRINGIDO', prefijo + v.mensaje)
+  }
+
+  // ---- Plantillas de fondos (misma lógica que el backend) ----
   const pfPub = (r: unknown[]) => {
     const est = r[15] as Record<string, { e: string; m: number }>
     return [...r.slice(0, 15), Object.fromEntries(Object.entries(est).map(([m, v]) => [m, { e: v.e, m: v.m }])), r[16], r[17]]
   }
   const MES = /^\d{4}-(0[1-9]|1[0-2])$/
-  // Igual que pfIdSeguro_ del backend: cabe en el límite (caja 40, fondo 64); si "pf-"+UUID no cabe con el prefijo, se omite su "pf-".
-  const seguro = (pre: string, id: unknown, max = pre === 'c-' ? 40 : 60) => {
+  // Igual que pfIdSeguro_ del backend: cabe en el límite (60); si "pf-"+UUID no cabe con el prefijo, se omite su "pf-".
+  const seguro = (pre: string, id: unknown, max = 60) => {
     const limpio = String(id).replace(/[^A-Za-z0-9_-]/g, ''), s = pre + limpio
     return s.length <= max ? s : (pre + limpio.replace(/^pf-/, '')).slice(0, max)
   }
@@ -179,13 +177,16 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     return { monto: !f[9] || mes >= String(f[9]) ? Number(f[2]) : 0, solo: null, aplicada: true }
   }
   const handlers: Record<string, (p: Record<string, unknown>) => unknown> = {
-    data: () => structuredClone({ ...db, plantillasFin: db.plantillasFin.map(pfPub), vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
+    data: () => structuredClone({ ...db, plantillasFin: db.plantillasFin.filter(r => r[1] === 'fondo').map(pfPub), vinculos: db.vinculos.filter(r => r[1]).map(r => [r[0], r[1]]), version: '1.0.0-demo', sheetUrl: 'https://docs.google.com/spreadsheets/' }),
     saveGasto: p => {
       const now = new Date().toISOString()
       const i = db.gastos.findIndex(r => r[13] === p.id)
       if (p.mode === 'create' && i >= 0) return db.gastos[i]
       if (p.mode === 'update' && i < 0) throw fail('NOT_FOUND', 'El gasto ya no existe en la hoja.')
       const prev = i >= 0 ? db.gastos[i] : null
+      // Igual que saveGasto_: el medio se revalida al crear y al editar solo si cambió medio, clasificación o mes.
+      const clave = (x: unknown[]) => [x[6], x[8], x[3], x[4], String(x[0]).slice(0, 7)].map(v => normName(String(v ?? ''))).join('|')
+      if (!prev || clave(prev) !== clave([p.fecha, 0, 0, p.categoria, p.subcategoria, 0, p.medioPago, 0, p.ambito])) exigirMedio(p)
       const row = [p.fecha, Math.round(Number(p.monto) * 100) / 100, p.moneda, p.categoria, p.subcategoria, formatearDescripcion(String(p.descripcion ?? '')), p.medioPago,
         p.tipoGasto, p.ambito, p.esRecurrente === true, prev ? prev[10] : 'Activo', prev ? prev[11] : 'web', p.comprobanteUrl ?? '',
         p.id, prev ? prev[14] : now, now]
@@ -248,7 +249,19 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const gcol = [8, 3, 4][col]
       for (const r of db.gastos) if (match(r[8], r[3], r[4])) { r[gcol] = p.nuevo; gastos++ }
       if (!catalogo) throw fail('NOT_FOUND', 'La opción ya no existe en el catálogo.')
-      return { catalogo, gastos }
+      // Igual que renameCatalogo_: las rutas de fondos fijadas a ese ámbito se renombran en todas sus versiones.
+      let fondos = 0
+      for (const r of db.fondos) {
+        if (!r[14]) continue
+        const vs = JSON.parse(String(r[14])) as ReglaFondo[]
+        let cambio = false
+        for (const v of vs) for (const ru of v.rutas) {
+          if (!ru.ambito || !match(ru.ambito, ru.categoria, ru.subcategoria)) continue
+          if (col === 0) { ru.ambito = String(p.nuevo); cambio = true } else if (col === 1 && ru.categoria) { ru.categoria = String(p.nuevo); cambio = true } else if (col === 2 && ru.subcategoria) { ru.subcategoria = String(p.nuevo); cambio = true }
+        }
+        if (cambio) { r[14] = JSON.stringify(vs); fondos++ }
+      }
+      return { catalogo, gastos, fondos }
     },
     reorderCategorias: p => {
       const nombres = Array.isArray(p.categorias) ? p.categorias.map(String) : []
@@ -265,8 +278,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const gastos = db.gastos.filter(r => n(r[8]) === n(p.ambito) && n(r[3]) === n(p.categoria)).length
       const pl = db.plantillas.filter(r => n(r[1]) === n(p.ambito) && n(r[2]) === n(p.categoria)).length
       const otro = db.catalogo.some(r => n(r[0]) !== n(p.ambito) && n(r[1]) === n(p.categoria))
-      const cajas = db.cajas.filter(r => (r[3] === 'Categoría' && n(r[4]) === n(p.categoria) && !otro) || (r[3] === 'Subcategoría' && subs.includes(n(r[4])))).length
-      if (gastos || pl || cajas) throw fail('IN_USE', `No se puede eliminar “${p.categoria}”: la usan ${[gastos && `${gastos} gasto(s)`, pl && `${pl} plantilla(s)`, cajas && `${cajas} subcaja(s)`].filter(Boolean).join(', ')}. Desactívala para conservar el historial.`)
+      const fondos = fondosObj().filter(f => f.reglas.some(v => v.rutas.some(ru => n(ru.categoria) === n(p.categoria) && (n(ru.ambito) === n(p.ambito) || (!ru.ambito && !otro))))).length
+      if (gastos || pl || fondos) throw fail('IN_USE', `No se puede eliminar “${p.categoria}”: la usan ${[gastos && `${gastos} gasto(s)`, pl && `${pl} plantilla(s)`, fondos && `${fondos} fondo(s) del presupuesto`].filter(Boolean).join(', ')}. Desactívala para conservar el historial.`)
       if (subs.length && p.cascada !== true) throw fail('IN_USE', `“${p.categoria}” tiene ${subs.length} subcategoría(s). Confirma la eliminación en cascada o desactívala.`)
       db.catalogo = db.catalogo.filter(r => !(n(r[0]) === n(p.ambito) && n(r[1]) === n(p.categoria)))
       return { eliminada: true, subcategorias: subs.length }
@@ -276,19 +289,20 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const prev = db.medios.find(r => String(r[0]).toLowerCase() === String(p.nombre).toLowerCase())
       return upsert(db.medios, 1, [p.nombre, p.activo !== false, p.icono === undefined ? prev?.[2] ?? '' : p.icono, p.color === undefined ? prev?.[3] ?? '' : p.color])
     },
-    saveCaja: p => {
-      if (String(p.id ?? '').length > 40) throw fail('VALIDATION', 'ID de caja supera 40 caracteres.')
-      const norm = (v: unknown) => normName(String(v ?? ''))
-      if (p.filtroCampo !== 'Todos' && p.activo !== false && db.cajas.some(r => r[0] !== p.id && r[3] === p.filtroCampo && norm(r[4]) === norm(p.filtroValor) && r[7] !== false)) {
-        throw fail('VALIDATION', `Otra caja ya usa ${p.filtroCampo} = ${p.filtroValor}. Cambia el alcance o desactívala primero.`)
-      }
-      return upsert(db.cajas, 1, [p.id, p.nombre, Number(p.presupuesto), p.filtroCampo, p.filtroValor ?? '', p.color, Number(p.orden), p.activo !== false, formatearDescripcion(String(p.descripcion ?? '')), p.icono ?? ''])
-    },
-    deleteCaja: p => {
-      const r = db.cajas.find(x => x[0] === p.id)
-      if (r && r[3] === 'Todos') throw fail('VALIDATION', 'La caja general no se puede eliminar.')
-      db.cajas = db.cajas.filter(x => x[0] !== p.id)
-      return { id: p.id, eliminada: !!r }
+    saveAsignacion: p => {
+      const gastoId = String(p.gastoId ?? '').toLowerCase()
+      const row = db.gastos.find(r => String(r[13]).toLowerCase() === gastoId)
+      if (!row) throw fail('NOT_FOUND', 'El gasto ya no existe en la hoja.')
+      const partes = (Array.isArray(p.partes) ? p.partes : []) as ParteManual[]
+      db.asignaciones = db.asignaciones.filter(r => r[0] !== gastoId)
+      if (!partes.length) return [gastoId, '']
+      if (row[10] === 'Anulado') throw fail('VALIDATION', 'El gasto está eliminado: restáuralo antes de cambiar su asignación.')
+      const g = { fecha: row[0], monto: row[1], moneda: row[2], categoria: row[3], subcategoria: row[4], medioPago: row[6], ambito: row[8], id: row[13] } as unknown as Gasto
+      const e = validarAsignacion(g, partes, fondosObj(), { fondosMeses: db.fondosMeses.map(m => ({ fondoId: String(m[0]), mes: String(m[1]), monto: Number(m[2]), modo: m[3] === 'desde' ? 'desde' : 'solo' })), aislarDesde: aislaDesde(db.config) })
+      if (e) throw fail('VALIDATION', e)
+      const json = JSON.stringify(partes.map(x => ({ fondoId: x.fondoId, monto: Math.round(x.monto * 100) / 100 })))
+      db.asignaciones.push([gastoId, json])
+      return [gastoId, json]
     },
     deleteFondo: p => {
       const antes = db.fondos.length, ajustes = db.fondosMeses.length
@@ -296,15 +310,13 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       db.fondosMeses = db.fondosMeses.filter(r => r[0] !== p.id)
       return { id: p.id, eliminada: db.fondos.length < antes, ajustes: ajustes - db.fondosMeses.length }
     },
-    reorderCajas: p => {
-      const ids = p.ids as string[]
-      db.cajas.forEach(r => { r[6] = r[3] === 'Todos' ? 1 : ids.indexOf(String(r[0])) + 2 || ids.length + 2 })
-      return { ok: true }
-    },
-    savePresupuesto: p => upsert(db.presupuestos, 2, [p.periodo, p.cajaId, Number(p.monto)]),
     // Mismas validaciones que saveFondo_ en Code.gs (upsert por ID: un doble clic no duplica).
     saveFondo: p => {
-      const nombre = String(p.nombre ?? '').trim(), mes = String(p.mes ?? ''), medio = mediosDeFondo(String(p.medioPago ?? '')).join('|')
+      const nombre = String(p.nombre ?? '').trim(), mes = String(p.mes ?? '')
+      const reglas = Array.isArray(p.reglas) ? (p.reglas as ReglaFondo[]) : null
+      if (reglas) for (const r of reglas) { const e = validarRegla(r); if (e) throw fail('VALIDATION', e) }
+      const ult = reglas?.[reglas.length - 1]
+      const medio = ult ? (ult.medios === 'solo' ? ult.listaMedios.join('|') : '') : leerReglas('', String(p.medioPago ?? ''))[0].listaMedios.join('|')
       const monedas = [db.config.moneda, ...String(db.config.monedas ?? '').split(',')].map(x => x.trim()).filter(Boolean)
       if (!nombre) throw fail('VALIDATION', 'Nombre del fondo es obligatorio.')
       if (!(Number(p.monto) >= 0) || Number(p.monto) > 1e9) throw fail('VALIDATION', 'Monto inválido.')
@@ -320,18 +332,18 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const prev = db.fondos.find(r => r[0] === p.id)
       const row = [p.id, nombre, Math.round(Number(p.monto) * 100) / 100, p.moneda, p.color || '#1e3a8a', p.icono ?? '', activo,
         p.orden === undefined && prev ? prev[7] : Number(p.orden ?? 0), p.recurrencia === 'unica' ? 'unica' : 'mensual', mes, medio, prev ? prev[11] : now, now,
-        ['mensual', 'extra', 'ahorro_asignado'].includes(String(p.tipo)) ? p.tipo : prev ? prev[13] : p.recurrencia === 'unica' ? 'extra' : 'mensual']
+        ['mensual', 'extra', 'ahorro_asignado'].includes(String(p.tipo)) ? p.tipo : prev ? prev[13] : p.recurrencia === 'unica' ? 'extra' : 'mensual',
+        reglas ? JSON.stringify(reglas) : prev ? prev[14] ?? '' : '']
       return upsert(db.fondos, 1, row)
     },
     savePlantillaFin: p => {
       const tipo = String(p.tipo)
-      if (tipo !== 'fondo' && tipo !== 'subcaja') throw fail('VALIDATION', 'Tipo de plantilla inválido.')
+      if (tipo !== 'fondo') throw fail('VALIDATION', 'Tipo de plantilla inválido.')
       const nombre = String(p.nombre ?? '').trim()
       if (!nombre) throw fail('VALIDATION', 'Nombre de la plantilla es obligatorio.')
       if (!(Number(p.monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
       const origen = String(p.origenId ?? '')
-      if (tipo === 'subcaja' && (!['Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'].includes(String(p.campo)) || !String(p.valor ?? '').trim())) throw fail('VALIDATION', 'Alcance de caja inválido.')
-      if (origen && !(tipo === 'fondo' ? db.fondos : db.cajas).some(r => r[0] === origen)) throw fail('NOT_FOUND', tipo === 'fondo' ? 'El fondo original ya no existe.' : 'La caja original ya no existe.')
+      if (origen && !db.fondos.some(r => r[0] === origen)) throw fail('NOT_FOUND', 'El fondo original ya no existe.')
       let maxOrden = 0
       for (const r of db.plantillasFin) {
         maxOrden = Math.max(maxOrden, Number(r[13]))
@@ -340,10 +352,11 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
         if (origen && r[14] === origen) throw fail('DUPLICATE', `Ya existe una plantilla vinculada a este registro (“${r[2]}”). Edítala en lugar de crear otra.`)
       }
       const prev = db.plantillasFin.find(r => r[0] === p.id)
+      if (prev && prev[1] !== tipo) throw fail('VALIDATION', 'No se puede cambiar el tipo de una plantilla.')
       const now = new Date().toISOString()
       const medios = String(p.medios ?? '').split('|').map(x => x.trim()).filter(x => x && x !== 'Libre')
-      const row = [p.id, tipo, nombre, Math.round(Number(p.monto) * 100) / 100, tipo === 'fondo' ? String(p.moneda || 'PEN') : '', tipo === 'fondo' ? [...new Set(medios)].join('|') : '',
-        tipo === 'subcaja' ? String(p.campo) : '', tipo === 'subcaja' ? String(p.valor).trim() : '', formatearDescripcion(String(p.descripcion ?? '')), String(p.color || '#1e3a8a'), String(p.icono ?? ''),
+      const row = [p.id, tipo, nombre, Math.round(Number(p.monto) * 100) / 100, String(p.moneda || 'PEN'), [...new Set(medios)].join('|'),
+        '', '', formatearDescripcion(String(p.descripcion ?? '')), String(p.color || '#1e3a8a'), String(p.icono ?? ''),
         p.recurrencia === 'unica' ? 'unica' : 'mensual', p.activo !== false, prev ? prev[13] : p.orden === undefined ? maxOrden + 1 : Number(p.orden),
         prev && !origen ? prev[14] : origen, prev ? prev[15] : {}, prev ? prev[16] : now, now]
       upsert(db.plantillasFin, 1, row)
@@ -351,7 +364,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     },
     deletePlantillaFin: p => {
       const antes = db.plantillasFin.length
-      db.plantillasFin = db.plantillasFin.filter(r => r[0] !== p.id)
+      db.plantillasFin = db.plantillasFin.filter(r => r[0] !== p.id || r[1] !== 'fondo')
       return { id: p.id, eliminada: db.plantillasFin.length < antes }
     },
     reorderPlantillasFin: p => {
@@ -366,28 +379,21 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       const items = (p.items as { id: string; accion?: string; monto?: number }[]) ?? []
       if (!items.length || items.length > 60) throw fail('VALIDATION', 'Selecciona entre 1 y 60 plantillas.')
       const plan = items.map(it => {
-        const r = db.plantillasFin.find(x => x[0] === it.id)
+        const r = db.plantillasFin.find(x => x[0] === it.id && x[1] === 'fondo')
         if (!r) throw fail('NOT_FOUND', 'Una plantilla ya no existe. Actualiza los datos.')
         const accion = it.accion === 'omitir' ? 'omitir' : it.accion === 'pendiente' ? 'pendiente' : 'aplicar'
         const monto = accion === 'aplicar' ? Number(it.monto ?? r[3]) : 0
         if (accion === 'aplicar' && !(monto >= 0)) throw fail('VALIDATION', 'Monto inválido.')
         if (accion === 'aplicar' && r[12] === false) throw fail('VALIDATION', `La plantilla “${r[2]}” está desactivada.`)
-        if (accion === 'aplicar' && !r[14]) {
-          if (r[1] === 'fondo' && db.fondos.some(f => f[0] !== seguro('f-', r[0]) && normName(String(f[1])) === normName(String(r[2])))) throw fail('VALIDATION', `Ya existe un fondo llamado “${r[2]}”. Enlaza la plantilla a ese fondo (Guardar como plantilla desde ella).`)
-          if (r[1] === 'subcaja' && db.cajas.some(c => c[0] !== seguro('c-', r[0]) && c[7] !== false && c[3] === r[6] && normName(String(c[4])) === normName(String(r[7])))) throw fail('VALIDATION', `Ya existe una caja con el alcance de “${r[2]}”. Enlaza la plantilla a esa subcaja.`)
-        }
+        if (accion === 'aplicar' && !r[14] && db.fondos.some(f => f[0] !== seguro('f-', r[0]) && normName(String(f[1])) === normName(String(r[2]))))
+          throw fail('VALIDATION', `Ya existe un fondo llamado “${r[2]}”. Enlaza la plantilla a ese fondo (Guardar como plantilla desde ella).`)
         return { r, accion, monto }
       })
       const revertir = (r: unknown[], est: { e: string; w?: boolean; p?: number | null } | undefined) => {
         if (!est || est.e !== 'aplicada' || !est.w) return
         const origen = r[14]
-        if (r[1] === 'fondo') {
-          db.fondosMeses = db.fondosMeses.filter(x => !(x[0] === origen && x[1] === mes && x[3] === 'solo'))
-          if (est.p != null) db.fondosMeses.push([origen, mes, est.p, 'solo'])
-        } else {
-          db.presupuestos = db.presupuestos.filter(x => !(x[0] === mes && x[1] === origen))
-          if (est.p != null) db.presupuestos.push([mes, origen, est.p])
-        }
+        db.fondosMeses = db.fondosMeses.filter(x => !(x[0] === origen && x[1] === mes && x[3] === 'solo'))
+        if (est.p != null) db.fondosMeses.push([origen, mes, est.p, 'solo'])
       }
       const out: unknown[] = []
       for (const { r, accion, monto } of plan) {
@@ -398,25 +404,14 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
         if (accion === 'pendiente') delete est[mes]
         else if (accion === 'omitir') est[mes] = { e: 'omitida', m: 0 }
         else {
-          let w = false, prev: number | null = null, origen = String(r[14])
-          if (r[1] === 'fondo') {
-            if (!db.fondos.some(f => f[0] === origen)) {
-              origen = seguro('f-', r[0])
-              if (!db.fondos.some(f => f[0] === origen)) handlers.saveFondo({ id: origen, nombre: r[2], monto: r[3], moneda: r[4], color: r[9], icono: r[10], recurrencia: r[11], mes, activo: true, medioPago: r[5] || 'Libre', orden: db.fondos.length + 1 })
-            }
-            const ef = efectivoFondo(db.fondos.find(f => f[0] === origen)!, mes)
-            prev = ef.solo
-            if (!eq(monto, ef.monto) || !ef.aplicada) { handlers.saveFondoMes({ fondoId: origen, mes, modo: 'solo', monto }); w = true }
-          } else {
-            if (!db.cajas.some(c => c[0] === origen)) {
-              origen = seguro('c-', r[0])
-              if (!db.cajas.some(c => c[0] === origen)) handlers.saveCaja({ id: origen, nombre: r[2], presupuesto: r[3], filtroCampo: r[6], filtroValor: r[7], color: r[9], icono: r[10], activo: true, descripcion: r[8], orden: db.cajas.length + 1 })
-            }
-            const pr = db.presupuestos.find(x => x[0] === mes && x[1] === origen)
-            prev = pr ? Number(pr[2]) : null
-            const ef = pr ? Number(pr[2]) : mes >= aislaDesde(db.config) ? 0 : Number(db.cajas.find(c => c[0] === origen)![2])
-            if (!eq(monto, ef) || (!pr && mes >= aislaDesde(db.config))) { handlers.savePresupuesto({ periodo: mes, cajaId: origen, monto }); w = true }
+          let w = false, origen = String(r[14])
+          if (!db.fondos.some(f => f[0] === origen)) {
+            origen = seguro('f-', r[0])
+            if (!db.fondos.some(f => f[0] === origen)) handlers.saveFondo({ id: origen, nombre: r[2], monto: r[3], moneda: r[4], color: r[9], icono: r[10], recurrencia: r[11], mes, activo: true, medioPago: r[5] || 'Libre', orden: db.fondos.length + 1 })
           }
+          const ef = efectivoFondo(db.fondos.find(f => f[0] === origen)!, mes)
+          const prev = ef.solo
+          if (!eq(monto, ef.monto) || !ef.aplicada) { handlers.saveFondoMes({ fondoId: origen, mes, modo: 'solo', monto }); w = true }
           est[mes] = { e: 'aplicada', m: monto, w, p: prev }
           r[14] = origen
         }
@@ -426,31 +421,24 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       return { mes, plantillas: out }
     },
     aplicarEntidadesMes: p => {
-      const tipo = p.tipo === 'subcaja' ? 'subcaja' : p.tipo === 'fondo' ? 'fondo' : ''
-      if (!tipo) throw fail('VALIDATION', 'Tipo inválido.')
+      if (p.tipo !== 'fondo') throw fail('VALIDATION', 'Tipo inválido: desde la versión 1.28 solo se aplican fondos (las cajas se retiraron).')
       const mes = String(p.mes)
       if (!MES.test(mes)) throw fail('VALIDATION', 'Mes inválido (AAAA-MM).')
       const items = (p.items as { id: string; monto: number }[]) ?? []
       if (!items.length || items.length > 60) throw fail('VALIDATION', 'Selecciona entre 1 y 60 elementos.')
       if (new Set(items.map(i => i.id)).size !== items.length) throw fail('VALIDATION', 'Elemento repetido en la solicitud.')
       const plan = items.map(it => {
-        const fila = (tipo === 'fondo' ? db.fondos : db.cajas).find(x => x[0] === it.id)
-        if (!fila) throw fail('NOT_FOUND', `Una ${tipo} ya no existe. Actualiza los datos.`)
+        const fila = db.fondos.find(x => x[0] === it.id)
+        if (!fila) throw fail('NOT_FOUND', 'Un fondo ya no existe. Actualiza los datos.')
         if (!(Number(it.monto) >= 0)) throw fail('VALIDATION', 'Monto inválido.')
         return { fila, monto: Number(it.monto) }
       })
       let escritas = 0
       for (const { fila, monto } of plan) {
-        if (tipo === 'fondo') {
-          const ef = efectivoFondo(fila, mes)
-          if (!eq(monto, ef.monto) || !ef.aplicada) { handlers.saveFondoMes({ fondoId: fila[0], mes, modo: 'solo', monto }); escritas++ }
-        } else {
-          const pr = db.presupuestos.find(x => x[0] === mes && x[1] === fila[0])
-          const aisl = mes >= aislaDesde(db.config), ef = pr ? Number(pr[2]) : aisl ? 0 : Number(fila[2])
-          if (!eq(monto, ef) || (aisl && !pr)) { handlers.savePresupuesto({ periodo: mes, cajaId: fila[0], monto }); escritas++ }
-        }
+        const ef = efectivoFondo(fila, mes)
+        if (!eq(monto, ef.monto) || !ef.aplicada) { handlers.saveFondoMes({ fondoId: fila[0], mes, modo: 'solo', monto }); escritas++ }
       }
-      return { tipo, mes, aplicadas: plan.length, escritas }
+      return { tipo: 'fondo', mes, aplicadas: plan.length, escritas }
     },
     saveFondoMes: p => {
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.mes))) throw fail('VALIDATION', 'Mes inválido (AAAA-MM).')
@@ -481,19 +469,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
         if (!r[5] && d.color) { r[5] = d.color; cambio = true }
         if (cambio) catalogo++
       }
-      return { cajas: 0, fondos: 0, catalogo, config: 0 }
-    },
-    migrarGeneralAFondo: () => {
-      if (db.fondos.some(r => r[0] === 'fondo-general')) return { creada: false, meses: 0 }
-      if (db.fondos.some(r => normName(String(r[1])) === 'general')) throw fail('VALIDATION', 'Ya tienes un fondo llamado “General”. Revisa sus importes a mano: no se migró nada.')
-      const g = db.cajas.find(r => r[3] === 'Todos')
-      if (!g) throw fail('NOT_FOUND', 'No hay caja general que migrar.')
-      const now = new Date().toISOString()
-      const fila = ['fondo-general', 'General', Number(g[2]), db.config.moneda || 'PEN', g[5], '', true, 0, 'mensual', '', '', now, now]
-      db.fondos.push(fila)
-      const ajustes = db.presupuestos.filter(r => r[1] === g[0]).map(r => ['fondo-general', r[0], Number(r[2]), 'solo'])
-      db.fondosMeses.push(...ajustes)
-      return { creada: true, meses: ajustes.length, fondo: fila, ajustes }
+      return { cajas: 0, fondos: 0, catalogo, config: 0, medios: 0 }
     },
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
     plantillas: () => [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10])),
@@ -528,6 +504,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     saveGastosBatch: p => {
       const lista = p.gastos as Record<string, unknown>[]
       lista.forEach((g, i) => { if (!(Number(g.monto) > 0) || !String(g.medioPago ?? '').trim()) throw fail('VALIDATION', `Gasto ${i + 1} (${g.descripcion}): monto o medio de pago inválido.`) })
+      lista.forEach((g, i) => { if (!db.gastos.some(r => r[13] === g.id)) exigirMedio(g, `Gasto ${i + 1} (${formatearDescripcion(String(g.descripcion ?? '')) || 'sin descripción'}): `) })
       const now = new Date().toISOString()
       const nuevas: unknown[][] = []
       // Como el backend real: un ID ya existente no se duplica ni se modifica; se devuelve lo guardado.
@@ -557,7 +534,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       db.revisiones.push(row)
       return [...row]
     },
-    // Revisión del presupuesto (v1.26): réplica del backend. Solo agrega filas a su propia hoja; nunca toca gastos, fondos ni cajas.
+    // Revisión del presupuesto (v1.26): réplica del backend. Solo agrega filas a su propia hoja; nunca toca gastos ni fondos.
     saveRevisionPresupuesto: p => {
       const prev = db.revisionesPresupuesto.find(r => r[0] === p.id); if (prev) return [...prev]
       if (!/^rev-[0-9a-f-]{36}$/.test(String(p.id))) throw fail('VALIDATION', 'ID de revisión inválido.')
@@ -617,6 +594,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
     },
     repararIds: () => [],
     repararHojas: () => ({ url: 'https://docs.google.com/spreadsheets/', demo: true }),
+    // En demostración no hay hojas de cajas que retirar: se informa el inventario vacío y no se cambia nada.
+    retirarCajas: () => ({ simulacion: true, inventario: { cajas: 0, subcajas: 0, cajaGeneral: null, ajustesMensuales: 0, plantillasSubcaja: 0, fondos: db.fondos.length, acciones: [] }, demo: true }),
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
     backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/', carpeta: carpeta.nombre, carpetaUrl: carpeta.url }),
     carpetaRespaldo: () => ({ ...carpeta }),

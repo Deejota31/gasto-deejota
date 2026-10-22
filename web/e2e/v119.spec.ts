@@ -18,7 +18,7 @@ const sinScrollH = (page: Page) => page.evaluate(() => document.documentElement.
 const escriturasGastos = (page: Page) => page.evaluate(() => Object.entries((globalThis as unknown as { __gdDemoCalls?: Record<string, number> }).__gdDemoCalls ?? {}).filter(([k]) => /gasto|batch/i.test(k) && !/^(data|plantillas)$/.test(k)).reduce((s, [, v]) => s + v, 0))
 const fondosAplicadas = async (page: Page) => Number(await page.getByTestId('n-fondos').innerText())
 
-async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?demo=60&fondos=3&cajas=3#cajas') {
+async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?demo=60&fondos=3&cajas=3#presupuestos') {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
   await page.clock.setFixedTime(new Date(hoy))
   await page.goto(ruta)
@@ -43,7 +43,7 @@ test.describe('v1.19 aislamiento por mes', () => {
     await expect(av.getByRole('button', { name: 'Preparar cajas mensuales' })).toBeVisible()
     await expect(page.getByText(/NaN|Infinity/)).toHaveCount(0)
     // Diciembre y enero (cambio de año) también empiezan vacíos.
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
     await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para diciembre')
@@ -143,7 +143,7 @@ test.describe('v1.19 asistente y campana', () => {
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Descartar aviso del mes' }).click()
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
-    await go(page, 'Dashboard'); await go(page, 'Cajas')
+    await go(page, 'Dashboard'); await go(page, 'Presupuestos')
     await expect(page.getByTestId('campana-badge')).toHaveCount(0)
   })
 
@@ -155,7 +155,7 @@ test.describe('v1.19 asistente y campana', () => {
   })
 
   test('falla el backend al aplicar: error visible, la planificación no queda marcada como aplicada', async ({ page }) => {
-    await abrir(page, '2026-11-05T10:00:00-05:00', '/?demo=60&fondos=3&cajas=3&falla=1#cajas')
+    await abrir(page, '2026-11-05T10:00:00-05:00', '/?demo=60&fondos=3&cajas=3&falla=1#presupuestos')
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Preparar ahora' }).click()
     const antesF = await fondosAplicadas(page)
@@ -267,7 +267,7 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
   const errores = (page: Page) => page.getByText(/ID de caja supera|No se pudo confirmar/)
 
   test('aplicar una sola plantilla y luego todas: sin error, sin duplicar', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fondos=3#cajas')
+    await abrir(page, OCT, '/?demo=60&fondos=3#presupuestos')
     await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await crearPlantilla(page, 'Mascotas', '300', 0)
     await crearPlantilla(page, 'Viajes', '150', 1)
@@ -294,7 +294,7 @@ test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regres
   })
 
   test('con el backend caído el error es visible, con Reintentar, y no queda nada aplicado', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fondos=3&falla=1#cajas')
+    await abrir(page, OCT, '/?demo=60&fondos=3&falla=1#presupuestos')
     await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
     await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
     await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()

@@ -6,11 +6,11 @@ const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
 const calls = (page: Page) => page.evaluate(() => ({ ...(globalThis as unknown as { __gdDemoCalls: Record<string, number> }).__gdDemoCalls }))
 const NOV = '2026-11-05T10:00:00-05:00'
 
-async function abrir(page: Page, hoy = NOV, ruta = '/?demo=60&fondos=3&cajas=3&latencia=0#cajas') {
+async function abrir(page: Page, hoy = NOV, ruta = '/?demo=60&fondos=3&cajas=3&latencia=0#presupuestos') {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
   await page.clock.setFixedTime(new Date(hoy))
   await page.goto(ruta)
-  if (ruta.endsWith('#cajas')) await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
+  if (ruta.endsWith('#presupuestos')) await expect(page.getByRole('heading', { name: /Fondos del presupuesto/ })).toBeVisible()
   else await expect(page.getByTestId('consolidado')).toBeVisible()
 }
 /** Cifra del Presupuesto consolidado (Dashboard). */
@@ -21,7 +21,7 @@ async function cifra(page: Page, id: 'presupuesto-consolidado' | 'gastado-del-pe
   return money(await el.locator('p').nth(1).innerText())
 }
 async function nuevoFondo(page: Page, { nombre, monto, tipo }: { nombre: string; monto: string; tipo: 'Mensual' | 'Extra' | 'Ahorro asignado' }) {
-  await go(page, 'Cajas')
+  await go(page, 'Presupuestos')
   await page.getByRole('button', { name: 'Nuevo fondo' }).click()
   const d = dialog(page)
   await d.getByLabel('Nombre del fondo').fill(nombre)
@@ -54,7 +54,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await page.getByRole('button', { name: 'Mes anterior', exact: true }).click()
     const octP0 = await cifra(page, 'presupuesto-consolidado')
     const octG0 = await cifra(page, 'gastado-del-período')
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await page.getByRole('button', { name: 'Mes siguiente', exact: true }).click()
 
     // Escenario 1: S/ 3,000 para noviembre y un gasto de S/ 200.
@@ -84,7 +84,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await expect.poll(() => cifra(page, 'gastado-del-período')).toBeCloseTo(g0 + 225, 2)
 
     // Escenario 7: una reserva interna de S/ 500 no aumenta el presupuesto total.
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     const reservado0 = money(await page.getByTestId('cajas-resumen').locator('div', { hasText: 'Reservado en cajas' }).locator('dd').innerText())
     await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
@@ -99,7 +99,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     expect(await cifra(page, 'presupuesto-consolidado')).toBe(p0 + 4500)
 
     // Escenario 4: los fondos nuevos de noviembre no tocaron octubre.
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await page.getByRole('button', { name: 'Mes anterior', exact: true }).click()
     expect(await cifra(page, 'presupuesto-consolidado')).toBe(octP0)
     expect(await cifra(page, 'gastado-del-período')).toBe(octG0)
@@ -143,7 +143,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
   })
 
   test('10: cambiar de pantalla mientras se guarda un fondo no bloquea la navegación, no duplica y confirma el resultado real', async ({ page }) => {
-    await abrir(page, NOV, '/?demo=60&fondos=3&cajas=3&latencia=2500#cajas')
+    await abrir(page, NOV, '/?demo=60&fondos=3&cajas=3&latencia=2500#presupuestos')
     const c0 = await calls(page)
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
@@ -157,7 +157,7 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Fondo lento creado' })).toBeVisible({ timeout: 20_000 })
     const c1 = await calls(page)
     expect((c1.saveFondo ?? 0) - (c0.saveFondo ?? 0)).toBe(1)
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo').filter({ hasText: 'Fondo lento' })).toHaveCount(1)
   })
 })
@@ -166,7 +166,7 @@ test.describe('v1.26 terminología e interfaz', () => {
   test('la interfaz habla de Fondos del presupuesto y Revisión del presupuesto; no queda «fuente» ni «conciliación»', async ({ page }) => {
     await abrir(page, '2026-10-19T10:00:00-05:00')
     await expect(page.getByRole('button', { name: 'Nuevo fondo' })).toBeVisible()
-    for (const tab of ['Cajas', 'Dashboard', 'Salud financiera', 'Configuración']) {
+    for (const tab of ['Presupuestos', 'Dashboard', 'Salud financiera', 'Configuración']) {
       await go(page, tab)
       await expect(page.locator('body')).not.toContainText(/fuentes? de dinero|conciliaci[oó]n/i)
     }

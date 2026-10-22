@@ -26,7 +26,7 @@ test.describe('v1.17: revisión responsive y menú Agregar', () => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fondos=3')
       await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
-      for (const tab of ['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración']) {
+      for (const tab of ['Dashboard', 'Gastos', 'Presupuestos', 'Catálogo', 'Salud financiera', 'Configuración']) {
         await go(page, tab)
         await page.waitForTimeout(250)
         expect(await sinScrollH(page), `desborde en ${tab} a ${w}px`).toBe(true)
@@ -59,7 +59,7 @@ test.describe('v1.17: revisión responsive y menú Agregar', () => {
 test.describe('v1.17: filas compactas, swipe y alternativas', () => {
   test('móvil: Lista por defecto, 1ª línea con interruptor y sin botones Editar/Más; deslizar revela acciones, sin eliminar solo', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     const fila = page.getByTestId('fondo-fila').first()
     await expect(fila).toBeVisible()
     await expect(fila.getByRole('switch')).toBeVisible()
@@ -79,7 +79,7 @@ test.describe('v1.17: filas compactas, swipe y alternativas', () => {
 
   test('swipe táctil real (CDP) abre las acciones; el scroll vertical no las abre', async ({ page, context }) => {
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     const fila = page.getByTestId('fondo-fila').first()
     await fila.scrollIntoViewIfNeeded()
     const b = (await fila.boundingBox())!
@@ -105,7 +105,7 @@ test.describe('v1.17: filas compactas, swipe y alternativas', () => {
 
   test('escritorio: sin swipe, el menú ⋯ sigue disponible', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect(page.getByTestId('swipe-hint')).toHaveCount(0)
   })
 })
@@ -130,7 +130,7 @@ test.describe('v1.17: Gastos mensuales en móvil', () => {
 
 test.describe('v1.17: Fondos mensuales', () => {
   const abrir = async (page: Page) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await page.getByRole('button', { name: 'Fondos mensuales' }).first().click()
   }
 
@@ -168,7 +168,7 @@ test.describe('v1.17: Fondos mensuales', () => {
 
   test('Guardar como plantilla desde el fondo: copia datos, no crea fondos; segunda vez avisa que ya existe', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     const menu = page.getByRole('button', { name: /^Más acciones del fondo / }).first()
     const etiqueta = (await menu.getAttribute('aria-label'))!.replace('Más acciones del fondo ', '')
     await abrirMenu(menu)
@@ -234,7 +234,7 @@ test.describe('v1.17: Fondos mensuales', () => {
   })
 
   test('falla del backend: no queda guardada ninguna plantilla', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3&falla=1#cajas')
+    await page.goto('/?demo=60&fondos=3&falla=1#presupuestos')
     await page.getByRole('button', { name: 'Fondos mensuales' }).first().click()
     await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
     await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
@@ -245,45 +245,12 @@ test.describe('v1.17: Fondos mensuales', () => {
   })
 })
 
-test.describe('v1.17: Cajas mensuales', () => {
-  test('crear desde existente (selector con búsqueda), aplicar reserva, no cambia el presupuesto consolidado', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
-    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
-    const d = dialog(page)
-    await d.getByRole('button', { name: /Nueva plantilla/ }).click()
-    await page.getByRole('menuitem', { name: /desde una caja existente/ }).click()
-    await dialog(page).locator('#pf-origen').click()
-    const op = page.getByRole('listbox').getByRole('option').first()
-    await op.click()
-    await expect(dialog(page).locator('#pf-nombre')).not.toHaveValue('')
-    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
-    await expect(page.getByTestId('pf-fila')).toHaveCount(1)
-    await expect(page.getByTestId('pf-estado').first()).toHaveText('Config. histórica')   // v1.20: la subcaja ya existe y rige en meses previos al corte
-  })
-
-  test('Guardar como plantilla desde una subcaja y aviso si ya existe', async ({ page }) => {
-    await page.setViewportSize({ width: 1366, height: 768 })
-    await page.goto('/?demo=60&fondos=3#cajas')
-    const m = page.getByRole('button', { name: /^Más acciones de (?!el fondo|la plantilla)/ }).first()
-    const nombre = (await m.getAttribute('aria-label'))!.replace('Más acciones de ', '')
-    await abrirMenu(m)
-    await page.getByRole('menuitem', { name: 'Guardar como plantilla' }).click()
-    await expect(dialog(page).locator('#pf-nombre')).toHaveValue(nombre)
-    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
-    await expect(page.getByTestId('pf-fila')).toHaveCount(1)
-    await page.keyboard.press('Escape')
-    await abrirMenu(page.getByRole('button', { name: `Más acciones de ${nombre}`, exact: true }))
-    await page.getByRole('menuitem', { name: 'Guardar como plantilla' }).click()
-    await expect(page.getByTestId('plantilla-ya-existe')).toContainText(nombre)
-  })
-})
-
 test.describe('v1.17: móvil, formularios y modales de plantillas', () => {
   for (const [w, h] of [[375, 667], [390, 844], [360, 800]] as const) {
     test(`${w}×${h}: modales de plantillas sin desborde, pie visible y encima de la barra inferior`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
-      await page.goto('/?demo=60&fondos=3#cajas')
-      for (const t of ['Fondos mensuales', 'Cajas mensuales']) {
+      await page.goto('/?demo=60&fondos=3#presupuestos')
+      for (const t of ['Fondos mensuales']) {
         await page.getByRole('button', { name: t }).first().click()
         const d = dialog(page)
         await expect(d).toBeVisible()

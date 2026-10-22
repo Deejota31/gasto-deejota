@@ -37,6 +37,17 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 - **Actualización**: publicar primero la versión nueva de `Code.gs` y después la web. La base de datos actual fue verificada con el esquema vigente. No se necesitan pasos de migración histórica.
 - **Pruebas**: motor financiero, backend, API, componentes y E2E sobre el contrato actual. Los apartados antiguos del historial de versiones se mantienen como registro documental, no como instrucciones de operación.
 
+## Novedades v1.28.0 — Presupuestos inteligentes (se retiran Cajas, Subcajas y Reservas)
+
+Cambia **`Code.gs`** (redesplegar como nueva versión) y la web. Detalle: `docs/PRESUPUESTOS-1.28.md`; despliegue paso a paso: `docs/DESPLIEGUE-1.28.0.md`.
+
+- **Pestaña «Presupuestos»** (antes «Cajas»; el enlace `#cajas` redirige a `#presupuestos`). La única estructura de presupuesto son los **fondos**.
+- **Reglas por fondo**: medios de pago (todos / todos excepto / solo seleccionados), restricción opcional del medio y cobertura (todos, ámbito, categoría, subcategoría o personalizada). Las reglas son versionadas: editar un fondo rige desde el mes actual y no reescribe el historial.
+- **Reparto determinista**: medio dedicado → especificidad → orden manual → ID. El excedente pasa automáticamente al fondo que cubre todo (General, que puede quedar en negativo). Un gasto que ningún fondo cubre queda «Sin fondo asignable». Integridad: imputado + sin fondo = gasto.
+- **Un medio que viola una restricción bloquea el guardado** (web y backend, mismo mensaje). Un fondo sin saldo no bloquea: avisa del excedente.
+- **Asignación manual** por gasto (hoja nueva `ASIGNACIONES_GASTOS`), trazable y restaurable a automática.
+- **Migración segura**: `retirarCajas` (admin) simula por defecto y, al aplicar, hace respaldo y solo renombra `CAJAS`/`PRESUPUESTOS` como archivo. No borra datos.
+
 ## Novedades v1.27.0 — Auditoría de arquitectura: seguridad, limpieza y pruebas
 
 Cambia **`Code.gs`** (redesplegar como nueva versión) y la web. Sin cambios en las reglas financieras ni en el esquema de las 12 hojas. Detalle y evidencia: `docs/AUDITORIA-2026-10-22.md`; despliegue paso a paso: `docs/DESPLIEGUE-1.27.0.md`.

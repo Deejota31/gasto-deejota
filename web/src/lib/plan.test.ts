@@ -38,11 +38,13 @@ describe('planificación mensual: fechas y recordatorios', () => {
   })
   it('estado por etapas: omitida no cuenta como ejecutada; completada solo si ninguna queda pendiente', () => {
     const p = leerEstadoPlan({ 'plan_est_2026-11': 'e|120|' }, '2026-11')
-    expect(p.etapas).toEqual({ fondos: 1, subcajas: 2, gastos: 0 }); expect(p.estado).toBe('en_progreso')
-    expect(estadoDesdeEtapas({ fondos: 1, subcajas: 2, gastos: 0 })).toBe('en_progreso')
-    expect(estadoDesdeEtapas({ fondos: 1, subcajas: 2, gastos: 2 })).toBe('completada')
-    expect(estadoDesdeEtapas({ fondos: 0, subcajas: 0, gastos: 0 })).toBe('pendiente')
+    // v1.28: sin etapa de subcajas. El dígito del medio se conserva (siempre 2 = omitida) para leer estados guardados antes.
+    expect(p.etapas).toEqual({ fondos: 1, gastos: 0 }); expect(p.estado).toBe('en_progreso')
+    expect(estadoDesdeEtapas({ fondos: 1, gastos: 0 })).toBe('en_progreso')
+    expect(estadoDesdeEtapas({ fondos: 1, gastos: 2 })).toBe('completada')
+    expect(estadoDesdeEtapas({ fondos: 0, gastos: 0 })).toBe('pendiente')
     expect(serializarEstadoPlan(p)).toBe('e|120|')
+    expect(serializarEstadoPlan(leerEstadoPlan({ 'plan_est_2026-11': 'e|101|' }, '2026-11'))).toBe('e|121|')
   })
   it('próximas fechas parten de hoy y saltan meses desactivados', () => {
     const cfg = { plan_dias_2026: serializarAnio(Array.from({ length: 12 }, (_, i) => ({ dia: 1, activo: i !== 10 }))) }

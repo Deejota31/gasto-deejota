@@ -3,17 +3,17 @@ import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarClock, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Copy, ExternalLink,
   HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, ClipboardCheck, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet,
 } from 'lucide-react'
-import { cajaDe, prioridadCajas, type Aggregates } from '../lib/engine'
+import { type Aggregates, type FondoResumen } from '../lib/engine'
 import { formatDate, monthLabel, rangeLabel, singleMonth, shiftMonth } from '../lib/dates'
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import {
-  calcularCompromisos, calcularPresupuesto, estadoCompromiso, type EstadoCompromiso, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
+  calcularCompromisos, calcularPresupuesto, fondoDeCompromiso, estadoCompromiso, type EstadoCompromiso, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
   PESOS, PROBLEMA_TXT, REDUCCION_SIMULADA, type CalidadDatos, type CompromisoItem, type Compromisos, type Evolucion, type FilaEvolucion,
   type GrupoSimilar, type MiPresupuesto, type NivelComparacion, type NivelPresupuesto, type Oportunidad, type Rango,
 } from '../lib/salud'
 import type { AppStore } from '../lib/store'
-import type { CatalogoItem, EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
-import { cajaLook } from '../lib/visual'
+import type { EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
+import { fondoLook } from '../lib/visual'
 import { RevisionPresupuesto } from './RevisionPresupuesto'
 import { MenuAcciones } from './MenuAcciones'
 import { ESTADO_REV_TXT, estadoDe, revisarPeriodo } from '../lib/revisionPresupuesto'
@@ -53,7 +53,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
     [data.gastos, data.catalogo, data.medios, monedas, data.revisiones, filters])
   const comp = useMemo(() => calcularCompromisos({ gastos: data.gastos, plantillas, vinculos, desde: filters.desde, hasta: filters.hasta, base, rates }),
     [data.gastos, plantillas, vinculos, filters.desde, filters.hasta, base, rates])
-  const pres = useMemo(() => calcularPresupuesto(a, comp), [a, comp])
+  const pres = useMemo(() => calcularPresupuesto(a, comp, filters.hasta.slice(0, 7)), [a, comp, filters.hasta])
 
   // Evolución: por defecto, el mes del filtro (o el actual) contra el mismo tramo del mes anterior.
   const mesBase = singleMonth(filters.desde, filters.hasta) ?? today.slice(0, 7)
@@ -106,7 +106,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       id: 'presupuesto', titulo: 'Mi presupuesto', icon: PiggyBank, tone: presTone,
       valor: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : '—',
       valorTxt: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : 'No disponible',
-      sub: pres.presupuesto ? <>Disponible tras compromisos · <b className="font-semibold" style={{ color: presTone.fg }}>usado {pctTxt(pres.pctUsado)}</b></> : 'Define el presupuesto en Ajustar caja',
+      sub: pres.presupuesto ? <>Disponible tras compromisos · <b className="font-semibold" style={{ color: presTone.fg }}>usado {pctTxt(pres.pctUsado)}</b></> : 'Aplica tus fondos del mes en Presupuestos',
       barra: pres.presupuesto ? <Barra partes={[{ v: pres.gastado, color: presTone.fg }, { v: pres.pendiente, color: TONO.atencion.fg, rayado: true }]} total={pres.presupuesto} alto="h-1.5" /> : undefined,
       cta: 'Ver presupuesto',
       vacio: !pres.presupuesto,
@@ -131,7 +131,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       id: 'compromisos', titulo: 'Compromisos', icon: Repeat, tone: compTone,
       valor: comp.n ? money(comp.pendiente) : 'Sin compromisos',
       valorTxt: comp.n ? money(comp.pendiente) : 'Sin compromisos',
-      sub: comp.n ? `Pendiente · ${comp.nCubiertos} de ${comp.n - comp.sinMonto} cubiertos` : 'Márcalos en tus plantillas para reservar cada mes',
+      sub: comp.n ? `Pendiente · ${comp.nCubiertos} de ${comp.n - comp.sinMonto} cubiertos` : 'Márcalos en tus plantillas para separar cada mes',
       barra: comp.previsto ? <Barra partes={[{ v: comp.cubierto, color: TONO.ok.fg }]} total={comp.previsto} alto="h-1.5" /> : undefined,
       cta: comp.n ? 'Ver compromisos' : 'Cómo empezar',
       vacio: !comp.n,
@@ -145,7 +145,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       valor: ESTADO_REV_TXT[revEstado], valorTxt: ESTADO_REV_TXT[revEstado], sub: revSub, cta: 'Ver revisión',
       vacio: false,
       info: <>
-        <p>Comprueba que el mes tenga todos sus gastos y que fondos, reservas y gastos sean coherentes entre sí.</p>
+        <p>Comprueba que el mes tenga todos sus gastos y que fondos y gastos sean coherentes entre sí.</p>
         <p>Solo usa datos del presupuesto: no conoce saldos de cuentas ni ingresos, y nunca crea gastos por su cuenta.</p>
       </>,
     },
@@ -165,13 +165,13 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       <div id={`salud-${vista}`} role="tabpanel" aria-labelledby={`salud-tab-${vista}`} key={vista}
         className="fade-in rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)] sm:p-5">
         {vista === 'calidad' && <PanelCalidad c={calidad} onRevisar={() => setRevisar(true)} />}
-        {vista === 'presupuesto' && <PanelPresupuesto p={pres} comp={comp} money={money} catalogo={data.catalogo} />}
+        {vista === 'presupuesto' && <PanelPresupuesto p={pres} comp={comp} money={money} />}
         {vista === 'evolucion' && (
           <PanelEvolucion evo={evo} ahorro={ahorro} money={money} fmt={fmt} per={per} modo={modo} setModo={setModo} nivel={nivel} setNivel={setNivel}
             mesA={mesA} mesB={mesB} setMesA={setMesA} setMesB={setMesB} meses={mesesConDatos} />
         )}
         {vista === 'compromisos' && (
-          <PanelCompromisos store={store} comp={comp} money={money} fmt={fmt} filters={filters} vinculos={vinculos} loaded={store.plantillas.loaded}
+          <PanelCompromisos fondos={a.presupuesto.fondos} store={store} comp={comp} money={money} fmt={fmt} filters={filters} vinculos={vinculos} loaded={store.plantillas.loaded}
             onRevisarGasto={onRevisarGasto} onGastosMensuales={onGastosMensuales} />
         )}
       </div>
@@ -385,9 +385,9 @@ function PanelCalidad({ c, onRevisar }: { c: CalidadDatos; onRevisar: () => void
 
 /* ================================ Presupuesto ================================ */
 
-function PanelPresupuesto({ p, comp, money, catalogo }: { p: MiPresupuesto; comp: Compromisos; money: (c: number) => string; catalogo: CatalogoItem[] }) {
+function PanelPresupuesto({ p, comp, money }: { p: MiPresupuesto; comp: Compromisos; money: (c: number) => string }) {
   if (!p.presupuesto) {
-    return <Vacio icon={PiggyBank} titulo="Aún no defines tu presupuesto" tono={TONO.neutro}>Usa “Ajustar caja” en el Dashboard para fijar tu presupuesto mensual y ver cuánto puedes gastar todavía.</Vacio>
+    return <Vacio icon={PiggyBank} titulo="Aún no defines tu presupuesto" tono={TONO.neutro}>Crea o aplica tus fondos en Presupuestos para fijar el presupuesto del mes y ver cuánto puedes gastar todavía.</Vacio>
   }
   const nivel = NIVEL[p.nivel], tono = TONO[nivel.tono]
   const libre = Math.max(0, p.presupuesto - p.gastado - p.pendiente)
@@ -427,19 +427,19 @@ function PanelPresupuesto({ p, comp, money, catalogo }: { p: MiPresupuesto; comp
           </Aviso>}
       </div>
 
-      {p.cajas.length > 0 && (
+      {p.fondos.length > 1 && (
         <div className="mt-5">
-          <Subtitulo extra={<span className="text-[11px] text-muted">Reservas dentro del presupuesto general · no se suman a él</span>}>Cajas específicas</Subtitulo>
+          <Subtitulo extra={<span className="text-[11px] text-muted">Parte de cada fondo tras los compromisos que cubriría</span>}>Fondos del presupuesto</Subtitulo>
           <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {p.cajas.map(c => {
+            {p.fondos.map(c => {
               const t = c.asignado ? TONO[NIVEL[c.nivel].tono] : TONO.neutro
-              const { Icon: CajaIcon, color } = cajaLook(c.caja, catalogo)
+              const { Icon: FondoIcon, color } = fondoLook(c.fondo, p.fondos.map(x => x.fondo))
               return (
-                <li key={c.caja.id} className="rounded-2xl border border-line p-3">
+                <li key={c.fondo.id} className="rounded-2xl border border-line p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
-                      <span className="grid size-8 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><CajaIcon className="size-4" /></span>
-                      <span className="truncate">{c.caja.nombre}</span>
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><FondoIcon className="size-4" /></span>
+                      <span className="truncate">{c.fondo.nombre}</span>
                     </span>
                     <Chip tono={t}>{c.asignado ? pctTxt(c.pct) : 'Sin asignar'}</Chip>
                   </div>
@@ -647,21 +647,20 @@ const ESTADO_COMP: Record<EstadoComp, { txt: string; tono: Tono; Icon: typeof Ch
   'pagado-estimado': { txt: 'Pagado · sin monto', tono: TONO.info, Icon: CheckCircle2 },
 }
 
-function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, onRevisarGasto, onGastosMensuales }: {
-  store: AppStore; comp: Compromisos; money: (c: number) => string; fmt?: string; filters: Filters; vinculos: Map<string, string>; loaded: boolean
+function PanelCompromisos({ fondos, store, comp, money, fmt, filters, vinculos, loaded, onRevisarGasto, onGastosMensuales }: {
+  fondos: FondoResumen[]; store: AppStore; comp: Compromisos; money: (c: number) => string; fmt?: string; filters: Filters; vinculos: Map<string, string>; loaded: boolean
   onRevisarGasto: (g: Gasto) => void; onGastosMensuales: () => void
 }) {
   const [asociar, setAsociar] = useState<Plantilla | null>(null)
   const [abierto, setAbierto] = useState<string | null>(null)
   const [verCubiertos, setVerCubiertos] = useState(false)
-  const cajas = store.data?.cajas
-  const priorizadas = useMemo(() => prioridadCajas(cajas ?? []), [cajas])
+  const mes = filters.hasta.slice(0, 7)
   if (!loaded && !comp.n) return <div className="space-y-2">{[0, 1, 2].map(i => <div key={i} className="h-12 animate-pulse rounded-xl bg-bg" />)}</div>
   if (!comp.n) {
     return (
       <Vacio icon={Repeat} titulo="Aún no tienes compromisos marcados" tono={TONO.atencion}
         accion={<Button variant="soft" onClick={onGastosMensuales}><CalendarDays className="size-4" /> Abrir Gastos mensuales</Button>}>
-        Edita una plantilla (Luz, Internet, Apoyo familiar…) y activa “Es un compromiso mensual” para ver aquí cuánto reservar cada mes.
+        Edita una plantilla (Luz, Internet, Apoyo familiar…) y activa “Es un compromiso mensual” para ver aquí cuánto separar cada mes.
       </Vacio>
     )
   }
@@ -678,7 +677,7 @@ function PanelCompromisos({ store, comp, money, fmt, filters, vinculos, loaded, 
   const pct = comp.previsto ? Math.round((comp.cubierto / comp.previsto) * 100) : 0
   const fila = (x: { i: CompromisoItem; e: EstadoComp }) => (
     <FilaCompromiso key={x.i.plantilla.id} i={x.i} estado={x.e} money={money} fmt={fmt} abierto={abierto === x.i.plantilla.id}
-      caja={cajaDe(priorizadas, x.i.plantilla)?.nombre ?? null}
+      fondo={fondoDeCompromiso(x.i.plantilla, fondos, mes)?.nombre ?? null}
       onToggle={() => setAbierto(a => (a === x.i.plantilla.id ? null : x.i.plantilla.id))}
       onAsociar={() => setAsociar(x.i.plantilla)} onEditar={onGastosMensuales} onRevisarGasto={onRevisarGasto} onQuitar={quitar} />
   )
@@ -751,8 +750,8 @@ function MenuFila({ label, items }: { label: string; items: { txt: string; Icon:
   )
 }
 
-function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsociar, onEditar, onRevisarGasto, onQuitar }: {
-  i: CompromisoItem; estado: EstadoComp; caja: string | null; money: (c: number) => string; fmt?: string; abierto: boolean
+function FilaCompromiso({ i, estado, fondo, money, fmt, abierto, onToggle, onAsociar, onEditar, onRevisarGasto, onQuitar }: {
+  i: CompromisoItem; estado: EstadoComp; fondo: string | null; money: (c: number) => string; fmt?: string; abierto: boolean
   onToggle: () => void; onAsociar: () => void; onEditar: () => void; onRevisarGasto: (g: Gasto) => void; onQuitar: (g: Gasto) => void
 }) {
   const e = ESTADO_COMP[estado]
@@ -796,7 +795,7 @@ function FilaCompromiso({ i, estado, caja, money, fmt, abierto, onToggle, onAsoc
         <div id={id} className="space-y-2 px-3 pb-3 pl-7.5 text-xs" data-testid="compromiso-detalle">
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             <div><dt className="text-[10px] text-muted">Categoría</dt><dd className="truncate text-ink">{p.ambito} › {p.categoria} › {p.subcategoria}</dd></div>
-            <div><dt className="text-[10px] text-muted">Caja asignada</dt><dd className="truncate text-ink">{caja ?? 'Fuera de cajas (saldo libre)'}</dd></div>
+            <div><dt className="text-[10px] text-muted">Fondo previsto</dt><dd className="truncate text-ink">{fondo ?? 'Sin fondo asignable'}</dd></div>
             <div><dt className="text-[10px] text-muted">Medio de pago</dt><dd className="truncate text-ink">{p.medioPago || 'Sin medio predeterminado'}</dd></div>
             <div><dt className="text-[10px] text-muted">Notas</dt><dd className="text-ink">{nota}</dd></div>
           </dl>

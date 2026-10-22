@@ -1,6 +1,6 @@
 import { mediosDeFondo } from './fondoMedios'
 import { ArrowLeftRight, Banknote, CreditCard, Smartphone, Ticket, Wallet, type LucideIcon } from 'lucide-react'
-import type { Caja, CatalogoItem, Fondo } from './types'
+import type { CatalogoItem, Fondo } from './types'
 import { ICONOS, ICONS, sugerirIconos } from './iconos'
 
 export { ICONS }
@@ -172,11 +172,10 @@ export const soft = (hex: string, alpha = '1A') => `${hex}${alpha}`
 
 
 /* ---------------------------------------------------------------------------------------------------------------
- * Coherencia visual (v1.10): un medio de pago, un fondo o una caja se ven igual en TODA la web.
+ * Coherencia visual (v1.10): un medio de pago o un fondo se ven igual en TODA la web.
  *  - Medio de pago: su icono y color propios (arriba).
  *  - Fondo: lo que elijas (icono + color); si no eliges nada ("automático"), hereda el de su medio de pago
  *    y, si no tiene medio, uno según su nombre.
- *  - Caja: lo que elijas; si no, el de su alcance (medio de pago, ámbito, categoría o subcategoría).
  * "Elegido" = la fila tiene icono guardado; mientras no lo tenga, el color guardado se ignora y manda el automático.
  * ------------------------------------------------------------------------------------------------------------- */
 
@@ -210,18 +209,3 @@ export function fondoLook(f: Pick<Fondo, 'nombre' | 'medioPago' | 'icono' | 'col
   return (general && propio(general)) || LIBRE_BASE
 }
 
-/** Estilo de una caja: el elegido o, en automático, el de su alcance. */
-export function cajaLook(c: Pick<Caja, 'filtroCampo' | 'filtroValor' | 'color' | 'icono'>, catalogo: CatalogoItem[] = []): Look {
-  if (c.icono && ICONS[c.icono]) return { Icon: ICONS[c.icono], color: pick(c.color, '#4F7BE8') }
-  const v = c.filtroValor
-  switch (c.filtroCampo) {
-    case 'Medio de pago': return medioLook(v)
-    case 'Ámbito': return ambitoLook(v, catalogo)
-    case 'Categoría': return categoriaLook(v, catalogo)
-    case 'Subcategoría': {
-      const [cat, sub] = v.includes(' › ') ? v.split(' › ') : ['', v]
-      return cat ? subcategoriaLook(sub, cat, catalogo) : { Icon: (sugerirIconos(sub, [], 1)[0]?.Icon) ?? ICONS.tag, color: hashColor(sub) }
-    }
-    default: return { Icon: ICONS.wallet, color: pick(c.color, '#1E3A8A') }
-  }
-}

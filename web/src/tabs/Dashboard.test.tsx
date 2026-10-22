@@ -22,7 +22,7 @@ beforeAll(() => {
 afterEach(cleanup)
 
 async function datos(): Promise<AppData> {
-  return createApi(demoTransport(TODAY, 120, 0, 0, 3)).getData(true)
+  return createApi(demoTransport(TODAY, 120, 0, 3)).getData(true)
 }
 const filtros = (over: Partial<Filters> = {}): Filters => ({ preset: 'mes', ...presetRange('mes', TODAY), ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [], ...over })
 const montar = (data: AppData, filters: Filters) => {
@@ -30,7 +30,7 @@ const montar = (data: AppData, filters: Filters) => {
   return render(<Dashboard store={store} filters={filters} setFilters={() => {}} today={TODAY} onNuevoGasto={() => {}} onGastosMensuales={() => {}} />)
 }
 const motor = (data: AppData, filters: Filters) => aggregate(data.gastos, filters, {
-  base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today: TODAY, cajas: data.cajas, presupuestos: data.presupuestos,
+  base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today: TODAY, asignaciones: data.asignaciones,
   fondos: data.fondos ?? [], fondosMeses: data.fondosMeses ?? [], aislarDesde: aislaDesde(data.config),
 })
 const celda = (id: string) => norm(within(screen.getByTestId(`cons-${id}`)).getAllByText(/.*/, { selector: 'p' })[1].textContent ?? '')
@@ -71,7 +71,7 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
 
   it('los 8 indicadores (4 + 4) tienen el mismo patrón: icono a la izquierda del título y del valor', async () => {
     montar(await datos(), filtros())
-    const ids = ['cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido',
+    const ids = ['cons-fondos-activos', 'cons-fondos-con-excedente', 'cons-sin-fondo-asignable', 'cons-consumido',
       'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
     for (const id of ids) {
       const cel = screen.getByTestId(id)
@@ -84,37 +84,37 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     }
     // ya no existe la fila de cuatro tarjetas grandes
     expect(screen.getByTestId('consolidado-resumen').querySelector('svg')).toBeNull()
-    for (const [id, clase] of [['cons-libre-inicial', 'lucide-wallet'], ['cons-gastado-fuera-de-reservas', 'lucide-arrow-up-right'], ['cons-saldo-libre-actual', 'lucide-scale'], ['cons-consumido', 'lucide-gauge']]) {
+    for (const [id, clase] of [['cons-fondos-activos', 'lucide-circle-dollar-sign'], ['cons-fondos-con-excedente', 'lucide-shuffle'], ['cons-sin-fondo-asignable', 'lucide-unlink'], ['cons-consumido', 'lucide-gauge']]) {
       expect(screen.getByTestId(id).querySelector(`svg.${clase}`), id).toBeTruthy()
     }
   })
 
-  it('orden: Presupuesto consolidado (con KPIs) → Fondos del presupuesto y Cajas / reservas → gráficos', async () => {
+  it('orden: Presupuesto consolidado (con KPIs) → Fondos del presupuesto → gráficos', async () => {
     montar(await datos(), filtros())
     const orden = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
-    const cons = screen.getByTestId('caja-general'), acordeones = screen.getByTestId('resumen-cajas'), kpis = screen.getByTestId('kpis')
+    const cons = screen.getByTestId('bloque-consolidado'), acordeones = screen.getByTestId('resumen-fondos'), kpis = screen.getByTestId('kpis')
     const grafico = screen.getByText(/^Gasto acumulado/)
     expect(cons.contains(kpis)).toBe(true)
     expect(orden(cons, acordeones)).toBe(true)
     expect(orden(acordeones, grafico)).toBe(true)
     expect(orden(kpis, acordeones)).toBe(true)
     expect(screen.getByRole('button', { name: /^Fondos del presupuesto/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /^Cajas \/ reservas/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Cajas/ })).toBeNull()
   })
 
   it('el Presupuesto consolidado muestra los mismos importes que el motor (regresión con el mismo fixture)', async () => {
     const data = await datos()
     const f = filtros()
     montar(data, f)
-    const c = motor(data, f).cajas
+    const c = motor(data, f).presupuesto
     const m = (n: number) => norm(formatMoney(n, data.config.moneda || 'PEN'))
     expect(celda('presupuesto-consolidado')).toBe(m(c.presupuesto))
     expect(celda('gastado-del-período')).toBe(m(c.gastadoPeriodo))
     expect(celda('disponible-consolidado')).toBe(m(c.disponible))
-    expect(celda('reservado-en-cajas')).toBe(m(c.reservado))
-    expect(celda('libre-inicial')).toBe(m(c.libreInicial))
-    expect(celda('gastado-fuera-de-reservas')).toBe(m(c.gastadoLibre))
-    expect(celda('saldo-libre-actual')).toBe(m(c.saldoLibre))
+    expect(celda('exceso')).toBe(m(c.exceso))
+    expect(celda('fondos-activos')).toBe(String(c.activos))
+    expect(celda('fondos-con-excedente')).toBe(String(c.desbordados))
+    expect(celda('sin-fondo-asignable')).toBe(m(c.sinFondo.cents))
     expect(celda('consumido')).toBe(c.pct === null ? '—' : `${c.pct}%`)
     expect(c.disponible).toBe(c.presupuesto - c.gastadoPeriodo)
   })
@@ -124,7 +124,7 @@ describe('Dashboard: Presupuesto consolidado y KPIs', () => {
     const sin = filtros(), con = filtros({ ambitos: ['Personal'] })
     const a0 = motor(data, sin), a1 = motor(data, con)
     expect(a1.count).toBeLessThan(a0.count)                                              // el filtro realmente recorta
-    expect(a1.cajas).toEqual(a0.cajas)                                                   // el presupuesto consolidado ignora los filtros de dimensión
+    expect(a1.presupuesto).toEqual(a0.presupuesto)                                                   // el presupuesto consolidado ignora los filtros de dimensión
 
     const { unmount } = montar(data, sin)
     const base = celda('gastado-del-período'), movimientos0 = within(screen.getByTestId('kpis')).getByText(String(a0.count), { exact: true })

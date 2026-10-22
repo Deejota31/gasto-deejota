@@ -55,22 +55,6 @@ export interface Plantilla {
 export interface CatalogoItem { ambito: string; categoria: string; subcategoria: string; activo: boolean; icono?: string; color?: string; orden?: number }
 /** icono/color vacíos = el predeterminado del medio. */
 export interface Medio { nombre: string; activo: boolean; icono?: string; color?: string }
-export type FiltroCampo = 'Todos' | 'Ámbito' | 'Categoría' | 'Subcategoría' | 'Medio de pago'
-export interface Caja {
-  id: string
-  nombre: string
-  presupuesto: number
-  filtroCampo: FiltroCampo
-  filtroValor: string
-  color: string
-  orden: number
-  /** false = inactiva: no reserva dinero ni toma gastos (queda guardada para reactivarla). Sin valor = activa. */
-  activo?: boolean
-  descripcion?: string
-  /** Icono elegido (clave de iconos.ts). Vacío = automático: el de su alcance (medio de pago, ámbito, categoría…). */
-  icono?: string
-}
-export interface Presupuesto { periodo: string; cajaId: string; monto: number }
 
 /**
  * Fondo del presupuesto (v1.8): de dónde sale el presupuesto del mes (General, Sodexo, Extra 1…). Es configuración
@@ -91,23 +75,42 @@ export interface Fondo {
   id: string; nombre: string; monto: number; moneda: string; color: string; icono: string
   activo: boolean; orden: number; recurrencia: Recurrencia; mes: string
   tipo: TipoFondo
-  /** Medio de pago asociado (Sodexo…): los gastos pagados con él se atribuyen a este fondo. Vacío = fondo libre. */
+  /**
+   * Medios de la regla vigente separados por "|" (columna histórica «Medio de pago»). Solo se conserva para que una web anterior
+   * siga leyendo algo coherente durante el despliegue; el motor usa `reglas`.
+   */
   medioPago: string
+  /** Reglas del fondo (medios, cobertura, restricción) versionadas por mes: ver lib/presupuesto.ts. Nunca vacío. */
+  reglas: ReglaFondo[]
   creadoEn: string; actualizadoEn: string
 }
+
+/**
+ * Reglas de un fondo (v1.28). Se versionan por mes (`desde`): editar las reglas en un mes crea una versión nueva desde ese mes y los
+ * meses anteriores siguen usando la suya (el historial no cambia). `desde` vacío = desde siempre.
+ *  - medios: 'todos' | 'excepto' (todos menos `listaMedios`) | 'solo' (solo `listaMedios`).
+ *  - cobertura + rutas: qué gastos cubre. Ruta = ámbito › categoría › subcategoría; '' = cualquiera en ese nivel.
+ *  - restringeMedio: los medios de `listaMedios` (modo 'solo') SOLO pueden usarse en gastos que cubra este fondo (o la unión de los
+ *    fondos que restringen el mismo medio). Un gasto que lo viola no se guarda. Nada de esto se codifica por nombre.
+ */
+export type ModoMedios = 'todos' | 'excepto' | 'solo'
+export type TipoCobertura = 'todos' | 'ambito' | 'categoria' | 'subcategoria' | 'personalizada'
+export interface Ruta { ambito: string; categoria: string; subcategoria: string }
+export interface ReglaFondo { desde: string; medios: ModoMedios; listaMedios: string[]; cobertura: TipoCobertura; rutas: Ruta[]; restringeMedio: boolean }
+/** Asignación manual de un gasto a uno o varios fondos (importes en la moneda del gasto; suman exactamente el monto). */
+export interface ParteManual { fondoId: string; monto: number }
 /** Importe de un fondo para un mes: "solo" = únicamente ese mes; "desde" = ese mes en adelante. */
 export interface FondoMes { fondoId: string; mes: string; monto: number; modo: 'solo' | 'desde' }
 
 /**
- * Plantilla de fondo o de subcaja (v1.17): solo configuración reutilizable. Crearla, editarla o clonarla no crea dinero,
- * fondos, subcajas ni gastos. `origenId` enlaza con el fondo/subcaja original; `estados` dice qué pasó cada mes.
+ * Plantilla de fondo (v1.17): solo configuración reutilizable. Crearla, editarla o clonarla no crea dinero, fondos ni gastos.
+ * `origenId` enlaza con el fondo original; `estados` dice qué pasó cada mes.
  */
-export type TipoPlantillaFin = 'fondo' | 'subcaja'
+export type TipoPlantillaFin = 'fondo'
 export type EstadoPlantillaMes = 'pendiente' | 'aplicada' | 'omitida'
 export interface PlantillaFin {
   id: string; tipo: TipoPlantillaFin; nombre: string; monto: number
-  moneda: string; medios: string                                  // solo fondos ('A|B' o vacío)
-  campo: string; valor: string                                     // solo cajas (alcance)
+  moneda: string; medios: string                                  // 'A|B' o vacío
   descripcion: string; color: string; icono: string
   recurrencia: Recurrencia; activo: boolean; orden: number
   origenId: string; estados: Record<string, { e: 'aplicada' | 'omitida'; m: number }>
@@ -118,12 +121,11 @@ export interface AppData {
   gastos: Gasto[]
   catalogo: CatalogoItem[]
   medios: Medio[]
-  cajas: Caja[]
-  presupuestos: Presupuesto[]
-  /** Sin fondos (instalaciones anteriores) el presupuesto sigue saliendo de la caja general. */
   fondos?: Fondo[]
   fondosMeses?: FondoMes[]
   plantillasFin?: PlantillaFin[]
+  /** Asignaciones manuales de gastos a fondos: ID de gasto (minúsculas) → partes. Sin entrada = asignación automática. */
+  asignaciones?: Record<string, ParteManual[]>
   config: Record<string, string>
   /** Orden personalizado de la tabla de Gastos: [id, orden]. Se guarda aparte para no recalcular el dashboard. */
   ordenGastos?: [string, number][]

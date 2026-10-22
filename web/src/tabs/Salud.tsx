@@ -21,7 +21,7 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
   const gastos = data?.gastos
-  // Mismo motor y mismo contexto (fondos, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  // Mismo motor y mismo contexto (fondos, ajustes) en Dashboard, Presupuestos y Salud financiera.
   const a = useAgregado(data, filters, today)
   const activos = [...filters.ambitos, ...filters.categorias, ...filters.subcategorias.map(x => x.split(' › ').at(-1) ?? x), ...filters.medios, ...filters.tipos]
 
@@ -36,7 +36,7 @@ export default function Salud({ store, filters, setFilters, today, onRevisarGast
             <div className="min-w-0">
               <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-ink">Salud financiera
                 <InfoTooltip title="Salud financiera" align="left">
-                  <p>Responde tres preguntas: cuánto puedes gastar todavía, qué gastos están aumentando y cuánto necesitas reservar para tus compromisos. Además evalúa la calidad de tus datos.</p>
+                  <p>Responde tres preguntas: cuánto puedes gastar todavía, qué gastos están aumentando y cuánto necesitas separar para tus compromisos. Además evalúa la calidad de tus datos.</p>
                   <p>Usa los datos ya cargados y el mismo filtro de período del Dashboard y Gastos: no hace consultas adicionales a tu hoja y nunca modifica movimientos.</p>
                 </InfoTooltip>
               </h1>

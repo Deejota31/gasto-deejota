@@ -9,7 +9,7 @@ const llamadas = (page: Page, k: string) => page.evaluate(n => (globalThis as un
 const escriturasGastos = (page: Page) => page.evaluate(() => Object.entries((globalThis as unknown as { __gdDemoCalls?: Record<string, number> }).__gdDemoCalls ?? {}).filter(([k]) => /gasto|batch/i.test(k) && !/^(data|plantillas)$/.test(k)).reduce((s, [, v]) => s + v, 0))
 const nFondos = async (page: Page) => Number(await page.getByTestId('n-fondos').innerText())
 
-async function abrir(page: Page, ruta = '/?demo=60&fondos=3&cajas=3#cajas', hoy = NOV) {
+async function abrir(page: Page, ruta = '/?demo=60&fondos=3&cajas=3#presupuestos', hoy = NOV) {
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
   await page.clock.setFixedTime(new Date(hoy))
   await page.goto(ruta)
@@ -172,7 +172,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
   })
 
   test('doble clic al aplicar: una sola escritura y sin duplicados', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=400#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=400#presupuestos')
     await page.getByTestId('campana-plan').click()
     await page.getByTestId('panel-plan').getByRole('button', { name: 'Preparar ahora' }).click()
     await page.getByRole('button', { name: 'Usar mes anterior' }).first().click()
@@ -184,7 +184,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
   })
 
   test('segundo plano: el módulo se cierra al confirmar, el asistente sigue usable y la etapa pasa a Completada sola', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=900#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=900#presupuestos')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
@@ -205,7 +205,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
   })
 
   test('segundo plano con aplicación múltiple (vista previa): se cierra todo y se completa sin duplicar', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=600#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=600#presupuestos')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
@@ -221,7 +221,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
   })
 
   test('segundo plano con error: la etapa pasa a Error con Reintentar, nada queda aplicado ni marcado', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&falla=aplicar#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&falla=aplicar#presupuestos')
     await sembrarPlantillas(page)
     const antes = await nFondos(page)
     await abrirAsistente(page)
@@ -239,7 +239,7 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
   })
 
   test('error del backend: sin éxito falso, estado Error visible y nada aplicado', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&falla=1#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&falla=1#presupuestos')
     const antes = await nFondos(page)
     await abrirAsistente(page)
     await page.getByRole('button', { name: 'Usar mes anterior' }).first().click()
@@ -255,7 +255,7 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
   const toastOk = (page: Page, t: RegExp) => page.getByRole('status').filter({ hasText: t })
 
   test('al terminar «Fondos» el usuario sigue en el módulo de Gastos mensuales: no se reabre el asistente ni se cierra el módulo', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1800#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1800#presupuestos')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
@@ -279,7 +279,7 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
   })
 
   test('registrar gastos en segundo plano: se cierra el módulo, el asistente muestra «En progreso» y al terminar «Completada» con aviso verde', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#presupuestos')
     await abrirAsistente(page)
     await page.getByTestId('etapa-gastos').click()
     await dialog(page).getByRole('button', { name: 'Abrir gastos mensuales' }).click()
@@ -296,7 +296,7 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
   })
 
   test('navegar entre etapas mientras guarda no se interrumpe: la etapa donde estoy no cambia al completarse otra', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1500#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1500#presupuestos')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
@@ -311,7 +311,7 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
   })
 
   test('Finalizar: el asistente se cierra al instante, la vista muestra «Guardando planificación…» y al terminar avisa «Planificación guardada» sin reabrir nada', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#presupuestos')
     await abrirAsistente(page)
     await page.getByRole('button', { name: 'Omitir', exact: true }).click()
     await page.getByRole('button', { name: 'Omitir', exact: true }).click()
@@ -323,11 +323,11 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
     await expect(toastOk(page, /Planificación guardada/)).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('plan-guardando')).toHaveCount(0)
     await expect(page.getByTestId('asistente-plan')).toHaveCount(0)                                 // no se reabrió ni redirigió
-    await expect(page).toHaveURL(/#cajas$/)
+    await expect(page).toHaveURL(/#presupuestos$/)
   })
 
   test('el asistente se puede cerrar mientras guarda y la operación termina igual (estado guardado)', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#cajas')
+    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#presupuestos')
     await sembrarPlantillas(page)
     await abrirAsistente(page)
     await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()

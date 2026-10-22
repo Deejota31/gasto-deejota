@@ -61,7 +61,7 @@ export function ColorPicker({ value, onChange, label = 'Color' }: { value: strin
 }
 
 /**
- * Estado de la apariencia de un fondo o caja. `auto` es lo que se vería sin elegir nada (el del medio de pago o del
+ * Estado de la apariencia de un fondo. `auto` es lo que se vería sin elegir nada (el del medio de pago o del
  * alcance): mientras no elijas un icono, se guarda vacío y manda el automático. Al elegir un icono o un color, se
  * guarda lo que estabas viendo más tu cambio, así el otro no salta.
  */

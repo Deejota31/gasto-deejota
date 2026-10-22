@@ -45,7 +45,7 @@ export function RecordatoriosPlan({ cfg, saveCfg, hoy }: { cfg: Record<string, s
     <div className="space-y-4" data-testid="recordatorios-plan">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-3">
         <div className="min-w-0"><p className="text-sm font-medium text-ink">Recordatorios de planificación mensual</p>
-          <p className="text-[11px] text-muted">Un aviso en la campana para preparar fondos, cajas y gastos de cada mes. Solo dentro de la app.</p></div>
+          <p className="text-[11px] text-muted">Un aviso en la campana para preparar fondos y gastos de cada mes. Solo dentro de la app.</p></div>
         <Switch checked={activo} onChange={v => void saveCfg('plan_activo', v ? 'true' : 'false')} label="Recordatorios activos" estado />
       </div>
 
