@@ -10,9 +10,6 @@ var SPREADSHEET_NAME = 'Gasto Deejota - Base de Datos';
 
 var PF_COLS_ = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia',
   'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en', 'Datos'];
-// Esquema de la hoja anterior PLANTILLAS_MENSUALES (v1.19.2 la fusiona en PLANTILLAS_FINANCIERAS; solo se lee para migrar).
-var PL_COLS_LEGACY = ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en',
-  'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente'];
 var SHEETS = {
   GASTOS: ['Fecha', 'Monto', 'Moneda', 'Categoría', 'Subcategoría', 'Descripción', 'Medio de pago',
     'Tipo de gasto', 'Ámbito', 'Es recurrente', 'Estado', 'Origen', 'Comprobante URL', 'ID',
@@ -657,6 +654,18 @@ function checkAdmin_(adminToken) {
   }
 }
 
+/**
+ * Ejecútala desde el editor si crees que el token de la API se filtró (S-02): genera uno nuevo y el anterior deja de servir
+ * de inmediato. Después hay que pegar el nuevo en Configuración → Conexión en cada dispositivo. No está en ACTIONS a propósito.
+ */
+function rotarTokenApi() {
+  var t = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 16);
+  PropertiesService.getScriptProperties().setProperty('API_TOKEN', t);
+  invalidateCache_();
+  Logger.log('Nuevo API_TOKEN (cópialo en la web; el anterior ya no funciona): ' + t);
+  return t;
+}
+
 /** Ejecútala desde el editor: crea (o reemplaza) el token de administración y lo muestra una sola vez en el registro. */
 function crearTokenAdmin() {
   var t = 'adm_' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
@@ -881,8 +890,6 @@ var ACTIONS = {
   generarDatosPrueba: function (p) { return generarDatosPrueba(p); },
   generarCasosEspecialesPrueba: function () { return generarCasosEspecialesPrueba(); },
   borrarDatosPrueba: function () { return borrarDatosPrueba(); },
-  migrarPlantillas: function () { return migrarPlantillas(); },
-  actualizarCatalogo: function () { return actualizarCatalogo(); },
   repararIds: function () { return repararIds(); },
   repararHojas: function () { return repararHojas(); }
 };
@@ -890,8 +897,8 @@ var ACTIONS = {
 // Requieren además el token de administración (checkAdmin_). completarVacios y autorizarRespaldos no: la web llama a la primera
 // sola, una vez, y solo rellena celdas vacías; la segunda solo concede permisos de lectura de Drive.
 var ADMIN_ACTIONS = { setup: true, crearTokenAtajo: true, revocarTokenAtajo: true, generarDatosPrueba: true, generarCasosEspecialesPrueba: true,
-  borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true, migrarGeneralAFondo: true };
-var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
+  borrarDatosPrueba: true, repararIds: true, repararHojas: true, migrarGeneralAFondo: true };
+var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, repararIds: true, repararHojas: true };
 
 function saveGasto_(p, origen) {
   var ss = openSpreadsheet_(false);
@@ -2410,7 +2417,7 @@ function plantillasOrdenadas_(rows) {
 /* v1.19.2: las plantillas de gastos mensuales viven en PLANTILLAS_FINANCIERAS con Tipo = 'gasto'. Columnas usadas:
  * ID, Tipo, Nombre (= subcategoría), Monto, Moneda, Medios (= medio de pago), Descripción, Activo, Orden, Creado en,
  * Actualizado en y Datos (JSON: {ambito, categoria, subcategoria, tipoGasto, esCompromiso, esRecurrente}).
- * Internamente el resto del código sigue trabajando con la "forma de 14" de la antigua hoja PLANTILLAS_MENSUALES. */
+ * Internamente el resto del código sigue trabajando con la "forma de 14" (la que tuvo la hoja PLANTILLAS_MENSUALES, ya retirada). */
 function plGastoDesdeFila_(v) {
   var d = pfEstados_(v[18]);
   return [v[0], str_(d.ambito), str_(d.categoria), str_(d.subcategoria), v[8], v[16], v[17], v[3], v[4], v[5], v[13],
@@ -2423,42 +2430,14 @@ function plGastoAFila_(r) {   // forma de 14 → fila de la hoja (18 + Datos)
   return [r[0], 'gasto', r[3], r[7], str_(r[8]) || 'PEN', r[9], '', '', r[4], '', '', '', true, r[10], '', '', r[5], r[6], datos];
 }
 
-// Copia, una sola vez, las plantillas de la hoja anterior PLANTILLAS_MENSUALES. La hoja anterior no se modifica ni se borra.
-function plMigrarLegacy_(ss, old, sh) {
-  var props = PropertiesService.getScriptProperties();
-  var header = old.getRange(1, 1, 1, Math.max(old.getLastColumn(), 1)).getValues()[0];
-  if (!PL_COLS_LEGACY.every(function (e, i) { return str_(header[i]) === e; })) migrarPlantillasHoja_(ss, old);   // esquema muy antiguo: se normaliza con respaldo
-  else backup_();
-  var n = Math.max(lastDataRow_(old) - 1, 0);
-  var vals = n ? old.getRange(2, 1, n, PL_COLS_LEGACY.length).getValues() : [];
-  var have = {};
-  pfRows_(sh).forEach(function (r) { have[str_(r[0])] = true; });
-  var ts = function (v) { return v instanceof Date ? v.toISOString() : str_(v); };
-  var nuevas = [];
-  vals.forEach(function (r) {
-    var id = str_(r[0]);
-    if (!id || have[id]) return;
-    have[id] = true;
-    var f = plGastoAFila_(r);
-    f[16] = ts(r[5]); f[17] = ts(r[6]);
-    nuevas.push(f);
-  });
-  if (nuevas.length) appendRows_(sh, nuevas);
-  props.setProperty('PL_MIGRADO', '1');
-}
-
-// Hoja con las plantillas de gastos. crear=false: null si aún no hay nada. Migra PLANTILLAS_MENSUALES una sola vez.
+// Hoja con las plantillas de gastos. crear=false: null si aún no hay nada.
 function plHoja_(crear) {
   var ss = openSpreadsheet_(false);
-  var sh = ss.getSheetByName(PF_HOJA), old = ss.getSheetByName('PLANTILLAS_MENSUALES');
-  var pendiente = !!old && old.getLastRow() > 1 && !PropertiesService.getScriptProperties().getProperty('PL_MIGRADO');
-  if (!sh && !crear && !pendiente) return null;
-  sh = plantillasFinSheet_();
-  if (pendiente) plMigrarLegacy_(ss, old, sh);
-  return sh;
+  if (!ss.getSheetByName(PF_HOJA) && !crear) return null;
+  return plantillasFinSheet_();
 }
 
-// Plantillas de gasto: [{ fila, r }] con r en la forma de 14 (la misma que usaba PLANTILLAS_MENSUALES).
+// Plantillas de gasto: [{ fila, r }] con r en la forma de 14 (la misma forma de 14 de siempre).
 function plLeer_(sh) {
   var out = [];
   if (!sh) return out;
@@ -2475,122 +2454,7 @@ function listPlantillas_() {
   return plantillasOrdenadas_(plTodasLectura_()).map(function (x) { return plantillaRow_(x.r); });
 }
 
-/* ---------- Migración segura de la hoja anterior PLANTILLAS_MENSUALES ----------
- * Causa del error "encabezados distintos": una versión anterior escribía la columna Orden (K) sin agregar su
- * encabezado, y la validación exigía que la fila 1 coincidiera exactamente. Ahora:
- *  - Cada columna esperada se reconoce por su encabezado (o variantes conocidas: "Monto predeterminado", etc.).
- *  - Una columna esperada SIN encabezado solo se adopta si sus datos tienen el tipo correcto (p. ej. Orden = enteros);
- *    si no, se detiene sin escribir nada y explica qué revisar.
- *  - Un encabezado desconocido o repetido en una posición esperada detiene la operación: nunca se sobrescribe.
- *  - Columnas extra a la derecha se respetan y no se tocan.
- *  - Antes de cambiar encabezados de una hoja con datos se crea un respaldo del archivo. Es idempotente.
- */
-var PL_ALIAS = {
-  'Monto': ['monto', 'monto predeterminado'],
-  'Moneda': ['moneda', 'moneda predeterminada'],
-  'Medio de pago': ['medio de pago', 'medio de pago predeterminado', 'medio predeterminado'],
-  'Orden': ['orden'],
-  'Es compromiso': ['es compromiso', 'es_compromiso', 'compromiso'],
-  'Tipo de gasto': ['tipo de gasto', 'tipo'],
-  'Es recurrente': ['es recurrente', 'recurrente']
-};
-var PL_TIPO = {
-  'Monto': function (v) { return v === '' || (esNumero_(v) && Number(v) >= 0); },
-  'Moneda': function (v) { return v === '' || /^[A-Z]{3}$/.test(str_(v)); },
-  'Medio de pago': function (v) { return v === '' || (typeof v === 'string' && str_(v).length <= 40); },
-  'Orden': function (v) { return v === '' || (esNumero_(v) && Number(v) >= 0 && Math.floor(Number(v)) === Number(v)); },
-  'Es compromiso': function (v) { return v === '' || v === true || v === false || /^(TRUE|FALSE)$/i.test(str_(v)); },
-  'Tipo de gasto': function (v) { return v === '' || TIPOS_GASTO.indexOf(str_(v)) >= 0; },
-  'Es recurrente': function (v) { return v === '' || v === true || v === false || /^(TRUE|FALSE)$/i.test(str_(v)); }
-};
-
-// Número real (o texto numérico como "4"); nunca fechas ni casillas TRUE/FALSE.
-function esNumero_(v) { return (typeof v === 'number' && isFinite(v)) || (typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v)); }
-
-function encabezadoEs_(h, esperado) {
-  var n = norm_(h);
-  if (n === norm_(esperado)) return true;
-  return (PL_ALIAS[esperado] || []).indexOf(n) >= 0;
-}
-
-function schemaError_(msg) { return appError_('SCHEMA', 'La hoja PLANTILLAS_MENSUALES necesita revisión: ' + msg + ' No se modificó nada.'); }
-function colLetra_(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
-
-// Devuelve { cambios: n, detalle: [...] }. Lanza SCHEMA si no puede migrar con seguridad.
-function migrarPlantillasHoja_(ss, sh, opts) {
-  var esperado = PL_COLS_LEGACY;
-  var lastCol = Math.max(sh.getLastColumn(), 1);
-  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-  // Camino rápido (cada escritura): si los encabezados ya son exactamente los esperados, no se lee nada más.
-  // Los IDs repetidos se detectan igual al guardar (savePlantilla_ recorre las filas que ya leyó).
-  if (esperado.every(function (e, i) { return str_(header[i]) === e; })) return { cambios: 0, detalle: [] };
-  var lastRow = lastDataRow_(sh);
-  var datos = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, Math.max(lastCol, esperado.length)).getValues() : [];
-  var nuevos = [];
-  var detalle = [];
-  // Encabezados repetidos (por nombre normalizado) entre los esperados: ambiguo, no se adivina.
-  var vistos = {};
-  header.forEach(function (h, i) {
-    if (str_(h) === '') return;
-    esperado.forEach(function (e) {
-      if (encabezadoEs_(h, e)) {
-        if (vistos[e] !== undefined) throw schemaError_('el encabezado “' + e + '” aparece en las columnas ' + colLetra_(vistos[e]) + ' y ' + colLetra_(i) + '.');
-        vistos[e] = i;
-      }
-    });
-  });
-  for (var i = 0; i < esperado.length; i++) {
-    var h = str_(header[i]);
-    var e = esperado[i];
-    if (h !== '') {
-      if (!encabezadoEs_(h, e)) throw schemaError_('la columna ' + colLetra_(i) + ' debería ser “' + e + '” pero se llama “' + h + '”.');
-      if (h !== e) detalle.push(colLetra_(i) + ': “' + h + '” reconocida como ' + e);
-      nuevos.push(h);
-      continue;
-    }
-    // Columna esperada sin encabezado: ¿tiene datos? ¿son del tipo correcto?
-    var col = datos.map(function (r) { return r[i] === null || r[i] === undefined ? '' : r[i]; });
-    var conDatos = col.filter(function (v) { return str_(v) !== ''; });
-    if (i < 7 && conDatos.length) throw schemaError_('la columna ' + colLetra_(i) + ' (' + e + ') tiene datos pero no tiene encabezado.');
-    if (conDatos.length && PL_TIPO[e] && !col.every(PL_TIPO[e])) {
-      throw schemaError_('la columna ' + colLetra_(i) + ' no tiene encabezado y sus datos no corresponden a “' + e + '”. Revísala o muévela a otra columna.');
-    }
-    detalle.push(colLetra_(i) + ': se agrega el encabezado “' + e + '”' + (conDatos.length ? ' (se conservan ' + conDatos.length + ' valores existentes)' : ''));
-    nuevos.push(e);
-  }
-  // IDs únicos: con un ID repetido, editar una plantilla modificaría otra.
-  var ids = {};
-  if (!(opts && opts.omitirIds)) datos.forEach(function (r, k) {
-    var id = str_(r[0]);
-    if (!id) return;
-    if (ids[id]) throw schemaError_('el ID ' + id + ' está repetido en las filas ' + ids[id] + ' y ' + (k + 2) + '.');
-    ids[id] = k + 2;
-  });
-  var cambios = nuevos.filter(function (h, i) { return h !== str_(header[i]); }).length;
-  if (!cambios) return { cambios: 0, detalle: detalle };
-  console.log('Migración PLANTILLAS_MENSUALES. Detectado: ' + JSON.stringify(header) + ' → objetivo: ' + JSON.stringify(esperado) + '. ' + detalle.join('; '));
-  if (datos.length && !(opts && opts.sinRespaldo)) {
-    var r = backup_();
-    console.log('Respaldo previo a la migración: ' + r.url);
-  }
-  sh.getRange(1, 1, 1, esperado.length).setValues([nuevos]).setFontWeight('bold').setBackground('#e2e8f0');
-  sh.setFrozenRows(1);
-  return { cambios: cambios, detalle: detalle };
-}
-
-/** Ejecútala desde el editor: copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada). */
-function migrarPlantillas() {
-  var ss = openSpreadsheet_(false);
-  if (!ss.getSheetByName('PLANTILLAS_MENSUALES')) { Logger.log('No existe la hoja PLANTILLAS_MENSUALES: las plantillas de gastos ya viven en PLANTILLAS_FINANCIERAS.'); return; }
-  var res = withLock_(function () {
-    PropertiesService.getScriptProperties().deleteProperty('PL_MIGRADO');   // fuerza la copia; los IDs ya copiados se omiten
-    var sh = plantillasFinSheet_();
-    plMigrarLegacy_(ss, ss.getSheetByName('PLANTILLAS_MENSUALES'), sh);
-    return { plantillas: plLeer_(sh).length };
-  });
-  Logger.log('Plantillas de gastos en PLANTILLAS_FINANCIERAS: ' + res.plantillas + '. La hoja PLANTILLAS_MENSUALES quedó intacta (ya puedes borrarla).');
-  return res;
-}
+function schemaError_(msg) { return appError_('SCHEMA', 'La hoja PLANTILLAS_FINANCIERAS necesita revisión: ' + msg + ' No se modificó nada.'); }
 
 // Reescribe la columna Orden (1..n) de las plantillas de gasto, según la lista de posiciones ya ordenada.
 function escribirOrdenPlantillas_(sh, items, indicesOrdenados) {
@@ -2875,65 +2739,6 @@ function reorderGastos_(p) {
   if (n) sh.getRange(2, 1, n, 2).setValues(rows);
   appendRows_(sh, nuevos);
   return { ok: true, total: ids.length };
-}
-
-/**
- * Aplica el catálogo de CATALOGO_INICIAL a tu hoja (ejecútala a mano desde el editor). Primero crea un respaldo.
- * - Agrega las opciones que falten y las deja activas, con su orden.
- * - Filas de versiones anteriores (sin Orden): las de la lista quedan activas y numeradas; las que ya no están quedan
- *   INACTIVAS (no se borran): dejan de ofrecerse para gastos nuevos, pero tus gastos antiguos las conservan.
- * - Filas con Orden (ya migradas o creadas desde la app) no se tocan: respeta lo que activaste, desactivaste o reordenaste.
- * - No toca la hoja GASTOS ni cambia nombres, iconos o colores. Se puede volver a ejecutar sin riesgo.
- */
-function actualizarCatalogo() {
-  var ss = openSpreadsheet_(false);
-  var backup = backup_(); // antes de cualquier cambio
-  Logger.log('Respaldo creado: ' + backup.url);
-  ensureSheet_(ss, 'CATALOGO', SHEETS.CATALOGO); // agrega la columna Orden si falta
-  var res = withLock_(function () {
-    var sh = ss.getSheetByName('CATALOGO');
-    var n = Math.max(lastDataRow_(sh) - 1, 0);
-    var rows = n ? sh.getRange(2, 1, n, 7).getValues() : [];
-    var orden = ordenCanonico_();
-    var seen = {};
-    var stats = { agregadas: 0, reactivadas: 0, desactivadas: 0, sinCambios: 0 };
-    var log = { reactivadas: [], desactivadas: [] };
-    var label = function (r) { return [str_(r[0]), str_(r[1]), str_(r[2])].filter(String).join(' › '); };
-    // Regla: una fila SIN Orden viene de una versión anterior y se ajusta a la lista oficial. Una fila CON Orden ya
-    // fue migrada o la creaste desde la app: se respeta tal cual (activa/inactiva y orden), así volver a ejecutar
-    // esta función no deshace tus cambios manuales.
-    var vals = rows.map(function (r) {
-      if (!hasContent_(r)) return [r[3], r[6]];
-      var key = catKey_(r[0], r[1], r[2]);
-      var oficial = Object.prototype.hasOwnProperty.call(orden, key) && !seen[key];
-      seen[key] = true;
-      var activo = r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE';
-      if (str_(r[6]) !== '') { stats.sinCambios++; return [r[3], r[6]]; }
-      if (oficial) {
-        if (!activo) { stats.reactivadas++; log.reactivadas.push(label(r)); } else stats.sinCambios++;
-        return [true, orden[key]];
-      }
-      if (activo) { stats.desactivadas++; log.desactivadas.push(label(r)); }
-      return [false, r[6]];
-    });
-    if (n) {
-      sh.getRange(2, 4, n, 1).setValues(vals.map(function (v) { return [v[0]]; }));
-      sh.getRange(2, 7, n, 1).setValues(vals.map(function (v) { return [v[1]]; }));
-    }
-    var nuevas = [];
-    canonicalRows_().forEach(function (r) {
-      var key = catKey_(r[0], r[1], r[2]);
-      if (!seen[key]) { seen[key] = true; nuevas.push([r[0], r[1], r[2], true, '', '', orden[key]]); }
-    });
-    appendRows_(sh, nuevas);
-    stats.agregadas = nuevas.length;
-    invalidateCache_();
-    return { stats: stats, log: log };
-  });
-  Logger.log('Catálogo actualizado: ' + JSON.stringify(res.stats));
-  if (res.log.desactivadas.length) Logger.log('Quedaron inactivas (se conservan para tus gastos antiguos): ' + res.log.desactivadas.join(', '));
-  if (res.log.reactivadas.length) Logger.log('Reactivadas: ' + res.log.reactivadas.join(', '));
-  return res.stats;
 }
 
 /**

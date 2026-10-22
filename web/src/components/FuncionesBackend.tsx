@@ -24,8 +24,6 @@ export const FUNCIONES: Funcion[] = [
   { grupo: 'Conexión y archivos', nombre: 'autorizarRespaldos', titulo: 'Autorizar respaldos', desc: 'Da permiso a Drive y muestra la carpeta donde se guardan.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'diagnose', titulo: 'Diagnóstico', desc: 'Filas por hoja, versión y estado.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'completarVacios', titulo: 'Completar vacíos', desc: 'Rellena las celdas vacías (Activo, Icono, Orden, Medio…).', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'migrarPlantillas', admin: true, titulo: 'Migrar plantillas', desc: 'Copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada).', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'actualizarCatalogo', admin: true, titulo: 'Actualizar catálogo', desc: 'Agrega la columna Orden y ordena el catálogo. Crea respaldo antes.', cambiaHoja: true },
   { grupo: 'Mantenimiento de la hoja', nombre: 'repararIds', admin: true, titulo: 'Reparar IDs', desc: 'Asigna ID a movimientos sin ID o repetidos. Crea respaldo antes.', cambiaHoja: true },
   { grupo: 'Mantenimiento de la hoja', nombre: 'repararHojas', admin: true, titulo: 'Reparar hojas', desc: 'Compacta filas, agrega columnas y reordena medios. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },

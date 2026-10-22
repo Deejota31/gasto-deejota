@@ -305,51 +305,6 @@ describe('backend Apps Script', () => {
     expect(sub[6]).toBe(11101)
   })
 
-  it('actualizarCatalogo: respalda, agrega lo nuevo, desactiva lo obsoleto sin borrarlo y no toca GASTOS', () => {
-    const cat = b.ss.getSheetByName('CATALOGO')!
-    // Hoja de la versión anterior: 6 columnas, sin Orden, con valores viejos y un "Otros" repetido.
-    cat.rows = [['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color'],
-      ['Personal', '', '', true, '', ''],
-      ['Personal', 'Alimentación', 'Antojos', true, '', ''],
-      ['Personal', 'Alimentación', 'Desayuno', false, '', ''],
-      ['Familia', 'Bebé', 'Cuidado Darielita', true, '', ''],
-      ['Pareja', 'Salidas', '', true, 'users', '#8B7CF6'],
-      ['Personal', 'Alimentación', 'Otros', true, '', ''],
-      ['Personal', 'Alimentación', ' otros', true, '', '']]
-    const gs = b.ss.getSheetByName('GASTOS')!
-    b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Cuidado Darielita' }))
-    const gastosAntes = JSON.stringify(gs.rows)
-    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
-    expect(b.ss.copies).toHaveLength(1)
-    expect(JSON.stringify(gs.rows)).toBe(gastosAntes)
-    expect(cat.rows[0]).toEqual(['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'])
-    const byKey = (a: string, c: string, s: string) => cat.rows.filter(x => x[0] === a && x[1] === c && String(x[2]).trim() === s)
-    expect(byKey('Personal', 'Alimentación', 'Antojos')[0][3]).toBe(false)       // obsoleto: inactivo, no borrado
-    expect(byKey('Familia', 'Bebé', 'Cuidado Darielita')[0][3]).toBe(false)
-    expect(byKey('Personal', 'Alimentación', 'Desayuno')[0][3]).toBe(true)        // vigente: reactivado
-    expect(byKey('Pareja', 'Salidas', '')[0].slice(3, 6)).toEqual([true, 'users', '#8B7CF6']) // conserva icono/color
-    const otros = cat.rows.filter(x => x[0] === 'Personal' && x[1] === 'Alimentación' && String(x[2]).trim().toLowerCase() === 'otros')
-    expect(otros.map(x => x[3])).toEqual([true, false])                           // el duplicado lógico queda inactivo
-    expect(byKey('Familia', 'Bebé', 'Cuidado Infantil')[0][3]).toBe(true)        // nuevo agregado
-    expect(r.agregadas).toBeGreaterThan(200)
-    const d = b.post('data', { fresh: true }).data
-    expect(d.gastos[0][4]).toBe('Cuidado Darielita')                             // el histórico se sigue leyendo igual
-    expect((b.g.actualizarCatalogo() as unknown as Record<string, number>).agregadas).toBe(0) // idempotente
-  })
-
-  it('actualizarCatalogo respeta los cambios manuales hechos después (activo, orden y opciones propias)', () => {
-    b.g.actualizarCatalogo()
-    const cat = b.ss.getSheetByName('CATALOGO')!
-    const row = (a: string, c: string, s: string) => cat.rows.find(x => x[0] === a && x[1] === c && x[2] === s)!
-    row('Personal', 'Auto', 'SOAT')[3] = false            // la desactivé a mano
-    row('Personal', 'Auto', 'Gas')[6] = 10200.5            // la reordené a mano
-    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Auto', subcategoria: 'Peajes', activo: true }) // creada desde la app
-    const antes = JSON.stringify(cat.rows)
-    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
-    expect(r).toMatchObject({ agregadas: 0, reactivadas: 0, desactivadas: 0 })
-    expect(JSON.stringify(cat.rows)).toBe(antes)
-  })
-
   it('reintento de un alta: no duplica y aplica la corrección solo si el gasto no se editó después', () => {
     b.post('saveGasto', gasto())
     const corregido = b.post('saveGasto', gasto({ monto: 30 })).data
@@ -466,116 +421,13 @@ describe('backend Apps Script', () => {
     expect(b.post('plantillas').data[1].slice(7)).toEqual([130, 'PEN', 'Yape', 2, false, 'Variable', false])
   })
 
-  describe('plantillas de gastos mensuales en PLANTILLAS_FINANCIERAS (v1.19.2): migración desde la hoja anterior PLANTILLAS_MENSUALES', () => {
-    const H7 = ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en']
-    const H14 = [...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente']
+  describe('plantillas de gastos mensuales en PLANTILLAS_FINANCIERAS (v1.19.2)', () => {
     const id = (n: number) => `pl-11111111-2222-4333-8444-${String(n).padStart(12, '0')}`
-    const nombres = ['Luz', 'Agua', 'Gas', 'Internet', 'Línea Celular', 'ChatGPT', 'Claude', 'Spotify', 'Seguro Padre', 'Propina Madre', 'Cuidado Darielita']
-    const orden = [4, 5, 6, 7, 8, 9, 10, 11, 1, 2, 3]
     const nuevaHoja = () => b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!
-    const gastoRows = () => nuevaHoja().rows.slice(1).filter(r => r[1] === 'gasto')
     const lista = () => b.post('plantillas').data as unknown[][]
-    // Caso real de una versión antigua: 7 encabezados y la columna K (Orden) con números pero sin encabezado.
-    const hojaAntigua = () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H7], ...nombres.map((n, i) => [id(i + 1), 'Familia', 'Servicios', n, n, `2026-10-0${(i % 9) + 1}T00:00:00.000Z`, 't', '', '', '', orden[i]])]
-      return sh
-    }
-    // Hoja actual (14 columnas, como la tiene el usuario).
-    const hojaActual = () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H14],
-        [id(1), 'Familia', 'Servicios', 'Luz', 'Luz', '2026-10-14T20:05:17.406Z', '2026-10-14T20:05:17.406Z', '', 'PEN', 'Plin', 1, true, 'Variable', false],
-        [id(2), 'Familia', 'Servicios', 'Agua', 'Agua', '2026-10-14T20:05:34.644Z', '2026-10-14T20:05:34.644Z', 80, 'PEN', 'Plin', 2, true, 'Fijo', true]]
-      return sh
-    }
-
-    it('la hoja actual de 14 columnas se copia una sola vez: mismos IDs, fechas, orden y marcas; la hoja anterior queda intacta', () => {
-      const old = hojaActual()
-      const antes = JSON.stringify(old.rows)
-      const v0 = b.ss.copies.length
-      const l = lista()
-      expect(l.map(x => x[0])).toEqual([id(1), id(2)])
-      expect(l[1].slice(5, 14)).toEqual(['2026-10-14T20:05:34.644Z', '2026-10-14T20:05:34.644Z', 80, 'PEN', 'Plin', 2, true, 'Fijo', true])
-      expect(l[0][7]).toBe('')                                             // monto vacío se conserva vacío
-      expect(gastoRows().map(r => [r[0], r[1], r[2]])).toEqual([[id(1), 'gasto', 'Luz'], [id(2), 'gasto', 'Agua']])
-      expect(JSON.parse(String(gastoRows()[1][18]))).toEqual({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua', tipoGasto: 'Fijo', esCompromiso: true, esRecurrente: true })
-      expect(b.ss.copies.length - v0).toBe(1)                              // respaldo antes de migrar
-      lista(); lista(); b.post('data', { fresh: true })
-      expect(gastoRows()).toHaveLength(2)                                  // no se vuelve a copiar
-      expect(JSON.stringify(old.rows)).toBe(antes)                         // la hoja anterior no se toca (puedes borrarla)
-      // borrar una plantilla migrada no la "resucita" desde la hoja anterior
-      expect(b.post('deletePlantilla', { id: id(1) }).data.eliminada).toBe(true)
-      expect(lista().map(x => x[0])).toEqual([id(2)])
-    })
-
-    it('caso real antiguo (7 encabezados + Orden sin encabezado): se normaliza con respaldo y conserva las 11 plantillas, IDs, fechas y orden', () => {
-      const old = hojaAntigua()
-      const antes = old.rows.slice(1).map(r => r.slice(0, 7))
-      const v0 = b.ss.copies.length
-      expect(lista().map(x => x[4])).toEqual([...nombres.slice(8), ...nombres.slice(0, 8)])
-      expect(b.ss.copies.length - v0).toBe(1)
-      expect(gastoRows().map(r => [r[0], r[16]])).toEqual(antes.map(r => [r[0], r[5]]))   // IDs y fechas de creación intactos
-      const r = b.post('savePlantilla', { id: id(20), mode: 'create', ambito: 'Personal', categoria: 'Compras', subcategoria: 'Ropa', descripcion: 'Ropa', monto: 55, moneda: 'PEN', medioPago: 'Plin' })
-      expect(r.ok).toBe(true)
-      expect(gastoRows()).toHaveLength(12)
-      expect(lista().at(-1)![4]).toBe('Ropa')
-      // editar conserva creación y orden
-      b.post('savePlantilla', { id: id(1), mode: 'update', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: 94.9, moneda: 'USD', medioPago: 'Sodexo' })
-      const luz = lista().find(x => x[0] === id(1))!
-      expect(luz.slice(5, 11)).toEqual([antes[0][5], luz[6], 94.9, 'USD', 'Sodexo', 4])
-      // clonar después de la original, reordenar y eliminar
-      expect(b.post('savePlantilla', { id: id(21), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: 94.9, moneda: 'PEN', medioPago: 'Yape', afterId: id(1) }).ok).toBe(true)
-      const ids = () => lista().map(x => x[0])
-      expect(ids().indexOf(id(21))).toBe(ids().indexOf(id(1)) + 1)
-      expect(b.post('reorderPlantillas', { ids: [...ids()].reverse() }).ok).toBe(true)
-      expect(b.post('deletePlantilla', { id: id(21) }).data.eliminada).toBe(true)
-      expect(lista()).toHaveLength(12)
-      expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(1)
-    })
-
-    it('hoja anterior de solo 7 columnas: se lee sin perder datos', () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H7], [id(1), 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't']]
-      expect(lista()[0]).toEqual([id(1), 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't', '', 'PEN', '', 1, false, 'Variable', false].map((v, i) => i === 10 ? lista()[0][10] : v))
-      b.post('savePlantilla', { id: id(2), mode: 'create', ambito: 'Personal', categoria: 'Suscripciones', subcategoria: 'Spotify', descripcion: 'Spotify', monto: 25, moneda: 'PEN', medioPago: 'Yape' })
-      expect(lista().map(r => r[4])).toEqual(['ChatGPT', 'Spotify'])
-    })
-
-    it('variantes de nombre se reconocen; encabezado desconocido, repetido o datos de otro tipo detienen la copia sin escribir nada', () => {
-      const old = hojaAntigua()
-      old.rows[0] = [...H7, 'Monto predeterminado', 'Moneda predeterminada', 'Medio de pago predeterminado', 'Orden']
-      expect(lista()).toHaveLength(11)                                     // alias reconocidos
-      for (const romper of [
-        (s: typeof old) => { s.rows[0][7] = 'Notas' },                       // desconocido
-        (s: typeof old) => { s.rows[0][11] = 'Monto' },                      // repetido
-        (s: typeof old) => { s.rows[0][7] = ''; s.rows[1][7] = 'abc' },      // sin encabezado y datos de otro tipo
-        (s: typeof old) => { s.rows[0][10] = ''; s.rows[1][10] = true },     // Orden sin encabezado con casillas
-      ]) {
-        b = load(); b.g.setup()
-        const s = hojaAntigua(); s.rows[0] = [...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso']
-        romper(s)
-        const snap = JSON.stringify(s.rows), nuevaAntes = JSON.stringify(nuevaHoja().rows)
-        const e = b.post('plantillas')
-        expect(e.error.code).toBe('SCHEMA')
-        expect(e.error.message).toMatch(/No se modificó nada/)
-        expect(JSON.stringify(s.rows)).toBe(snap)
-        expect(JSON.stringify(nuevaHoja().rows)).toBe(nuevaAntes)         // nada se copió
-        expect(b.props.get('PL_MIGRADO')).toBeFalsy()
-        // las plantillas de fondos y subcajas siguen funcionando aunque la hoja anterior necesite revisión
-        expect(b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'General', monto: 100, moneda: 'PEN', medios: '', recurrencia: 'mensual' }).ok).toBe(true)
-      }
-    })
-
-    it('IDs repetidos en la hoja anterior: se copia uno solo por ID', () => {
-      const old = hojaActual()
-      old.rows.push([...old.rows[1]])
-      expect(lista().map(x => x[0])).toEqual([id(1), id(2)])
-      expect(gastoRows()).toHaveLength(2)
-    })
-
     it('las tres clases conviven en una hoja sin pisarse: reordenar, eliminar y listar actúan solo sobre su Tipo', () => {
-      hojaActual(); lista()
+      b.post('savePlantilla', { id: id(1), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: '', moneda: 'PEN', medioPago: 'Plin' })
+      b.post('savePlantilla', { id: id(2), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua', descripcion: 'Agua', monto: 80, moneda: 'PEN', medioPago: 'Plin' })
       const f1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'unica' }).data[0]
       const f2 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000002', tipo: 'fondo', nombre: 'Sodexo', monto: 280, moneda: 'PEN', medios: 'Sodexo', recurrencia: 'unica' }).data[0]
       const s1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000003', tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' }).data[0]
@@ -2346,7 +2198,7 @@ describe('seguridad del backend', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const ADMIN = ['setup', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba',
-    'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'migrarGeneralAFondo']
+    'repararIds', 'repararHojas', 'migrarGeneralAFondo']
   // Acciones de uso diario (no administrativas), clasificadas a propósito: una acción nueva sin clasificar rompe esta prueba.
   const DIARIAS = ['data', 'saveGasto', 'setEstado', 'setEstadoLote', 'saveCatalogo', 'renameCatalogo', 'reorderCategorias', 'deleteCategoria',
     'saveMedio', 'saveCaja', 'deleteCaja', 'reorderCajas', 'savePresupuesto', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',
@@ -2403,6 +2255,17 @@ describe('seguridad del backend', () => {
       expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).ok).toBe(true)
       ;(b.g as unknown as { revocarTokenAdmin: () => void }).revocarTokenAdmin()
       expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).error.code).toBe('NOT_ENABLED')
+    })
+
+    it('S-02: rotarTokenApi invalida el token anterior al instante y el nuevo funciona; no es accesible por la API', () => {
+      const viejo = b.props.get('API_TOKEN')!
+      expect(b.post('data', {}, viejo).ok).toBe(true)
+      expect(b.post('rotarTokenApi', {}, viejo).error.code).toBe('BAD_ACTION')
+      const nuevo = (b.g as unknown as { rotarTokenApi: () => string }).rotarTokenApi()
+      expect(nuevo).not.toBe(viejo)
+      expect(nuevo.length).toBeGreaterThanOrEqual(32)
+      expect(b.post('data', {}, viejo).error.code).toBe('UNAUTHORIZED')
+      expect(b.post('data', {}, nuevo).ok).toBe(true)
     })
 
     it('el token de administración no aparece en ninguna respuesta de uso diario ni en la de setup', () => {

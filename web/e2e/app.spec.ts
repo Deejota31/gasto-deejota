@@ -1841,7 +1841,7 @@ test.describe('v1.12', () => {
     await expect(panel.getByRole('button', { name: /^Mantenimiento de la hoja/ })).toHaveAttribute('aria-expanded', 'false')
     await expect(page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true })).toHaveCount(0)
     for (const g of ['Mantenimiento de la hoja', 'Conexión y archivos', 'Atajo de iPhone', 'Datos de prueba']) await panel.getByRole('button', { name: new RegExp(`^${g}`) }).click()
-    for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba'])
+    for (const f of ['misArchivos', 'setup', 'autorizarRespaldos', 'diagnose', 'completarVacios', 'repararIds', 'repararHojas', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba'])
       await expect(page.getByRole('button', { name: `Ejecutar ${f}`, exact: true })).toBeVisible()
     // respuesta simple en el área de resultado
     await page.getByRole('button', { name: 'Ejecutar misArchivos', exact: true }).click()
