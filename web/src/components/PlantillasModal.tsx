@@ -2,7 +2,7 @@
 // - Edición rápida de monto, moneda y medio SOLO para el lote en preparación (la plantilla no cambia).
 // - Selección de una, algunas o todas; resumen fijo con totales por moneda; registro en UNA petición.
 // - Orden manual global (arrastrar o Subir/Bajar) que también define el orden de inserción del lote.
-// Una plantilla no es un movimiento: no suma en KPIs, cajas ni gráficos.
+// Una plantilla no es un movimiento: no suma en KPIs, fondos ni gráficos.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Copy, ListChecks,
@@ -490,8 +490,8 @@ function PlantillaForm({ store, plantilla, draft, cloneOf, items, onDone, onReop
               <span className="min-w-0"><span className="block text-sm font-medium">Es recurrente</span><span className="block text-[11px] text-muted">Sus gastos se marcarán como recurrentes.</span></span>
               <Switch compact checked={esRecurrente} onChange={setEsRecurrente} label="Es recurrente" />
             </div>
-            <div className="flex items-center justify-between gap-3 px-3 py-2.5" title="Se reservan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.">
-              <span className="min-w-0"><span className="block text-sm font-medium">Es compromiso mensual</span><span className="block text-[11px] text-muted">Pagos de cada mes (luz, internet…): se reservan en Salud financiera.</span></span>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5" title="Se separan en “Compromisos” de Salud financiera y se dan por cubiertos solo con gastos registrados desde esta plantilla o asociados a ella.">
+              <span className="min-w-0"><span className="block text-sm font-medium">Es compromiso mensual</span><span className="block text-[11px] text-muted">Pagos de cada mes (luz, internet…): se separan en Salud financiera.</span></span>
               <Switch compact checked={esCompromiso} onChange={setEsCompromiso} label="Es un compromiso mensual" />
             </div>
           </div>

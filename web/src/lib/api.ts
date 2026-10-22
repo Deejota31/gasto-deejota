@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { TIPOS_GASTO, TIPOS_FONDO, type EstadoRevisionPres, type RevisionPres, type TipoFondo, type AppData, type Caja, type CatalogoItem, type EstadoRevision, type Fondo, type FondoMes, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type Presupuesto, type Revision, type TipoGasto } from './types'
+import { TIPOS_GASTO, TIPOS_FONDO, type EstadoRevisionPres, type RevisionPres, type TipoFondo, type AppData, type CatalogoItem, type EstadoRevision, type Fondo, type FondoMes, type ParteManual, type PlantillaFin, type TipoPlantillaFin, type Gasto, type Medio, type Plantilla, type ReglaFondo, type Revision, type TipoGasto } from './types'
+import { normalizarRegla, reglasLegado, validarRegla } from './presupuesto'
 
 /** Cliente de la API de Apps Script. Todas las acciones van por POST con text/plain (sin preflight CORS). */
 
@@ -163,23 +164,45 @@ const loteSchema = z.object({
   ids: z.array(str), gastos: z.array(gastoRow), mensaje: str,
 })
 
-// [id, nombre, presupuesto, campo, valor, color, orden, activo?, descripción?, icono?] — antes de v1.7 llegan solo 7; antes de v1.10 sin icono.
-const cajaRow = z.tuple([str, str, z.number(), str, str, str, z.number()]).rest(z.union([str, z.number(), z.boolean()]))
-
-// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn, tipo?] (backend anterior: sin tipo)
+// [id, nombre, monto, moneda, color, icono, activo, orden, recurrencia, mes, medio, creadoEn, actualizadoEn, tipo?, reglas?]
+// (backend anterior: sin tipo / sin reglas → reglas equivalentes a su medio de pago, igual que antes de v1.28)
 const fondoRow = z.tuple([str, str, z.number(), str, str, str, z.boolean(), z.number(), str, str, str, str, str]).rest(str)
+const rutaSchema = z.object({ ambito: z.string(), categoria: z.string(), subcategoria: z.string() })
+const reglaSchema = z.object({
+  desde: z.string(), medios: z.enum(['todos', 'excepto', 'solo']), listaMedios: z.array(z.string()), cobertura: z.enum(['todos', 'ambito', 'categoria', 'subcategoria', 'personalizada']),
+  rutas: z.array(rutaSchema), restringeMedio: z.boolean(),
+})
+/** Reglas guardadas (JSON de la columna Reglas). Ilegibles o inválidas → las equivalentes a su medio (nunca se inventa una cobertura). */
+export function leerReglas(raw: string | undefined, medioPago: string): ReglaFondo[] {
+  if (raw) {
+    try {
+      const r = z.array(reglaSchema).min(1).safeParse(JSON.parse(raw))
+      if (r.success && r.data.every(x => !validarRegla(x))) return r.data.map(normalizarRegla).sort((a, b) => a.desde.localeCompare(b.desde))
+    } catch { /* JSON ilegible: reglas anteriores */ }
+  }
+  return reglasLegado(medioPago)
+}
 const fondoMesRow = z.tuple([str, str, z.number(), str])
 const tipoFondo = (t: unknown, nombre: string, recurrencia: string): TipoFondo =>
   (TIPOS_FONDO as readonly unknown[]).includes(t) ? t as TipoFondo : /^(carpeta t[ée]sis|viaje a ica)/i.test(nombre) ? 'ahorro_asignado' : recurrencia === 'unica' ? 'extra' : 'mensual'
 const toFondo = (r: z.infer<typeof fondoRow>): Fondo => ({
   tipo: tipoFondo(r[13], r[1], r[8]), id: r[0], nombre: r[1], monto: r[2], moneda: r[3] || 'PEN', color: r[4] || '#1e3a8a', icono: r[5], activo: r[6], orden: r[7],
-  recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12],
+  recurrencia: r[8] === 'unica' ? 'unica' : 'mensual', mes: r[9], medioPago: r[10], creadoEn: r[11], actualizadoEn: r[12], reglas: leerReglas(r[14], r[10]),
 })
+const partesSchema = z.array(z.object({ fondoId: z.string(), monto: z.number() }))
+/** [gastoId, JSON de partes] → mapa por ID en minúsculas. Una fila ilegible se ignora (el gasto vuelve a la asignación automática). */
+function leerAsignaciones(rows: [string, string][]): Record<string, ParteManual[]> {
+  const out: Record<string, ParteManual[]> = {}
+  for (const [id, json] of rows) {
+    try { const r = partesSchema.safeParse(JSON.parse(json)); if (r.success && r.data.length) out[id.toLowerCase()] = r.data } catch { /* fila ilegible */ }
+  }
+  return out
+}
 const toFondoMes = (r: z.infer<typeof fondoMesRow>): FondoMes => ({ fondoId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
 // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
 const plantillaFinRow = z.tuple([str, str, str, z.number(), str, str, str, str, str, str, str, str, z.boolean(), z.number(), str, z.record(z.string(), z.object({ e: z.enum(['aplicada', 'omitida']), m: z.number() })), str, str])
 const toPlantillaFin = (r: z.infer<typeof plantillaFinRow>): PlantillaFin => ({
-  id: r[0], tipo: r[1] === 'subcaja' ? 'subcaja' : 'fondo', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], campo: r[6], valor: r[7], descripcion: r[8],
+  id: r[0], tipo: 'fondo', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], descripcion: r[8],
   color: r[9] || '#1e3a8a', icono: r[10], recurrencia: r[11] === 'unica' ? 'unica' : 'mensual', activo: r[12], orden: r[13], origenId: r[14], estados: r[15], creadoEn: r[16], actualizadoEn: r[17],
 })
 export type PlantillaFinInput = Omit<PlantillaFin, 'creadoEn' | 'actualizadoEn' | 'estados' | 'orden'> & { orden?: number }
@@ -198,8 +221,7 @@ const dataSchema = z.object({
   gastos: z.array(gastoRow),
   catalogo: z.array(catRow),
   medios: z.array(z.tuple([str, z.boolean()]).rest(z.unknown())),
-  cajas: z.array(cajaRow),
-  presupuestos: z.array(z.tuple([str, str, z.number()])),
+  // cajas / presupuestos (≤ v1.27) ya no se usan: si llegan se ignoran.
   config: z.record(str, str),
   ordenGastos: z.array(z.tuple([str, z.number()])).optional(),
   vinculos: z.array(z.tuple([str, str])).optional(),
@@ -208,6 +230,7 @@ const dataSchema = z.object({
   fondos: z.array(fondoRow).optional(),
   fondosMeses: z.array(fondoMesRow).optional(),
   plantillasFin: z.array(plantillaFinRow).optional(),
+  asignaciones: z.array(z.tuple([str, str])).optional(),
 })
 
 const ESTADOS_REVISION: readonly string[] = ['legitimo', 'pendiente', 'duplicado']
@@ -222,16 +245,6 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   if (!r.success) throw new ApiError('INVALID_RESPONSE', 'Los datos de la hoja tienen un formato inesperado.')
   return r.data
 }
-
-const FILTRO_CAMPOS = ['Todos', 'Ámbito', 'Categoría', 'Subcategoría', 'Medio de pago'] as const
-const toCaja = (r: z.infer<typeof cajaRow>): Caja => ({
-  id: r[0], nombre: r[1], presupuesto: r[2],
-  filtroCampo: (FILTRO_CAMPOS as readonly string[]).includes(r[3]) ? (r[3] as Caja['filtroCampo']) : 'Todos',
-  filtroValor: r[4], color: r[5] || '#1e3a8a', orden: r[6],
-  activo: r[7] === undefined || r[7] === '' ? true : r[7] === true || String(r[7]).toUpperCase() === 'TRUE',
-  descripcion: r[8] === undefined ? '' : String(r[8]),
-  icono: r[9] === undefined ? '' : String(r[9]),
-})
 
 export type GastoInput = Omit<Gasto, 'estado' | 'origen' | 'creadoEn' | 'actualizadoEn'> & {
   /** Al crear desde una plantilla: queda vinculado como pago de ese compromiso. Se ignora al editar o clonar. */
@@ -271,15 +284,14 @@ export function createApi(t: Transport) {
           gastos: marcarIds(d.gastos.map(rowToGasto)),
           catalogo: d.catalogo.map(toCatalogo),
           medios: d.medios.map((r): Medio => toMedio(r)),
-          cajas: d.cajas.map(toCaja),
-          presupuestos: d.presupuestos.map(([periodo, cajaId, monto]): Presupuesto => ({ periodo, cajaId, monto })),
           ordenGastos: d.ordenGastos ?? [],
           vinculos: (d.vinculos ?? []).map(([g, p]) => [g.toLowerCase(), p] as [string, string]),
           revisiones: (d.revisiones ?? []).filter(r => r[1] === 'duplicado').map(toRevision),
           revisionesPresupuesto: (d.revisionesPresupuesto ?? []).map(toRevPres),
           fondos: (d.fondos ?? []).map(toFondo),
           fondosMeses: (d.fondosMeses ?? []).map(toFondoMes),
-          plantillasFin: (d.plantillasFin ?? []).map(toPlantillaFin),
+          plantillasFin: (d.plantillasFin ?? []).filter(r => r[1] === 'fondo').map(toPlantillaFin),
+          asignaciones: leerAsignaciones(d.asignaciones ?? []),
         }
       }).finally(() => { inflight = null })
       return inflight
@@ -320,19 +332,10 @@ export function createApi(t: Transport) {
     async saveMedio(m: Medio): Promise<Medio> {
       return toMedio(parse(z.tuple([str, z.boolean()]).rest(z.unknown()), await t('saveMedio', m)))
     },
-    async saveCaja(c: Caja): Promise<Caja> {
-      return toCaja(parse(cajaRow, await t('saveCaja', c)))
-    },
-    async deleteCaja(id: string): Promise<void> {
-      await t('deleteCaja', { id })
-    },
-    /** Orden manual de las subcajas (la general queda primera), en una sola escritura. */
-    async reorderCajas(ids: string[]): Promise<void> {
-      await t('reorderCajas', { ids })
-    },
-    async savePresupuesto(p: Presupuesto): Promise<Presupuesto> {
-      const [periodo, cajaId, monto] = parse(z.tuple([str, str, z.number()]), await t('savePresupuesto', p))
-      return { periodo, cajaId, monto }
+    /** Asignación manual de un gasto a fondos (vacía = vuelve a la automática). Solo escribe ASIGNACIONES_GASTOS. */
+    async saveAsignacion(gastoId: string, partes: ParteManual[]): Promise<ParteManual[]> {
+      const [, json] = parse(z.tuple([str, str]), await t('saveAsignacion', { gastoId, partes }))
+      return json ? parse(partesSchema, JSON.parse(json)) : []
     },
     /** Crea o edita un fondo (upsert por ID: reintentar o doble clic no duplica). */
     async saveFondo(f: FondoInput): Promise<Fondo> {
@@ -342,7 +345,7 @@ export function createApi(t: Transport) {
     async saveFondoMes(m: FondoMes, quitar = false): Promise<void> {
       await t('saveFondoMes', { ...m, ...(quitar ? { quitar: true } : {}) })
     },
-    /** Plantillas de fondos/subcajas: definiciones reutilizables (upsert por ID; no crea dinero ni entidades). */
+    /** Plantillas de fondos: definiciones reutilizables (upsert por ID; no crea dinero ni entidades). */
     async savePlantillaFin(p: PlantillaFinInput): Promise<PlantillaFin> {
       return toPlantillaFin(parse(plantillaFinRow, await t('savePlantillaFin', p)))
     },
@@ -352,9 +355,9 @@ export function createApi(t: Transport) {
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]): Promise<PlantillaFin[]> {
       return parse(z.object({ plantillas: z.array(plantillaFinRow) }), await t('aplicarPlantillasFin', { mes, items })).plantillas.map(toPlantillaFin)
     },
-    /** Aplica fondos o subcajas existentes a UN mes (copiar mes anterior, nuevo fondo/subcaja del mes). Idempotente. */
-    async aplicarEntidadesMes(tipo: 'fondo' | 'subcaja', mes: string, items: { id: string; monto: number }[]): Promise<void> {
-      await t('aplicarEntidadesMes', { tipo, mes, items })
+    /** Aplica fondos existentes a UN mes (copiar mes anterior, nuevo fondo del mes). Idempotente. */
+    async aplicarFondosMes(mes: string, items: { id: string; monto: number }[]): Promise<void> {
+      await t('aplicarEntidadesMes', { tipo: 'fondo', mes, items })
     },
     async deleteFondo(id: string): Promise<void> {
       await t('deleteFondo', { id })
@@ -362,14 +365,9 @@ export function createApi(t: Transport) {
     async reorderFondos(ids: string[]): Promise<void> {
       await t('reorderFondos', { ids })
     },
-    /** Crea el fondo General con el presupuesto de la caja general y sus ajustes mensuales. Idempotente. */
     /** Rellena celdas vacías de la hoja (Activo, Icono, Medio, Orden…). `catalogo` trae el icono/color a escribir en cada fila vacía. */
     async completarVacios(catalogo: { ambito: string; categoria: string; subcategoria: string; icono: string; color: string }[]) {
-      return parse(z.object({ cajas: z.number(), fondos: z.number(), catalogo: z.number(), config: z.number(), medios: z.number().optional() }), await t('completarVacios', { catalogo }))
-    },
-    async migrarGeneralAFondo() {
-      const r = parse(z.object({ creada: z.boolean(), meses: z.number(), fondo: fondoRow.optional(), ajustes: z.array(fondoMesRow).optional() }), await t('migrarGeneralAFondo', {}))
-      return { creada: r.creada, meses: r.meses, fondo: r.fondo ? toFondo(r.fondo) : null, ajustes: (r.ajustes ?? []).map(toFondoMes) }
+      return parse(z.object({ fondos: z.number(), catalogo: z.number(), config: z.number(), medios: z.number().optional() }), await t('completarVacios', { catalogo }))
     },
     async saveConfig(clave: string, valor: string): Promise<void> {
       await t('saveConfig', { clave, valor })
@@ -401,7 +399,7 @@ export function createApi(t: Transport) {
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>): Promise<Revision> {
       return toRevision(parse(revisionRow, await t('saveRevision', { ...r, tipo: 'duplicado' })))
     },
-    /** Revisión del presupuesto: SOLO agrega a REVISIONES_PRESUPUESTO (nunca fondos, gastos, cajas ni presupuestos). */
+    /** Revisión del presupuesto: SOLO agrega a REVISIONES_PRESUPUESTO (nunca fondos ni gastos). */
     async saveRevisionPresupuesto(i: RevisionPresInput): Promise<RevisionPres> { return toRevPres(parse(revPresRow, await t('saveRevisionPresupuesto', i))) },
     async deletePlantilla(id: string): Promise<void> {
       await t('deletePlantilla', { id })

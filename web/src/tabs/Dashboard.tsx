@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useAgregado } from '../lib/useAgregado'
 import {
-  Activity, Calculator, CalendarDays, Hash, Layers, Pencil,
+  Activity, Calculator, CalendarDays, Hash, Layers,
   PieChart as PieIcon, Shapes, Trophy,
   Receipt,
 } from 'lucide-react'
@@ -10,32 +10,30 @@ import type { PlanificacionApi } from '../components/Planificacion'
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import { formatDate, monthLabel, rangeLabel, singleMonth } from '../lib/dates'
 import type { AppStore } from '../lib/store'
-import type { Caja, Filters } from '../lib/types'
+import type { Filters } from '../lib/types'
 import { categoriaLook, subcategoriaLook } from '../lib/visual'
 import { AcumuladoChart, AmbitoDonut, BarList } from '../components/charts'
 import { AnalisisDetallado } from '../components/analisis'
 import { BotonMensual, BotonNuevo, Card, Empty, ErrorBox, Segmented, Skeleton } from '../components/ui'
 import { FilterBar } from '../components/shared'
-import { CajaModal } from '../components/cajas'
 import { PresupuestoConsolidado } from '../components/PresupuestoConsolidado'
-import { ResumenCajas } from '../components/ResumenCajas'
+import { ResumenFondos } from '../components/ResumenFondos'
 
 const toggle = (xs: string[], v: string) => (xs.includes(v) ? xs.filter(x => x !== v) : [...xs, v])
 
-export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onIrCajas, plan }: {
+export default function Dashboard({ store, filters, setFilters, today, onNuevoGasto, onGastosMensuales, onIrPresupuestos, plan }: {
   plan?: PlanificacionApi; store: AppStore; filters: Filters; setFilters: (f: Filters) => void; today: string; onNuevoGasto: () => void; onGastosMensuales: () => void
-  onIrCajas?: () => void
+  onIrPresupuestos?: () => void
 }) {
-  const [editCaja, setEditCaja] = useState<{ caja: Caja; asignado: number } | null>(null)
   const [ranking, setRanking] = useState(rankingSesion)
   const data = store.data
   const base = data?.config.moneda || 'PEN'
   const catalogo = useMemo(() => data?.catalogo ?? [], [data?.catalogo])
   const medios = (data?.medios ?? []).filter(m => m.activo).map(m => m.nombre)
 
-  // Una sola agregación por combinación de filtros; KPIs, cajas y gráficos reutilizan este resultado.
+  // Una sola agregación por combinación de filtros; KPIs, fondos y gráficos reutilizan este resultado.
   // Dependencias explícitas: un cambio en vínculos o revisiones (Salud financiera) no recalcula el dashboard.
-  // Mismo motor y mismo contexto (fondos, cajas, ajustes) en Dashboard, Cajas y Salud financiera.
+  // Mismo motor y mismo contexto (fondos, reglas, asignaciones) en Dashboard, Presupuestos y Salud financiera.
   const a = useAgregado(data, filters, today)
   const config = data?.config
   const rates = useMemo(() => ratesFromConfig(config ?? {}), [config])
@@ -72,21 +70,15 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
             <ErrorBox tone="warning" message={`${a.excluidosSinTipoCambio} movimiento(s) en otra moneda no se suman porque falta su tipo de cambio en Configuración.`} />
           )}
 
-          {/* v1.19: mes sin fondos/cajas aplicadas. Los gastos reales se conservan; no se muestran % engañosos. */}
-          {mes && data && mes >= aislaDesde(data.config) && plan && (() => {
-            const sinF = a.cajas.origen === 'fondos' && !a.cajas.fondos.lista.some(r => r.aplicada)
-            const sinS = a.cajas.subcajas.length > 0 && !a.cajas.subcajas.some(r => r.aplicada)
-            if (!sinF && !sinS) return null
-            return (
-              <div className="space-y-2" data-testid="aviso-mes-sin-config">
-                {sinF && <ErrorBox tone="warning" message="Todavía no has configurado fondos del presupuesto para este mes." action={{ label: 'Preparar fondos mensuales', onClick: () => plan.abrir(mes, 'fondos') }} />}
-                {sinS && <ErrorBox tone="warning" message="Todavía no has reservado presupuesto para este mes." action={{ label: 'Preparar cajas mensuales', onClick: () => plan.abrir(mes, 'subcajas') }} />}
-              </div>
-            )
-          })()}
+          {/* v1.19: mes sin fondos aplicados. Los gastos reales se conservan; no se muestran % engañosos. */}
+          {mes && data && mes >= aislaDesde(data.config) && plan && a.presupuesto.fondos.length > 0 && !a.presupuesto.fondos.some(r => r.aplicada) && (
+            <div className="space-y-2" data-testid="aviso-mes-sin-config">
+              <ErrorBox tone="warning" message="Todavía no has configurado fondos del presupuesto para este mes." action={{ label: 'Preparar fondos mensuales', onClick: () => plan.abrir(mes, 'fondos') }} />
+            </div>
+          )}
 
           {/* Todos los indicadores viven en el Presupuesto consolidado (los cuatro complementarios al final del bloque) */}
-          <PresupuestoConsolidado c={a.cajas} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
+          <PresupuestoConsolidado c={a.presupuesto} money={money} periodo={mes ? monthLabel(mes, true) : rangeLabel(filters)}
             complementarios={[
               { etiqueta: 'Promedio diario', color: 'var(--color-celeste)', valor: money(a.promedioDiario), icono: <CalendarDays />,
                 pista: a.estado === 'futuro' ? 'El período aún no comienza' : `${a.diasPeriodo} días ${a.estado === 'en-curso' ? 'transcurridos' : 'del período'}`,
@@ -99,11 +91,8 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
               { etiqueta: 'Movimientos', color: 'var(--color-navy)', valor: String(a.count), icono: <Hash />,
                 pista: a.count ? `${new Set(data!.gastos.filter(g => g.estado === 'Activo' && g.fecha >= filters.desde && g.fecha <= filters.hasta).map(g => g.fecha)).size} días con gastos` : undefined,
                 info: <p>Cantidad de gastos activos que cumplen los filtros.</p> },
-            ]}
-            accion={a.cajas.origen !== 'fondos' && a.cajas.general
-              ? <button type="button" onClick={() => setEditCaja({ caja: a.cajas.general!, asignado: a.cajas.presupuesto })} className="inline-flex items-center gap-1.5 rounded-xl border border-white/30 px-3 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-white/10"><Pencil className="size-3.5" /> Ajustar caja</button>
-              : undefined} />
-          <ResumenCajas c={a.cajas} money={money} catalogo={store.data?.catalogo} onIrCajas={onIrCajas} />
+            ]} />
+          <ResumenFondos p={a.presupuesto} money={money} onIrPresupuestos={onIrPresupuestos} />
 
 
 
@@ -113,7 +102,7 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
           <Card title={`Gasto acumulado — ${periodoTxt}`} icon={<Activity className="size-4 text-navy" />}
             info={{ title: 'Gasto acumulado', body: <>
               <p>Cómo evoluciona tu gasto a lo largo del período. La línea azul es el gasto real acumulado día a día.</p>
-              <p>La línea punteada gris (ritmo ideal) reparte la caja mensual de forma pareja hasta el último día: si la azul va por encima, gastas más rápido de lo planeado.</p>
+              <p>La línea punteada gris (ritmo ideal) reparte el presupuesto mensual de forma pareja hasta el último día: si la azul va por encima, gastas más rápido de lo planeado.</p>
               <p>La línea coral (proyección) solo aparece en un período en curso: extiende tu promedio diario actual hasta el cierre.</p>
               <p>Abajo, el gasto de cada día. Aplican todos los filtros.</p></> }}>
             <AcumuladoChart a={a} currency={base} dateFormat={data!.config.formato_fecha} gastos={data!.gastos} filters={filters} rates={rates} catalogo={catalogo} />
@@ -160,7 +149,6 @@ export default function Dashboard({ store, filters, setFilters, today, onNuevoGa
         </>
       )}
 
-      {editCaja && a && <CajaModal store={store} target={editCaja} cajas={a.cajas} mes={mes} money={money} onClose={() => setEditCaja(null)} />}
     </div>
   )
 }

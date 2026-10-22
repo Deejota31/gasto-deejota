@@ -15,7 +15,7 @@ const TONO: Record<EstadoRevisionPres, string> = {
 const ICONO: Record<Severidad, typeof Info> = { ok: CheckCircle2, aviso: Info, alerta: AlertTriangle }
 
 /**
- * Revisión del presupuesto: ¿el período tiene todos sus gastos y es coherente? Solo usa fondos, reservas y gastos registrados
+ * Revisión del presupuesto: ¿el período tiene todos sus gastos y es coherente? Solo usa fondos y gastos registrados
  * (nada de saldos de banco). Guardar solo AGREGA un registro a REVISIONES_PRESUPUESTO; regularizar un gasto olvidado se hace
  * creando un gasto normal (con su antiduplicado), nunca desde aquí.
  */
@@ -34,7 +34,7 @@ export function RevisionPresupuesto({ store, today, onRevisarGastos, onNuevoGast
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-base font-semibold"><ClipboardCheck className="size-5 text-navy" />Revisión del presupuesto
             <InfoTooltip title="Qué revisa">
-              <p>Comprueba que el período esté completo y coherente usando solo tus fondos, reservas y gastos registrados.</p>
+              <p>Comprueba que el período esté completo y coherente usando solo tus fondos y gastos registrados.</p>
               <p>No usa saldos de cuentas ni ingresos: para la app, el dinero es el presupuesto que tú defines.</p>
             </InfoTooltip>
           </h3>

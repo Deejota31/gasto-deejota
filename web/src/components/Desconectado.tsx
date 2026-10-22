@@ -1,11 +1,11 @@
 import { Link2, Plug } from 'lucide-react'
 import { Button, Card, Empty } from './ui'
 
-type Seccion = 'dashboard' | 'cajas' | 'gastos' | 'salud' | 'catalogo'
+type Seccion = 'dashboard' | 'presupuestos' | 'gastos' | 'salud' | 'catalogo'
 
 const TEXTOS: Record<Seccion, { titulo: string; texto: string }> = {
   dashboard: { titulo: 'Todavía no hay datos', texto: 'Conéctate para ver tu resumen financiero.' },
-  cajas: { titulo: 'Aún no tienes cajas registradas', texto: 'Conéctate para ver y administrar tus cajas.' },
+  presupuestos: { titulo: 'Aún no tienes fondos registrados', texto: 'Conéctate para ver y administrar tus presupuestos.' },
   gastos: { titulo: 'Aún no hay gastos registrados', texto: 'Conéctate para ver y registrar tus gastos.' },
   salud: { titulo: 'Todavía no hay información disponible', texto: 'Conéctate para analizar tu salud financiera.' },
   catalogo: { titulo: 'Conéctate para ver y administrar tu catálogo', texto: 'Tus ámbitos, categorías, subcategorías y medios de pago aparecerán cuando te conectes.' },

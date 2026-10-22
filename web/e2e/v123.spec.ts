@@ -116,7 +116,7 @@ test.describe('P4: los errores de validación se borran al corregir el campo', (
 
   test('Caja: el mensaje sigue al alcance elegido', async ({ page }) => {
     await page.goto('/?demo=60')
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await page.getByRole('button', { name: /Nueva caja|Nueva subcaja|Crear caja/ }).first().click()
     const d = dialog(page)
     await d.getByLabel('Nombre', { exact: true }).fill('TEST-caja')

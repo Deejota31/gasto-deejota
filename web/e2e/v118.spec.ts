@@ -36,10 +36,10 @@ for (const tema of ['light', 'dark'] as const) {
       await page.waitForTimeout(500)   // termina la transición de colores del cambio de tema
     })
 
-    test('todos los switches: mismo azul ON y mismo gris OFF (Cajas, Catálogo y Configuración)', async ({ page }) => {
+    test('todos los switches: mismo azul ON y mismo gris OFF (Presupuestos, Catálogo y Configuración)', async ({ page }) => {
       const primary = await token(page, '--primary'), off = await token(page, '--switch-off')
       const ons = new Set<string>(), offs = new Set<string>()
-      for (const tab of ['Cajas', 'Catálogo', 'Configuración']) {
+      for (const tab of ['Presupuestos', 'Catálogo', 'Configuración']) {
         await go(page, tab)
         await page.waitForTimeout(300)
         const sw = page.locator('[role="switch"]:visible')
@@ -58,17 +58,15 @@ for (const tema of ['light', 'dark'] as const) {
       if (offs.size) expect([...offs]).toEqual([off])
     })
 
-    test('botones Nuevo gasto / Nuevo fondo / Nueva caja idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
+    test('botones Nuevo gasto / Nuevo fondo idénticos y mensuales idénticos; Nuevo siempre antes', async ({ page }) => {
       const nuevo: Record<string, unknown> = {}, mensual: Record<string, unknown> = {}
       nuevo.gasto = await estilo(page.getByRole('button', { name: 'Nuevo gasto' }).first())
       mensual.gasto = await estilo(page.getByRole('button', { name: 'Gastos mensuales' }).first())
-      await go(page, 'Cajas')
+      await go(page, 'Presupuestos')
       nuevo.fondo = await estilo(page.getByRole('button', { name: 'Nuevo fondo' }).first())
       mensual.fondo = await estilo(page.getByRole('button', { name: 'Fondos mensuales' }).first())
-      nuevo.subcaja = await estilo(page.getByRole('button', { name: 'Nueva caja' }).first())
-      mensual.subcaja = await estilo(page.getByRole('button', { name: 'Cajas mensuales' }).first())
-      expect(nuevo.fondo).toEqual(nuevo.gasto); expect(nuevo.subcaja).toEqual(nuevo.gasto)
-      expect(mensual.fondo).toEqual(mensual.gasto); expect(mensual.subcaja).toEqual(mensual.gasto)
+      expect(nuevo.fondo).toEqual(nuevo.gasto)
+      expect(mensual.fondo).toEqual(mensual.gasto)
       expect(nuevo.gasto).not.toEqual(mensual.gasto)
     })
 
@@ -79,11 +77,11 @@ for (const tema of ['light', 'dark'] as const) {
       }
       await orden('Nuevo gasto', 'Gastos mensuales')
       await go(page, 'Gastos'); await orden('Nuevo gasto', 'Gastos mensuales')
-      await go(page, 'Cajas'); await orden('Nuevo fondo', 'Fondos mensuales'); await orden('Nueva caja', 'Cajas mensuales')
+      await go(page, 'Presupuestos'); await orden('Nuevo fondo', 'Fondos mensuales')
     })
 
     test('menú ⋯: orden canónico, iconos de 16px y Eliminar con el rojo semántico', async ({ page }) => {
-      await go(page, 'Cajas')
+      await go(page, 'Presupuestos')
       const danger = await token(page, '--danger')
       await page.getByRole('button', { name: /^Más acciones del fondo / }).first().click()
       const items = page.getByRole('menuitem')
@@ -94,18 +92,12 @@ for (const tema of ['light', 'dark'] as const) {
       const hs = await items.evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().height)))
       expect(new Set(hs).size).toBe(1)
       await page.keyboard.press('Escape')
-      // Subcajas: mismo menú
-      const mc = page.getByTestId('caja-fila').first().getByRole('button', { name: /^Más acciones de / })
-      await mc.scrollIntoViewIfNeeded(); await page.waitForTimeout(250); await mc.click()
-      expect((await page.getByRole('menuitem').allInnerTexts()).map(t => t.trim())).toEqual(['Clonar', 'Guardar como plantilla', 'Subir', 'Bajar', 'Eliminar'])
-      expect((await estilo(page.getByRole('menuitem').last())).fg).toBe(danger)
     })
 
-    test('Editar: mismo estilo en fondos y subcajas; botón Eliminar de confirmación usa Danger', async ({ page }) => {
-      await go(page, 'Cajas')
+    test('Editar fondo y botón Eliminar de confirmación usa Danger', async ({ page }) => {
+      await go(page, 'Presupuestos')
       const ef = await estilo(page.getByRole('button', { name: /^Editar fondo / }).first())
-      const ec = await estilo(page.locator('button[title="Editar"]:visible').last())
-      expect(ec).toEqual(ef)
+      expect(ef.fg).toBeTruthy()
       // Eliminar (confirmación) = variante Danger: se crea una plantilla de prueba y se elimina
       await page.getByRole('button', { name: 'Fondos mensuales' }).first().click()
       await page.getByRole('dialog').getByRole('button', { name: /Nueva plantilla/ }).click()
@@ -137,11 +129,11 @@ test.describe('Design System: catálogo y responsive', () => {
       await page.setViewportSize({ width: w, height: h })
       await page.goto('/?demo=60&fondos=3')
       await expect(page.getByTestId('cons-gastado-del-período')).toBeVisible()
-      for (const tab of ['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración']) {
+      for (const tab of ['Dashboard', 'Gastos', 'Presupuestos', 'Catálogo', 'Salud financiera', 'Configuración']) {
         await go(page, tab); await page.waitForTimeout(200)
         expect(await sinScrollH(page), `${tab} a ${w}px`).toBe(true)
       }
-      await go(page, 'Cajas')
+      await go(page, 'Presupuestos')
       const nf = await page.getByRole('button', { name: 'Nuevo fondo' }).first().boundingBox(), mf = await page.getByRole('button', { name: 'Fondos mensuales' }).first().boundingBox()
       expect(nf!.x + nf!.y * 2000).toBeLessThan(mf!.x + mf!.y * 2000)
       expect(nf!.x + nf!.width).toBeLessThanOrEqual(w + 1)

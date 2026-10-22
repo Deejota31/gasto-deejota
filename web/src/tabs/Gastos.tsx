@@ -12,6 +12,8 @@ import { Pagination, SwipeRow } from '../components/table'
 import { BotonMensual, BotonNuevo, Button, Checkbox, Empty, ErrorBox, IconButton, inputCls, Modal, Pill, Segmented, Skeleton } from '../components/ui'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from '../components/reorden'
 import { FilterBar } from '../components/shared'
+import { AsignacionModal, IndicadorFondos } from '../components/Asignacion'
+import { useImputaciones } from '../lib/useAgregado'
 
 const ID_AVISO = {
   duplicado: 'Otro movimiento tiene el mismo ID. Ejecuta repararIds en Apps Script para poder editarlo.',
@@ -70,6 +72,14 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   // Un gasto con una escritura en curso muestra "Guardando…" y no admite otra acción hasta que el backend responda.
   const isBusy = (g: Gasto) => store.pending.has(`gasto:${g.id}`) || store.pending.has(`estado:${g.id}`)
   const medios = (store.data?.medios ?? []).map(m => m.nombre)
+  // Reparto entre fondos (mismo motor que Presupuestos y Dashboard) para el indicador compacto y "Ver / cambiar asignación".
+  const imputaciones = useImputaciones(store.data)
+  const nombresFondo = useMemo(() => new Map((store.data?.fondos ?? []).map(f => [f.id, f.nombre])), [store.data?.fondos])
+  const nombreFondo = (id: string) => nombresFondo.get(id) ?? 'Fondo'
+  const moneyBase = (c: number) => formatMoney(c, cfg.moneda || 'PEN')
+  const [asignar, setAsignar] = useState<Gasto | null>(null)
+  const indicador = (g: Gasto) => g.estado === 'Activo' && (store.data?.fondos?.length ?? 0) > 0
+    ? <IndicadorFondos imp={imputaciones.get(g.id)} nombre={nombreFondo} money={moneyBase} onClick={() => setAsignar(g)} /> : null
 
   // Orden personalizado: los que tienen posición guardada, por esa posición; los nuevos (sin posición) arriba,
   // del más reciente al más antiguo. Así un gasto nuevo nunca reordena los anteriores.
@@ -327,6 +337,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           <span className={`tabular text-[15px] font-bold ${off ? 'line-through' : 'text-ink'}`}>{formatMoney(toCents(g.monto), g.moneda)}</span>
                           {g.moneda !== (cfg.moneda || 'PEN') && <span className="block text-[10px] text-muted">{g.moneda}</span>}
+                          <span className="mt-0.5 flex justify-end">{indicador(g)}</span>
                         </td>
                         <td className="px-3 py-2.5"><div className="flex justify-end gap-0.5">{actionsFor(g)}</div></td>
                       </tr>
@@ -377,6 +388,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
                         <div className="text-right">
                           <p className={`tabular text-base font-bold ${off ? 'line-through' : ''}`}>{formatMoney(toCents(g.monto), g.moneda)}</p>
                           <p className="tabular text-[11px] text-muted">{formatDate(g.fecha, cfg.formato_fecha)}</p>
+                          <span className="mt-0.5 flex justify-end">{indicador(g)}</span>
                         </div>
                       </div>
                     </SwipeRow>
@@ -403,7 +415,7 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
               <p className="text-xs text-muted">{formatDate(confirm.fecha, cfg.formato_fecha)} · {confirm.ambito} · {confirm.medioPago}</p>
               <p className="tabular mt-1 text-lg font-bold">{formatMoney(toCents(confirm.monto), confirm.moneda)}</p>
             </div>
-            <p className="text-muted">Dejará de contar en totales, gráficos y cajas. No se borra de la hoja: queda en <b>Eliminados</b> y puedes restaurarlo cuando quieras.</p>
+            <p className="text-muted">Dejará de contar en totales, gráficos y presupuestos. No se borra de la hoja: queda en <b>Eliminados</b> y puedes restaurarlo cuando quieras.</p>
           </div>
         )}
       </Modal>
@@ -417,10 +429,11 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
               <p className="tabular mt-1 text-lg font-bold">{formatMoney(confirmLote.reduce((t, g) => t + (g.moneda === (cfg.moneda || 'PEN') ? toCents(g.monto) : 0), 0), cfg.moneda || 'PEN')}</p>
               {confirmLote.some(g => g.moneda !== (cfg.moneda || 'PEN')) && <p className="text-[11px] text-muted">El total solo suma los gastos en {cfg.moneda || 'PEN'}.</p>}
             </div>
-            <p className="text-muted">Dejarán de contar en totales, gráficos, fondos y cajas. No se borran de la hoja: quedan en <b>Eliminados</b> y puedes restaurarlos cuando quieras. Si falla el guardado, no se elimina ninguno.</p>
+            <p className="text-muted">Dejarán de contar en totales, gráficos y fondos del presupuesto. No se borran de la hoja: quedan en <b>Eliminados</b> y puedes restaurarlos cuando quieras. Si falla el guardado, no se elimina ninguno.</p>
           </div>
         )}
       </Modal>
+      {asignar && store.data && <AsignacionModal key={asignar.id} store={store} gasto={store.data.gastos.find(x => x.id === asignar.id) ?? asignar} imp={imputaciones.get(asignar.id)} onClose={() => setAsignar(null)} />}
     </div>
   )
 }

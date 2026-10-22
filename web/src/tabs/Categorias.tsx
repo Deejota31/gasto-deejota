@@ -387,7 +387,7 @@ function Picker({ label, children }: { label: string; children: ReactNode }) {
   return <div><p className="mb-1.5 text-xs font-medium text-muted">{label}</p>{children}</div>
 }
 
-/** Eliminar categoría: revisa gastos, plantillas, compromisos y subcajas. Con uso NO se elimina (se ofrece desactivar); nunca borra gastos. */
+/** Eliminar categoría: revisa gastos, plantillas, y compromisos. Con uso NO se elimina (se ofrece desactivar); nunca borra gastos. */
 function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store: AppStore; ambito: string; cat: CatNode; onClose: () => void; onDesactivar: () => void }) {
   const { loadPlantillas } = store
   useEffect(() => { void loadPlantillas() }, [loadPlantillas])
@@ -397,7 +397,7 @@ function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store:
   const uso = deps ? [
     deps.gastos && `${deps.gastos} gasto(s)`,
     deps.plantillas && `${deps.plantillas} plantilla(s)${deps.compromisos ? ` (${deps.compromisos} compromiso(s))` : ''}`,
-    deps.cajas && `${deps.cajas} caja(s)`,
+    deps.fondos && `${deps.fondos} fondo(s) del presupuesto`,
   ].filter(Boolean) as string[] : []
   const bloqueada = uso.length > 0
   const key = `cat-del:${ambito}|${cat.name}`
@@ -421,7 +421,7 @@ function BorrarCategoria({ store, ambito, cat, onClose, onDesactivar }: { store:
           </p>
         ) : (
           <>
-            <p className="text-muted">Nada la usa: ningún gasto, plantilla, compromiso ni caja. Se quitará del catálogo; ningún gasto se borra.</p>
+            <p className="text-muted">Nada la usa: ningún gasto, plantilla ni compromiso. Se quitará del catálogo; ningún gasto se borra.</p>
             {cat.subs.length > 0 && (
               <label className="flex items-start gap-2 rounded-xl bg-bg px-3 py-2 text-xs">
                 <Checkbox checked={cascada} onChange={setCascada} label={`Confirmo eliminar también sus ${cat.subs.length} subcategoría(s)`} />

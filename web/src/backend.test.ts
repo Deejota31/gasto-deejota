@@ -7,7 +7,7 @@ import { gasto, legacyCheckboxes, load } from './testing/backendHarness'
 import { CATALOGO_INICIAL } from './lib/catalogo'
 import { configurarExcepciones, formatearDescripcion } from './lib/texto'
 import { createApi } from './lib/api'
-import { aggregate, aislaDesde, budgetCents, fondoMontoMes } from './lib/engine'
+import { aggregate, aislaDesde, fondoMontoMes } from './lib/engine'
 import { ratesFromConfig } from './lib/money'
 import { calcularCompromisos, compararPeriodos, estadoCompromiso, evaluarCalidad } from './lib/salud'
 
@@ -15,8 +15,8 @@ describe('backend Apps Script', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
 
-  it('setup crea las 6 hojas, encabezados de GASTOS con 16 columnas y es idempotente', () => {
-    expect([...b.ss.sheets.keys()].sort()).toEqual(['CAJAS', 'CATALOGO', 'CONFIG', 'FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'PRESUPUESTOS', 'REVISIONES_CALIDAD', 'REVISIONES_PRESUPUESTO', 'VINCULOS_PLANTILLAS'])
+  it('setup crea las hojas (sin CAJAS ni PRESUPUESTOS desde v1.28), encabezados de GASTOS con 16 columnas y es idempotente', () => {
+    expect([...b.ss.sheets.keys()].sort()).toEqual(['ASIGNACIONES_GASTOS', 'CATALOGO', 'CONFIG', 'FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'GASTOS', 'MEDIOS_PAGO', 'ORDEN_GASTOS', 'PLANTILLAS_FINANCIERAS', 'REVISIONES_CALIDAD', 'REVISIONES_PRESUPUESTO', 'VINCULOS_PLANTILLAS'])
     expect(b.ss.getSheetByName('GASTOS')!.rows[0]).toHaveLength(16)
     const cat = b.ss.getSheetByName('CATALOGO')!.rows.slice(1)
     expect([...new Set(cat.map(r => r[0]))]).toEqual(['Personal', 'Trabajo', 'Pareja', 'Familia', 'Amigos'])
@@ -265,14 +265,16 @@ describe('backend Apps Script', () => {
     const id = (n: number) => `pl-11111111-2222-4333-8444-${String(n).padStart(12, '0')}`
     const nuevaHoja = () => b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!
     const lista = () => b.post('plantillas').data as unknown[][]
-    it('las tres clases conviven en una hoja sin pisarse: reordenar, eliminar y listar actúan solo sobre su Tipo', () => {
+    it('gastos y fondos conviven en una hoja sin pisarse (y una fila subcaja antigua se ignora): reordenar, eliminar y listar actúan solo sobre su Tipo', () => {
       b.post('savePlantilla', { id: id(1), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: '', moneda: 'PEN', medioPago: 'Plin' })
       b.post('savePlantilla', { id: id(2), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua', descripcion: 'Agua', monto: 80, moneda: 'PEN', medioPago: 'Plin' })
       const f1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'unica' }).data[0]
       const f2 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000002', tipo: 'fondo', nombre: 'Sodexo', monto: 280, moneda: 'PEN', medios: 'Sodexo', recurrencia: 'unica' }).data[0]
-      const s1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000003', tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' }).data[0]
+      expect(b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000003', tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' }).error.code).toBe('VALIDATION')
+      const s1 = 'pf-aaaaaaaa-0000-4000-8000-000000000003'
+      nuevaHoja().rows.push([s1, 'subcaja', 'Mascotas', 700, '', '', 'Categoría', 'Mascotas', '', '#1e3a8a', 'auto', 'mensual', true, 1, '', '', '', '', ''])   // fila anterior a v1.28
       expect(nuevaHoja().rows.slice(1).map(r => r[1])).toEqual(['gasto', 'gasto', 'fondo', 'fondo', 'subcaja'])
-      expect(b.post('data', { fresh: true }).data.plantillasFin.map((p: unknown[]) => p[0]).sort()).toEqual([f1, f2, s1].sort())  // la web no ve los de gasto aquí
+      expect(b.post('data', { fresh: true }).data.plantillasFin.map((p: unknown[]) => p[0]).sort()).toEqual([f1, f2].sort())  // ni gastos ni subcajas antiguas
       expect(lista().map(x => x[0])).toEqual([id(1), id(2)])
       const ordenDe = (idp: string) => nuevaHoja().rows.find(r => r[0] === idp)![13]
       expect(b.post('reorderPlantillasFin', { tipo: 'fondo', ids: [f2, f1] }).ok).toBe(true)
@@ -288,18 +290,20 @@ describe('backend Apps Script', () => {
       expect(b.post('savePlantillaFin', { id: id(2), tipo: 'fondo', nombre: 'X', monto: 1, moneda: 'PEN', medios: '', recurrencia: 'mensual' }).ok).toBe(false)
     })
 
-    it('hoja PLANTILLAS_FINANCIERAS de 18 columnas (v1.17–v1.19): se agrega Datos sin perder filas, y se pueden aplicar', () => {
+    it('hoja PLANTILLAS_FINANCIERAS de 18 columnas (v1.17–v1.19): se agrega Datos sin perder filas, y los fondos se pueden aplicar', () => {
       const cols = ['ID', 'Tipo', 'Nombre', 'Monto', 'Moneda', 'Medios', 'Alcance', 'Valor', 'Descripción', 'Color', 'Icono', 'Recurrencia', 'Activo', 'Orden', 'Origen ID', 'Estados', 'Creado en', 'Actualizado en']
       const fila = (i: string, tipo: string, nombre: string) => [i, tipo, nombre, 400, 'PEN', 'Libre', tipo === 'subcaja' ? 'Categoría' : '', tipo === 'subcaja' ? nombre : '', '', '#1e3a8a', 'auto', 'unica', true, 1, '', '', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z']
       const sh = nuevaHoja()
       sh.rows = [cols, fila('pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', 'fondo', 'Sodexo'), fila('pf-4e870b82-7519-44dc-b406-8bad102c664e', 'subcaja', 'Mascotas')]
-      expect(b.post('data', { fresh: true }).data.plantillasFin).toHaveLength(2)
+      expect(b.post('data', { fresh: true }).data.plantillasFin).toHaveLength(1)   // la subcaja antigua no se lee (tampoco se borra)
       expect(b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000009', tipo: 'fondo', nombre: 'Extra 1', monto: 500, moneda: 'PEN', medios: '', recurrencia: 'unica' }).ok).toBe(true)
       expect(sh.rows[0][18]).toBe('Datos')
       expect(sh.rows.slice(1).map(r => r[0]).slice(0, 2)).toEqual(['pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', 'pf-4e870b82-7519-44dc-b406-8bad102c664e'])
-      const ap = b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'pf-4e870b82-7519-44dc-b406-8bad102c664e', accion: 'aplicar', monto: 700 }, { id: 'pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', accion: 'aplicar', monto: 280 }] })
+      expect(b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'pf-4e870b82-7519-44dc-b406-8bad102c664e', accion: 'aplicar', monto: 700 }] }).error.code).toBe('NOT_FOUND')
+      const ap = b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', accion: 'aplicar', monto: 280 }] })
       expect(ap.ok, JSON.stringify(ap)).toBe(true)
-      expect(b.post('data', { fresh: true }).data.cajas.some((c: unknown[]) => c[1] === 'Mascotas' && String(c[0]).length <= 40)).toBe(true)
+      expect(b.post('data', { fresh: true }).data.fondos.some((f: unknown[]) => f[1] === 'Sodexo')).toBe(true)
+      expect(sh.rows.some(r => r[1] === 'subcaja')).toBe(true)
     })
   })
 
@@ -380,62 +384,6 @@ describe('backend Apps Script', () => {
     expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(1)
   })
 
-  it('v1.7 cajas personalizadas: hoja antigua se amplía, alcance único, general única, eliminar y reordenar sin tocar gastos', () => {
-    const sh = b.ss.getSheetByName('CAJAS')!
-    sh.rows = sh.rows.map(r => r.slice(0, 7))                             // hoja de una versión anterior
-    sh.rows[0] = ['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden']
-    const antes = sh.rows.slice(1).map(r => [...r])
-    const caja = (o: Record<string, unknown>) => b.post('saveCaja', { nombre: 'X', presupuesto: 100, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9, ...o })
-    const r = caja({ id: 'caja-salud', nombre: 'Caja Salud', descripcion: 'Médico y farmacia' })
-    expect(r.ok).toBe(true)
-    expect(sh.rows[0]).toHaveLength(10)
-    expect(sh.rows.slice(1, antes.length + 1).map(x => x.slice(0, 7))).toEqual(antes)   // cajas existentes intactas
-    expect(r.data.slice(7)).toEqual([true, 'Médico y Farmacia', ''])
-    // mismo alcance y valor (otra capitalización) → rechazado; desactivada sí se permite
-    expect(caja({ id: 'caja-salud2', filtroValor: ' salud ' }).error.message).toMatch(/ya usa Categoría = /)
-    expect(caja({ id: 'caja-salud2', filtroValor: 'salud', activo: false }).ok).toBe(true)
-    // alcances por ámbito y por subcategoría (Categoría › Subcategoría)
-    expect(caja({ id: 'caja-pareja', filtroCampo: 'Ámbito', filtroValor: 'Pareja' }).ok).toBe(true)
-    expect(caja({ id: 'caja-linea', filtroCampo: 'Subcategoría', filtroValor: 'Servicios › Línea Celular' }).ok).toBe(true)
-    expect(caja({ id: 'caja-x', filtroCampo: 'Categoría', filtroValor: '' }).error.code).toBe('VALIDATION')
-    expect(caja({ id: 'caja-x', presupuesto: -1 }).error.code).toBe('VALIDATION')
-    // una sola caja general, que no cambia de alcance ni se elimina
-    expect(caja({ id: 'otra-general', filtroCampo: 'Todos' }).error.message).toMatch(/solo puede haber una/)
-    expect(caja({ id: 'general', filtroCampo: 'Categoría', filtroValor: 'Auto' }).error.message).toMatch(/siempre abarca/)
-    expect(b.post('deleteCaja', { id: 'general' }).error.code).toBe('VALIDATION')
-    // reordenar en una escritura; la general queda primera
-    const w = sh.writes
-    expect(b.post('reorderCajas', { ids: ['caja-linea', 'auto', 'caja-salud'] }).ok).toBe(true)
-    expect(sh.writes - w).toBe(1)
-    const orden = (id: string) => sh.rows.find(x => x[0] === id)![6]
-    expect([orden('general'), orden('caja-linea'), orden('auto'), orden('caja-salud')]).toEqual([1, 2, 3, 4])
-    // eliminar una subcaja no toca GASTOS ni PRESUPUESTOS
-    b.post('saveGasto', gasto())
-    b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'caja-salud', monto: 50 })
-    const g0 = JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows), p0 = JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)
-    expect(b.post('deleteCaja', { id: 'caja-salud' }).data.eliminada).toBe(true)
-    expect(sh.rows.some(x => x[0] === 'caja-salud')).toBe(false)
-    expect(JSON.stringify(b.ss.getSheetByName('GASTOS')!.rows)).toBe(g0)
-    expect(JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)).toBe(p0)
-    const d = b.post('data', { fresh: true }).data
-    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-salud2').slice(7)).toEqual([false, '', ''])
-    expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[7]).toBe(true)  // fila antigua sin Activo = activa
-  })
-
-  it('v1.10 icono de caja: se guarda y se lee; vacío = automático; clave inválida se rechaza; cajas existentes intactas', () => {
-    const caja = (o: Record<string, unknown>) => b.post('saveCaja', { nombre: 'Viaje a Ica', presupuesto: 1000, filtroCampo: 'Categoría', filtroValor: 'Viajes', color: '#0B7285', orden: 9, ...o })
-    const antes = JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows.slice(1))
-    expect(caja({ id: 'caja-ica', icono: 'plane' }).data[9]).toBe('plane')
-    expect(caja({ id: 'caja-ica' }).data[9]).toBe('')                      // sin icono = automático (el de su alcance)
-    expect(caja({ id: 'caja-ica', icono: 'Plane!' }).error.code).toBe('VALIDATION')
-    expect(caja({ id: 'caja-ica', icono: 'x'.repeat(31) }).error.code).toBe('VALIDATION')
-    caja({ id: 'caja-ica', icono: 'tree-palm' })
-    const d = b.post('data', { fresh: true }).data
-    expect(d.cajas.find((x: unknown[]) => x[0] === 'caja-ica')[9]).toBe('tree-palm')
-    expect(JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows.slice(1, 1 + JSON.parse(antes).length))).toBe(antes)
-    expect(d.cajas.find((x: unknown[]) => x[0] === 'auto')[9]).toBe('')   // cajas anteriores: automático
-  })
-
   it('v1.10 plantillas: tipo de gasto y recurrente se guardan, se conservan al editar sin enviarlos y se validan', () => {
     const id = 'pl-11111111-2222-4333-8444-0000000000a1'
     const base = { id, ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', moneda: 'PEN', medioPago: 'Yape' }
@@ -513,21 +461,10 @@ describe('backend Apps Script', () => {
       expect(b.post('saveMedio', { nombre: ' libre ' }).error.code).toBe('VALIDATION')
     })
 
-    it('cajas: guardar escribe Activo, Icono = auto y Todos en la general; la web recibe icono vacío y valor vacío en la general', () => {
-      const g = b.post('saveCaja', { id: 'general', nombre: 'Caja general', presupuesto: 3000, filtroCampo: 'Todos', filtroValor: '', color: '#1e3a8a', orden: 1 })
-      expect(g.data.slice(3)).toEqual(['Todos', '', '#1e3a8a', 1, true, '', ''])
-      const fila = b.ss.getSheetByName('CAJAS')!.rows.find(r => r[0] === 'general')!
-      expect([fila[4], fila[7], fila[9]]).toEqual(['Todos', true, 'auto'])
-      const d = b.post('data', { fresh: true }).data
-      const general = d.cajas.find((x: unknown[]) => x[0] === 'general')
-      expect([general[4], general[7], general[9]]).toEqual(['', true, ''])
-    })
-
-    it('completarVacios rellena solo lo vacío (cajas, fondos, catálogo, config), no pisa nada y es idempotente', () => {
-      const cajas = b.ss.getSheetByName('CAJAS')!
-      // como en tu hoja: general sin Activo ni valor, otra caja sin orden ni icono
-      cajas.rows[1] = ['general', 'Caja general', 3000, 'Todos', '', '#1e3a8a', 1, '', '']
-      cajas.rows[2] = ['auto', 'Caja Auto', 250, 'Categoría', 'Auto', '#64748b', '', true, 'Mi nota', 'rocket']
+    it('completarVacios rellena solo lo vacío (fondos, catálogo, config), no pisa nada, es idempotente y ya no toca cajas', () => {
+      const cajas = b.ss.insertSheet('CAJAS')   // hoja anterior a v1.28: queda intacta
+      cajas.rows = [['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción', 'Icono'], ['general', 'Caja general', 3000, 'Todos', '', '#1e3a8a', 1, '', '']]
+      const cajas0 = JSON.stringify(cajas.rows)
       b.post('saveFondo', { id: 'f-1', nombre: 'General', monto: 3109.75, moneda: 'PEN', color: '#1E3A8A', orden: 1, recurrencia: 'unica', mes: '2026-10' })
       const f = b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows.find(r => r[0] === 'f-1')!
       f[5] = ''; f[10] = ''                                                    // celdas vacías, como las que tenías
@@ -542,13 +479,10 @@ describe('backend Apps Script', () => {
         { ambito: 'Personal', categoria: 'Auto', subcategoria: 'SOAT', icono: 'Bad Icon!', color: 'rojo' },
       ] })
       expect(r.ok).toBe(true)
-      expect(r.data.cajas).toBeGreaterThanOrEqual(2)
+      expect(r.data.cajas).toBe(0)
+      expect(JSON.stringify(cajas.rows)).toBe(cajas0)
       expect(r.data.fondos).toBe(1)
       expect(r.data.catalogo).toBeGreaterThan(0)
-      const gen = cajas.rows[1]
-      expect([gen[3], gen[4], gen[6], gen[7], gen[9]]).toEqual(['Todos', 'Todos', 1, true, 'auto'])
-      const aut = cajas.rows[2]
-      expect([aut[6], aut[7], aut[8], aut[9]]).toEqual([5, true, 'Mi nota', 'rocket'])      // Orden = siguiente al mayor; lo demás intacto
       expect([f[5], f[10]]).toEqual(['auto', 'Libre'])
       const personal = cat.rows.find(x => x[0] === 'Personal' && x[1] === '')!
       expect([personal[3], personal[4], personal[5]]).toEqual([true, 'user', '#4F7BE8'])
@@ -568,11 +502,10 @@ describe('backend Apps Script', () => {
       expect(personal[4]).toBe('user')                                                       // no pisó lo ya relleno
     })
 
-    it('la web lee las cajas y fondos ya rellenadas sin marcadores', () => {
-      b.post('completarVacios', {})
+    it('la lectura ya no trae cajas ni presupuestos (listas vacías solo por compatibilidad con la web 1.27)', () => {
+      b.ss.insertSheet('CAJAS').rows = [['ID'], ['general', 'Caja general', 3000, 'Todos', '', '#1e3a8a', 1]]
       const d = b.post('data', { fresh: true }).data
-      for (const c of d.cajas) expect(c[9]).toBe('')
-      expect(d.cajas.find((x: unknown[]) => x[3] === 'Todos')[4]).toBe('')
+      expect([d.cajas, d.presupuestos]).toEqual([[], []])
     })
   })
 
@@ -581,18 +514,18 @@ describe('backend Apps Script', () => {
     beforeEach(() => { b.admin(); b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES') })
     const fondo = (o: Record<string, unknown>) => b.post('saveFondo', { nombre: 'X', monto: 0, moneda: 'PEN', color: '#16A085', orden: 1, recurrencia: 'mensual', mes: '', ...o })
 
-    it('la primera fondo crea las hojas con respaldo previo (una sola vez) sin tocar GASTOS, CAJAS ni PRESUPUESTOS', () => {
+    it('el primer fondo crea las hojas con respaldo previo (una sola vez) sin tocar GASTOS ni el catálogo', () => {
       b.post('saveGasto', gasto())
-      const otras = ['GASTOS', 'CAJAS', 'PRESUPUESTOS'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))
+      const otras = ['GASTOS', 'CATALOGO'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))
       expect(b.post('data', { fresh: true }).data.fondos).toEqual([])
       const r = fondo({ id: 'f-sodexo', nombre: 'Sodexo', monto: 280, medioPago: 'Sodexo' })
       expect(r.ok).toBe(true)
       expect(b.ss.copies).toHaveLength(1)
-      expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows[0]).toHaveLength(14)
+      expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows[0]).toHaveLength(15)
       expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.rows[0]).toEqual(['Fondo ID', 'Mes', 'Monto', 'Modo', 'Actualizado en'])
       fondo({ id: 'f-extra1', nombre: 'Extra 1', monto: 1000, recurrencia: 'unica', mes: '2026-10' })
       expect(b.ss.copies).toHaveLength(1)                      // idempotente: no vuelve a respaldar
-      expect(['GASTOS', 'CAJAS', 'PRESUPUESTOS'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))).toEqual(otras)
+      expect(['GASTOS', 'CATALOGO'].map(n => JSON.stringify(b.ss.getSheetByName(n)!.rows))).toEqual(otras)
       const d = b.post('data', { fresh: true }).data
       expect(d.fondos.map((f: unknown[]) => [f[0], f[1], f[2], f[6], f[8], f[9], f[10]])).toEqual([
         ['f-sodexo', 'Sodexo', 280, true, 'mensual', '', 'Sodexo'], ['f-extra1', 'Extra 1', 1000, true, 'unica', '2026-10', '']])
@@ -651,34 +584,6 @@ describe('backend Apps Script', () => {
       expect(['f-a', 'f-b', 'f-c'].map(id => sh.rows.find(r => r[0] === id)![7])).toEqual([2, 3, 1])
     })
 
-    it('migrarGeneralAFondo: respaldo, copia caja general y sus ajustes mensuales, idempotente, no convierte Sodexo', () => {
-      b.post('savePresupuesto', { periodo: '2026-09', cajaId: 'general', monto: 3200 })
-      b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 300 })
-      const cajas0 = JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows), pres0 = JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)
-      const general = b.ss.getSheetByName('CAJAS')!.rows.find(r => r[3] === 'Todos')!
-      const r = b.post('migrarGeneralAFondo')
-      expect(r.ok).toBe(true)
-      expect(r.data.creada).toBe(true)
-      expect(r.data.meses).toBe(1)
-      expect(b.ss.copies.length).toBe(2)                         // respaldo al crear hojas + respaldo de la migración
-      const d = b.post('data', { fresh: true }).data
-      expect(d.fondos).toHaveLength(1)
-      expect(d.fondos[0].slice(0, 4)).toEqual(['fondo-general', 'General', general[2], 'PEN'])
-      expect(d.fondosMeses).toEqual([['fondo-general', '2026-09', 3200, 'solo']])
-      expect(JSON.stringify(b.ss.getSheetByName('CAJAS')!.rows)).toBe(cajas0)
-      expect(JSON.stringify(b.ss.getSheetByName('PRESUPUESTOS')!.rows)).toBe(pres0)
-      const again = b.post('migrarGeneralAFondo')
-      expect(again.data.creada).toBe(false)
-      expect(b.post('data', { fresh: true }).data.fondos).toHaveLength(1)
-      expect(b.post('data', { fresh: true }).data.fondosMeses).toHaveLength(1)
-    })
-
-    it('migrar se detiene si ya hay un fondo llamado General creada a mano', () => {
-      fondo({ id: 'f-mia', nombre: 'General', monto: 3500 })
-      const r = b.post('migrarGeneralAFondo')
-      expect(r.error.message).toMatch(/no se migró nada/)
-      expect(b.post('data', { fresh: true }).data.fondos).toHaveLength(1)
-    })
   })
 
   describe('v1.9 atajo de iPhone', () => {
@@ -825,10 +730,10 @@ describe('backend Apps Script', () => {
     expect(ca.similares.length).toBeGreaterThanOrEqual(1)
     expect(cs.indice!).toBeLessThan(100)
     // Presupuesto por fondo de prueba (sep excedido) y evolución con cambios entre meses
-    const ctx = { base: 'PEN', rates, today: '2026-10-12', cajas: d.cajas, presupuestos: d.presupuestos, fondos: d.fondos, fondosMeses: d.fondosMeses }
+    const ctx = { base: 'PEN', rates, today: '2026-10-12', fondos: d.fondos, fondosMeses: d.fondosMeses }
     const aSep = aggregate(d.gastos, sep, ctx)
-    expect(aSep.cajas.fondos.lista.find(x => x.fondo.id === 'f-prueba-presupuesto')!.aporta).toBe(150000)
-    expect(aSep.cajas.disponible).toBeLessThan(0)
+    expect(aSep.presupuesto.fondos.find(x => x.fondo.id === 'f-prueba-presupuesto')!.aporta).toBe(150000)
+    expect(aSep.presupuesto.disponible).toBeLessThan(0)
     const evo = compararPeriodos({ gastos: d.gastos, f: sep, actual: { desde: sep.desde, hasta: sep.hasta }, anterior: { desde: ago.desde, hasta: ago.hasta }, nivel: 'categoria', base: 'PEN', rates })
     expect(evo.hayHistorial).toBe(true)
     expect(evo.aumentaron.some(f => f.nombre === 'Alimentación')).toBe(true)
@@ -852,7 +757,7 @@ describe('backend Apps Script', () => {
   })
 
   it('setup se detiene si una hoja tiene encabezados distintos (no sobrescribe)', () => {
-    b.ss.getSheetByName('CAJAS')!.rows[0] = ['otra', 'cosa']
+    b.ss.getSheetByName('ORDEN_GASTOS')!.rows[0] = ['otra', 'cosa']
     expect(() => b.g.setup()).toThrow(/encabezados distintos/)
   })
 
@@ -997,21 +902,17 @@ describe('backend Apps Script', () => {
     expect(b.ss.getSheetByName('GASTOS')!.rows).toHaveLength(1)
   })
 
-  it('catálogo, medios, cajas, presupuestos y configuración hacen upsert sin duplicar', () => {
+  it('catálogo, medios y configuración hacen upsert sin duplicar; las acciones de cajas ya no existen', () => {
     b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', activo: true })
     b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', activo: false })
     b.post('saveMedio', { nombre: 'yape', activo: false })
-    b.post('saveCaja', { id: 'auto', nombre: 'Caja Auto', presupuesto: 500, filtroCampo: 'Categoría', filtroValor: 'Auto', color: '#64748b', orden: 2 })
-    b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 300 })
-    b.post('savePresupuesto', { periodo: '2026-10', cajaId: 'auto', monto: 350 })
+    for (const a of ['saveCaja', 'deleteCaja', 'reorderCajas', 'savePresupuesto', 'migrarGeneralAFondo']) expect(b.post(a, { id: 'auto' }).error.code).toBe('BAD_ACTION')
     b.post('saveConfig', { clave: 'tipo_cambio_USD', valor: '3.75' })
     const d = b.post('data').data
     expect(d.catalogo.filter((c: unknown[]) => c[0] === 'Personal' && c[2] === 'Almuerzo')).toEqual([['Personal', 'Alimentación', 'Almuerzo', false, '', '', 10102]])
     expect(d.medios.find((m: unknown[]) => String(m[0]).toLowerCase() === 'yape')[1]).toBe(false)
     expect(d.medios).toHaveLength(6)
     expect(d.medios[0][0]).toBe('Yape')
-    expect(d.cajas.find((c: unknown[]) => c[0] === 'auto')[2]).toBe(500)
-    expect(d.presupuestos).toEqual([['2026-10', 'auto', 350]])
     expect(d.config.tipo_cambio_USD).toBe('3.75')
   })
 
@@ -1141,37 +1042,17 @@ describe('backend Apps Script', () => {
       expect(fu('f-otra', 'sodexo (copia)', 3).error.code).toBe('VALIDATION')              // el nombre sigue siendo único
     })
 
-    it('el orden y el ON/OFF de fondos y subcajas se guardan en la hoja y sobreviven a una lectura fresca', () => {
+    it('el orden y el ON/OFF de los fondos se guardan en la hoja y sobreviven a una lectura fresca', () => {
       fu('f-1', 'A', 1); fu('f-2', 'B', 2); fu('f-3', 'C', 3)
       b.post('reorderFondos', { ids: ['f-3', 'f-1', 'f-2'] })
       fu('f-2', 'B', 3, { activo: false })
-      const caja = (id: string, valor: string, orden: number, activo = true) => b.post('saveCaja', { id, nombre: id, presupuesto: 10, filtroCampo: 'Categoría', filtroValor: valor, color: '#64748b', orden, activo })
-      caja('c-1', 'Auto', 2); caja('c-2', 'Salud', 3)
-      b.post('reorderCajas', { ids: ['c-2', 'c-1'] })
-      caja('c-1', 'Auto', 3, false)
       const d = b.post('data', { fresh: true }).data
       const orden = (xs: unknown[][], k: number) => [...xs].sort((x, y) => Number(x[k]) - Number(y[k])).map(x => x[0])
       expect(orden(d.fondos, 7)).toEqual(['f-3', 'f-1', 'f-2'])
       expect(d.fondos.find((f: unknown[]) => f[0] === 'f-2')[6]).toBe(false)
-      expect(orden(d.cajas.filter((c: unknown[]) => String(c[0]).startsWith('c-')), 6)).toEqual(['c-2', 'c-1'])
-      expect(d.cajas.find((c: unknown[]) => c[0] === 'c-1')[7]).toBe(false)
-      expect(b.ss.getSheetByName('CAJAS')!.rows.find(r => r[0] === 'c-1')![7]).toBe(false)   // TRUE/FALSE real en la hoja
+      expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.rows.find(r => r[0] === 'f-2')![6]).toBe(false)   // TRUE/FALSE real en la hoja
     })
 
-    it('clonar una subcaja guarda otra fila con ID nuevo, inactiva y sin monto; eliminar la subcaja no borra gastos', () => {
-      const o = { presupuesto: 250, filtroCampo: 'Ámbito', filtroValor: 'Familia', color: '#64748b', orden: 3 }
-      expect(b.post('saveCaja', { id: 'c-auto', nombre: 'Familia', ...o }).error).toBeUndefined()
-      expect(b.post('saveGasto', gasto()).error).toBeUndefined()
-      const copia = { ...o, id: 'c-copia', nombre: 'Familia (Copia)', presupuesto: 0, activo: false }
-      expect(b.post('saveCaja', copia).error).toBeUndefined()      // mismo alcance que la original: permitido porque nace inactiva
-      b.post('saveCaja', copia)                                    // reintento con el mismo ID: no duplica
-      expect(b.post('data', { fresh: true }).data.cajas.filter((c: unknown[]) => c[1] === 'Familia (Copia)')).toHaveLength(1)
-      expect(b.post('saveCaja', { ...copia, id: 'c-otra', nombre: 'Otra', activo: true }).error.code).toBe('VALIDATION')   // dos activas con el mismo alcance
-      expect(b.post('deleteCaja', { id: 'c-auto' }).data.eliminada).toBe(true)
-      const d = b.post('data', { fresh: true }).data
-      expect(d.gastos).toHaveLength(1)
-      expect(d.cajas.map((c: unknown[]) => c[0])).not.toContain('c-auto')
-    })
   })
 
   describe('v1.15 categorías: orden manual y eliminación segura', () => {
@@ -1251,11 +1132,12 @@ describe('backend Apps Script', () => {
       expect(cat().some(r => r[0] === 'Personal' && r[1] === 'Salud')).toBe(false)
       expect(cat().some(r => r[0] === 'Familia' && r[1] === 'Salud Familiar')).toBe(true)    // otros ámbitos intactos
       expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Salud', cascada: true }).data.eliminada).toBe(false)   // idempotente
-      // "Auto" tiene la subcaja inicial "Caja Auto": no se puede eliminar aunque se pida la cascada.
-      expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Auto', cascada: true }).error.message).toMatch(/1 subcaja/)
+      // Un fondo que cubre "Personal › Auto" la protege: no se puede eliminar aunque se pida la cascada.
+      b.post('saveFondo', { id: 'f-auto', nombre: 'Auto', monto: 400, moneda: 'PEN', recurrencia: 'mensual', mes: '', reglas: [{ desde: '', medios: 'todos', listaMedios: [], cobertura: 'categoria', rutas: [{ ambito: 'Personal', categoria: 'Auto', subcategoria: '' }], restringeMedio: false }] })
+      expect(b.post('deleteCategoria', { ambito: 'Personal', categoria: 'Auto', cascada: true }).error.message).toMatch(/1 fondo\(s\) del presupuesto/)
     })
 
-    it('deleteCategoria se niega si hay gastos, plantillas (o compromisos) o subcajas, aunque se pida la cascada; los datos no cambian', () => {
+    it('deleteCategoria se niega si hay gastos, plantillas (o compromisos) o fondos que la cubren, aunque se pida la cascada; los datos no cambian', () => {
       const total = () => b.ss.getSheetByName('CATALOGO')!.rows.length
       const n0 = total()
       b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz' }))
@@ -1265,15 +1147,18 @@ describe('backend Apps Script', () => {
       b.post('savePlantilla', { id: 'pl-00000000-0000-4000-8000-000000000001', mode: 'create', ambito: 'Familia', categoria: 'Hogar', subcategoria: 'Limpieza', descripcion: 'Limpieza', monto: 10, moneda: 'PEN', medioPago: 'Yape', esCompromiso: true })
       e = b.post('deleteCategoria', { ambito: 'Familia', categoria: 'Hogar', cascada: true })
       expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 plantilla\(s\) \(1 compromiso/)
-      b.post('saveCaja', { id: 'c-edu', nombre: 'Caja Salud Familiar', presupuesto: 50, filtroCampo: 'Categoría', filtroValor: 'Salud Familiar', color: '#64748b', orden: 2 })
+      // Una versión ANTERIOR de las reglas también cuenta: borrar la categoría dejaría ese mes sin cobertura.
+      b.post('saveFondo', { id: 'f-edu', nombre: 'Salud', monto: 50, moneda: 'PEN', recurrencia: 'mensual', mes: '', reglas: [
+        { desde: '', medios: 'todos', listaMedios: [], cobertura: 'categoria', rutas: [{ ambito: 'Familia', categoria: 'Salud Familiar', subcategoria: '' }], restringeMedio: false },
+        { desde: '2026-11', medios: 'todos', listaMedios: [], cobertura: 'todos', rutas: [], restringeMedio: false }] })
       e = b.post('deleteCategoria', { ambito: 'Familia', categoria: 'Salud Familiar', cascada: true })
-      expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 subcaja/)
+      expect(e.error.code).toBe('IN_USE'); expect(e.error.message).toMatch(/1 fondo/)
       expect(total()).toBe(n0)
       expect(b.post('data', { fresh: true }).data.gastos).toHaveLength(1)                    // ningún gasto se tocó
     })
 
-    it('una categoría que existe también en otro ámbito se puede eliminar de uno aunque exista una subcaja por Categoría (sigue funcionando en el otro)', () => {
-      b.post('saveCaja', { id: 'c-alim', nombre: 'Caja Alimentación', presupuesto: 50, filtroCampo: 'Categoría', filtroValor: 'Alimentación', color: '#64748b', orden: 2 })
+    it('una categoría que existe también en otro ámbito se puede eliminar de uno aunque un fondo la cubra en "todos los ámbitos" (sigue funcionando en el otro)', () => {
+      b.post('saveFondo', { id: 'f-alim', nombre: 'Alimentación', monto: 50, moneda: 'PEN', recurrencia: 'mensual', mes: '', reglas: [{ desde: '', medios: 'todos', listaMedios: [], cobertura: 'categoria', rutas: [{ ambito: '', categoria: 'Alimentación', subcategoria: '' }], restringeMedio: false }] })
       const r = b.post('deleteCategoria', { ambito: 'Amigos', categoria: 'Alimentación', cascada: true })
       expect(r.error).toBeUndefined()
       expect(r.data.eliminada).toBe(true)
@@ -1305,13 +1190,13 @@ describe('backend Apps Script', () => {
   })
 })
 
-describe('plantillas de fondos y de subcajas (v1.17)', () => {
+describe('plantillas de fondos (v1.17)', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const fondo = (o: Record<string, unknown> = {}) => b.post('saveFondo', { id: 'f-general', nombre: 'General', monto: 3500, moneda: 'PEN', color: '#1E3A8A', orden: 1, recurrencia: 'mensual', mes: '', ...o })
-  const caja = (o: Record<string, unknown> = {}) => b.post('saveCaja', { id: 'c-hogar', nombre: 'Servicios del Hogar', presupuesto: 400, filtroCampo: 'Categoría', filtroValor: 'Servicios', color: '#64748b', orden: 2, ...o })
   const plF = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: 'pf-1', tipo: 'fondo', nombre: 'Aporte de Pareja', monto: 1000, moneda: 'PEN', medios: '', recurrencia: 'mensual', ...o })
-  const plS = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: 'ps-1', tipo: 'subcaja', nombre: 'Servicios del Hogar', monto: 400, campo: 'Categoría', valor: 'Servicios', ...o })
+  const plG = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: 'ps-1', tipo: 'fondo', nombre: 'General mensual', monto: 3500, moneda: 'PEN', medios: '', recurrencia: 'mensual', origenId: 'f-general', ...o })
+  const meses = () => datos().fondosMeses.map((m: unknown[]) => m.slice(0, 3))
   const datos = () => b.post('data', { fresh: true }).data
   const snapshot = () => { const d = datos(); return JSON.stringify({ f: d.fondos, fm: d.fondosMeses, c: d.cajas, p: d.presupuestos, g: d.gastos }) }
 
@@ -1336,52 +1221,45 @@ describe('plantillas de fondos y de subcajas (v1.17)', () => {
     expect(datos().plantillasFin).toHaveLength(1)
   })
 
-  it('B: una plantilla desde una subcaja no cambia el importe reservado', () => {
-    caja()
-    const antes = snapshot()
-    expect(plS({ origenId: 'c-hogar' }).ok).toBe(true)
-    expect(snapshot()).toBe(antes)
-  })
-
   it('C: aplicar 450 en noviembre solo modifica noviembre y es idempotente (D)', () => {
-    caja()
-    plS({ origenId: 'c-hogar' })
+    fondo()
+    plG()
     const r1 = b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
     expect(r1.ok).toBe(true)
-    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
-    expect(datos().cajas.find((c: unknown[]) => c[0] === 'c-hogar')[2]).toBe(400)   // el habitual no cambia
-    const w = b.ss.getSheetByName('PRESUPUESTOS')!.writes, nCajas = datos().cajas.length
+    expect(meses()).toEqual([['f-general', '2026-11', 450]])
+    expect(datos().fondos.find((f: unknown[]) => f[0] === 'f-general')[2]).toBe(3500)   // el habitual no cambia
+    const w = b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.writes, nFondos = datos().fondos.length
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
-    expect(b.ss.getSheetByName('PRESUPUESTOS')!.writes).toBe(w)           // la repetición no escribe
-    expect(datos().presupuestos).toHaveLength(1)
-    expect(datos().cajas).toHaveLength(nCajas)                              // no se duplicó la subcaja
+    expect(b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!.writes).toBe(w)           // la repetición no escribe
+    expect(meses()).toHaveLength(1)
+    expect(datos().fondos).toHaveLength(nFondos)                              // no se duplicó el fondo
     const est = datos().plantillasFin[0][15]
     expect(est['2026-11']).toEqual({ e: 'aplicada', m: 450 })
   })
 
-  it('aplicar con el mismo importe habitual no escribe PRESUPUESTOS; cambiar el importe actualiza sin duplicar', () => {
-    caja(); plS({ origenId: 'c-hogar' })
-    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 400 }] })
-    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 400]])    // v1.19: desde el corte, aplicar SIEMPRE deja constancia del mes
-    b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-1', accion: 'aplicar', monto: 400 }] })
-    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 400]])    // antes del corte (comportamiento histórico): mismo importe, sin escribir
+  it('aplicar con el mismo importe habitual antes del corte no escribe; desde el corte deja constancia; cambiar el importe actualiza sin duplicar', () => {
+    fondo(); plG()
+    b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 3500 }] })
+    expect(meses()).toEqual([['f-general', '2026-12', 3500]])    // v1.19: desde el corte, aplicar SIEMPRE deja constancia del mes
+    b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-1', accion: 'aplicar', monto: 3500 }] })
+    expect(meses()).toEqual([['f-general', '2026-12', 3500]])    // antes del corte (comportamiento histórico): mismo importe, sin escribir
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 500 }] })
     b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id: 'ps-1', accion: 'aplicar', monto: 520 }] })
-    expect(datos().presupuestos).toEqual([['2026-12', 'c-hogar', 520]])
+    expect(meses()).toEqual([['f-general', '2026-12', 520]])
   })
 
-  it('volver a Pendiente restaura lo que había antes; omitir no escribe presupuestos', () => {
-    caja(); plS({ origenId: 'c-hogar' })
-    b.post('savePresupuesto', { periodo: '2026-11', cajaId: 'c-hogar', monto: 380 })      // ajuste manual previo
+  it('volver a Pendiente restaura lo que había antes; omitir no escribe importes', () => {
+    fondo(); plG()
+    b.post('saveFondoMes', { fondoId: 'f-general', mes: '2026-11', modo: 'solo', monto: 380 })      // ajuste manual previo
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
-    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
+    expect(meses()).toEqual([['f-general', '2026-11', 450]])
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'pendiente' }] })
-    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 380]])
+    expect(meses()).toEqual([['f-general', '2026-11', 380]])
     expect(datos().plantillasFin[0][15]['2026-11']).toBeUndefined()
     b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: 'ps-1', accion: 'omitir' }] })
     expect(datos().plantillasFin[0][15]['2026-10'].e).toBe('omitida')
-    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 380]])
+    expect(meses()).toEqual([['f-general', '2026-11', 380]])
   })
 
   it('plantilla de fondo sin fondo enlazado: la crea una sola vez con ID estable y solo ajusta ese mes', () => {
@@ -1401,8 +1279,8 @@ describe('plantillas de fondos y de subcajas (v1.17)', () => {
   })
 
   it('lote todo o nada: una plantilla inválida o inactiva no aplica ninguna', () => {
-    caja(); plS({ origenId: 'c-hogar' }); fondo(); plF({ origenId: 'f-general', nombre: 'General plantilla', monto: 3500 })
-    b.post('savePlantillaFin', { id: 'ps-1', tipo: 'subcaja', nombre: 'Servicios del Hogar', monto: 400, campo: 'Categoría', valor: 'Servicios', activo: false, origenId: 'c-hogar' })
+    fondo(); plF({ origenId: 'f-general', nombre: 'General plantilla', monto: 3500 })
+    b.post('savePlantillaFin', { id: 'ps-1', tipo: 'fondo', nombre: 'Inactiva', monto: 400, moneda: 'PEN', medios: '', recurrencia: 'mensual', activo: false })
     const antes = snapshot()
     const r = b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-1', accion: 'aplicar', monto: 3600 }, { id: 'ps-1', accion: 'aplicar', monto: 450 }] })
     expect(r.ok).toBe(false)
@@ -1411,9 +1289,9 @@ describe('plantillas de fondos y de subcajas (v1.17)', () => {
   })
 
   it('E: clonar crea una definición nueva sin vínculo, sin fondo, sin gastos ni dinero', () => {
-    caja(); plS({ origenId: 'c-hogar' })
+    fondo(); plG()
     const antes = snapshot()
-    expect(plS({ id: 'ps-copia', nombre: 'Servicios del Hogar (Copia)', origenId: '' }).ok).toBe(true)
+    expect(plG({ id: 'ps-copia', nombre: 'General mensual (Copia)', origenId: '' }).ok).toBe(true)
     const pls = datos().plantillasFin
     expect(pls).toHaveLength(2)
     expect(pls.find((p: unknown[]) => p[0] === 'ps-copia')[14]).toBe('')
@@ -1431,13 +1309,13 @@ describe('plantillas de fondos y de subcajas (v1.17)', () => {
   })
 
   it('eliminar una plantilla solo borra la definición (no el fondo ni lo aplicado)', () => {
-    caja(); plS({ origenId: 'c-hogar' })
+    fondo(); plG()
     b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'ps-1', accion: 'aplicar', monto: 450 }] })
     expect(b.post('deletePlantillaFin', { id: 'ps-1' }).data.eliminada).toBe(true)
     expect(b.post('deletePlantillaFin', { id: 'ps-1' }).data.eliminada).toBe(false)     // idempotente
     expect(datos().plantillasFin).toHaveLength(0)
-    expect(datos().cajas.some((c: unknown[]) => c[0] === 'c-hogar')).toBe(true)
-    expect(datos().presupuestos).toEqual([['2026-11', 'c-hogar', 450]])
+    expect(datos().fondos.some((f: unknown[]) => f[0] === 'f-general')).toBe(true)
+    expect(meses()).toEqual([['f-general', '2026-11', 450]])
   })
 })
 
@@ -1471,17 +1349,14 @@ describe('normalización de descripciones en el backend (v1.19)', () => {
     expect(b.ss.getSheetByName('GASTOS')!.rows).toHaveLength(3)
   })
 
-  it('gastos por lote, plantilla de gasto, subcaja y plantilla financiera normalizan igual', () => {
+  it('gastos por lote, plantilla de gasto y plantilla financiera normalizan igual', () => {
     const g = (n: number, d: string) => ({ ...gasto({ id: `bbbbbbbb-0000-4000-8000-00000000010${n}`, descripcion: d }), mode: undefined })
     const lb = b.post('saveGastosBatch', { loteId: 'lote-00000000-0000-4000-8000-000000000009', gastos: [g(1, 'LUZ Y AGUA'), g(2, 'seguro de mi papa')] }); expect(lb.error).toBeUndefined()
     const rows = b.ss.getSheetByName('GASTOS')!.rows
     expect([rows[1][5], rows[2][5]]).toEqual(['Luz y Agua', 'Seguro de mi Papa'])
     const pl = b.post('savePlantilla', { id: 'pl-11111111-2222-4333-8444-555555555555', mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Internet', descripcion: 'PAGO DE INTERNET' })
     expect(pl.data[4]).toBe('Pago de Internet')
-    const caja = b.post('saveCaja', { id: 'c-salud', nombre: 'Salud', presupuesto: 100, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9, descripcion: 'médico, farmacia y exámenes' })
-    expect(caja.error).toBeUndefined()
-    expect(b.ss.getSheetByName('CAJAS')!.rows.at(-1)![8]).toBe('Médico, Farmacia y Exámenes')
-    const pf = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'subcaja', nombre: 'Auto', monto: 250, campo: 'Categoría', valor: 'Auto', descripcion: 'MANTENIMIENTO DEL AUTO' })
+    const pf = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'Auto', monto: 250, moneda: 'PEN', medios: '', recurrencia: 'mensual', descripcion: 'MANTENIMIENTO DEL AUTO' })
     expect(pf.ok).toBe(true)
     expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows.at(-1)![8]).toBe('Mantenimiento del Auto')
   })
@@ -1498,13 +1373,12 @@ describe('normalización de descripciones en el backend (v1.19)', () => {
 })
 
 
-describe('aislamiento mensual de fondos y subcajas (v1.19)', () => {
+describe('aislamiento mensual de fondos (v1.19)', () => {
   let b: ReturnType<typeof load>
   const datos = () => b.post('data').data
   beforeEach(() => {
     b = load(); b.g.setup()
     b.post('saveFondo', { id: 'f-general', nombre: 'General', monto: 3000, moneda: 'PEN', color: '#1e3a8a', icono: 'auto', recurrencia: 'mensual', mes: '2026-10', activo: true, medioPago: '', orden: 1 })
-    b.post('saveCaja', { id: 'c-hogar', nombre: 'Servicios del Hogar', presupuesto: 400, filtroCampo: 'Categoría', filtroValor: 'Servicios', color: '#16A085', orden: 2 })
   })
   const efectivo = (mes: string) => {
     const d = datos()
@@ -1528,25 +1402,12 @@ describe('aislamiento mensual de fondos y subcajas (v1.19)', () => {
     expect(efectivo('2026-10')).toEqual([3000]); expect(efectivo('2026-11')).toEqual([3500]); expect(efectivo('2026-12')).toEqual([0])
   })
 
-  it('subcajas: la reserva de noviembre no existe en octubre/diciembre; aplicar con 0 también deja constancia', () => {
-    const cajas = () => datos().cajas.find((c: unknown[]) => c[0] === 'c-hogar')
-    const caja = { id: 'c-hogar', nombre: 'x', presupuesto: cajas()[2], filtroCampo: 'Categoría' } as never
-    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-11', items: [{ id: 'c-hogar', monto: 450 }] })
-    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-11', items: [{ id: 'c-hogar', monto: 450 }] })
-    const pres = datos().presupuestos.map((p: unknown[]) => ({ periodo: p[0], cajaId: p[1], monto: p[2] }))
-    expect(pres).toEqual([{ periodo: '2026-11', cajaId: 'c-hogar', monto: 450 }])
-    expect(budgetCents(caja, '2026-10', pres, aislaDesde({}))).toBe(40000)      // antes del corte: la reserva habitual de siempre
-    expect(budgetCents(caja, '2026-11', pres, aislaDesde({}))).toBe(45000)
-    expect(budgetCents(caja, '2026-12', pres, aislaDesde({}))).toBe(0)
-    b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-12', items: [{ id: 'c-hogar', monto: 0 }] })
-    expect(datos().presupuestos).toHaveLength(2)
-  })
-
   it('todo o nada: un ID inexistente o un monto inválido no escribe nada; el consolidado no cambia', () => {
     const antes = JSON.stringify([datos().fondos, datos().fondosMeses, datos().cajas, datos().presupuestos])
     expect(b.post('aplicarEntidadesMes', { tipo: 'fondo', mes: '2026-11', items: [{ id: 'f-general', monto: 10 }, { id: 'nope', monto: 5 }] }).error.code).toBe('NOT_FOUND')
     expect(b.post('aplicarEntidadesMes', { tipo: 'fondo', mes: '2026-11', items: [{ id: 'f-general', monto: -1 }] }).error.code).toBe('VALIDATION')
     expect(b.post('aplicarEntidadesMes', { tipo: 'fondo', mes: '2026-13', items: [{ id: 'f-general', monto: 1 }] }).error.code).toBe('VALIDATION')
+    expect(b.post('aplicarEntidadesMes', { tipo: 'subcaja', mes: '2026-11', items: [{ id: 'f-general', monto: 1 }] }).error.message).toMatch(/solo se aplican fondos/)
     expect(JSON.stringify([datos().fondos, datos().fondosMeses, datos().cajas, datos().presupuestos])).toBe(antes)
   })
 
@@ -1585,64 +1446,53 @@ describe('planificación mensual y recordatorios en CONFIG (v1.19)', () => {
     expect(b.post('saveConfig', { clave: 'cualquier_cosa', valor: '1' }).error.code).toBe('VALIDATION')
   })
   it('cambiar la planificación no escribe nada financiero', () => {
-    const antes = JSON.stringify(['FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))
+    const antes = JSON.stringify(['FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'ASIGNACIONES_GASTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))
     b.post('saveConfig', { clave: 'plan_est_2026-11', valor: 'd|000|' })
-    expect(JSON.stringify(['FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'CAJAS', 'PRESUPUESTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))).toBe(antes)
+    expect(JSON.stringify(['FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'ASIGNACIONES_GASTOS', 'GASTOS'].map(n => b.ss.getSheetByName(n)!.rows))).toBe(antes)
   })
 })
 
-describe('plantillas de fondos y subcajas: hojas propias e IDs reales (v1.19)', () => {
+describe('plantillas de fondos: hoja propia e IDs reales (v1.19)', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const uuid = () => `pf-${crypto.randomUUID()}`                       // el ID que genera la web: 39 caracteres
   const plF = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: uuid(), tipo: 'fondo', nombre: 'Aporte de Pareja', monto: 1000, moneda: 'PEN', medios: '', recurrencia: 'mensual', ...o })
-  const plS = (o: Record<string, unknown> = {}) => b.post('savePlantillaFin', { id: uuid(), tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas', ...o })
   const datos = () => b.post('data', { fresh: true }).data
   const filas = (hoja: string) => (b.ss.getSheetByName(hoja)?.rows ?? []).slice(1)
 
-  it('REGRESIÓN: aplicar una subcaja con ID de plantilla "pf-"+UUID ya no falla por "ID de caja supera 40 caracteres"', () => {
-    const id = plS().data[0]
-    expect(id.length).toBe(39)
-    const r = b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id, accion: 'aplicar', monto: 750 }] })
-    expect(r.ok, JSON.stringify(r)).toBe(true)
-    const caja = datos().cajas.find((c: unknown[]) => c[1] === 'Mascotas')
-    expect(caja[0].length).toBeLessThanOrEqual(40)
-    expect(datos().presupuestos).toContainEqual(['2026-10', caja[0], 750])
-  })
-
-  it('aplicar TODAS (2 subcajas + 3 fondos en un solo pedido) funciona, es idempotente y no duplica nada', () => {
-    const s = [plS(), plS({ nombre: 'Viajes', monto: 250, valor: 'Viajes' })].map(x => x.data[0])
+  it('aplicar TODAS (3 fondos en un solo pedido) funciona, es idempotente y no duplica nada', () => {
     const f = ['A', 'B', 'C'].map(n => plF({ nombre: `Fondo ${n}`, monto: 100 }).data[0])
-    const items = [...s, ...f].map(id => ({ id, accion: 'aplicar', monto: undefined }))
+    const items = f.map(id => ({ id, accion: 'aplicar', monto: undefined }))
     const r1 = b.post('aplicarPlantillasFin', { mes: '2026-10', items })
     expect(r1.ok, JSON.stringify(r1)).toBe(true)
-    const antes = JSON.stringify([datos().cajas, datos().fondos, datos().presupuestos, datos().fondosMeses])
+    const antes = JSON.stringify([datos().fondos, datos().fondosMeses])
     const r2 = b.post('aplicarPlantillasFin', { mes: '2026-10', items })
     expect(r2.ok).toBe(true)
-    expect(JSON.stringify([datos().cajas, datos().fondos, datos().presupuestos, datos().fondosMeses])).toBe(antes)
-    expect(datos().cajas.filter((c: unknown[]) => ['Mascotas', 'Viajes'].includes(c[1] as string))).toHaveLength(2)
+    expect(JSON.stringify([datos().fondos, datos().fondosMeses])).toBe(antes)
     expect(datos().fondos).toHaveLength(3)
-    expect(new Set(datos().cajas.map((c: unknown[]) => c[0])).size).toBe(datos().cajas.length)
+    expect(new Set(datos().fondos.map((c: unknown[]) => c[0])).size).toBe(3)
   })
 
   it('aplicar a noviembre (aislado) y a otro mes no se cruzan, también con IDs largos', () => {
-    const id = plS().data[0]
+    const id = plF().data[0]
     expect(b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id, accion: 'aplicar', monto: 800 }] }).ok).toBe(true)
     expect(b.post('aplicarPlantillasFin', { mes: '2026-12', items: [{ id, accion: 'aplicar', monto: 900 }] }).ok).toBe(true)
-    const cid = datos().cajas.find((c: unknown[]) => c[1] === 'Mascotas')[0]
-    expect(datos().presupuestos.filter((p: unknown[]) => p[1] === cid).sort()).toEqual([['2026-11', cid, 800], ['2026-12', cid, 900]])
+    const fid = datos().fondos.find((c: unknown[]) => c[1] === 'Aporte de Pareja')[0]
+    expect(fid.length).toBeLessThanOrEqual(60)
+    expect(datos().fondosMeses.filter((p: unknown[]) => p[0] === fid).map((p: unknown[]) => p.slice(0, 3)).sort()).toEqual([[fid, '2026-11', 800], [fid, '2026-12', 900]])
   })
 
-  it('fondos y subcajas se guardan en PLANTILLAS_FINANCIERAS, distinguidas por la columna Tipo', () => {
-    const f = plF().data[0], s = plS().data[0]
-    expect(filas('PLANTILLAS_FINANCIERAS').map(r => [r[0], r[1]])).toEqual([[f, 'fondo'], [s, 'subcaja']])
+  it('los fondos se guardan en PLANTILLAS_FINANCIERAS con su Tipo; una plantilla de subcaja nueva se rechaza', () => {
+    const f = plF().data[0], s = plF({ nombre: 'Otro' }).data[0]
+    expect(b.post('savePlantillaFin', { id: uuid(), tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' }).error.code).toBe('VALIDATION')
+    expect(filas('PLANTILLAS_FINANCIERAS').map(r => [r[0], r[1]])).toEqual([[f, 'fondo'], [s, 'fondo']])
     expect(b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows[0]).toContain('Tipo')
     for (const h of ['PLANTILLAS_FONDOS_PRESUPUESTO', 'PLANTILLAS_SUBCAJAS', 'PLANTILLAS_MENSUALES']) expect(b.ss.getSheetByName(h)).toBeNull()
     expect(datos().plantillasFin.map((p: unknown[]) => p[0]).sort()).toEqual([f, s].sort())
   })
 
   it('el estado aplicada/omitida queda en la fila de cada plantilla y sobrevive a una nueva lectura', () => {
-    const s = plS().data[0], f = plF().data[0]
+    const s = plF({ nombre: 'Otro' }).data[0], f = plF().data[0]
     b.post('aplicarPlantillasFin', { mes: '2026-10', items: [{ id: s, accion: 'aplicar', monto: 700 }, { id: f, accion: 'omitir' }] })
     const fila = (id: string) => filas('PLANTILLAS_FINANCIERAS').find(r => r[0] === id)!
     expect(JSON.parse(String(fila(s)[15]))['2026-10'].e).toBe('aplicada')
@@ -1651,13 +1501,14 @@ describe('plantillas de fondos y subcajas: hojas propias e IDs reales (v1.19)', 
     expect(d.find((p: unknown[]) => p[0] === s)[15]['2026-10'].e).toBe('aplicada')
   })
 
-  it('eliminar y reordenar actúan por Tipo; el ID no puede cambiar de tipo', () => {
-    const f1 = plF().data[0], f2 = plF({ nombre: 'Sodexo' }).data[0], s = plS().data[0]
+  it('eliminar y reordenar actúan por Tipo (una fila subcaja antigua no se toca); el ID no puede cambiar de tipo', () => {
+    const f1 = plF().data[0], f2 = plF({ nombre: 'Sodexo' }).data[0], s = uuid()
+    b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!.rows.push([s, 'subcaja', 'Mascotas', 700, '', '', 'Categoría', 'Mascotas', '', '#1e3a8a', 'auto', 'mensual', true, 7, '', '', '', '', ''])
     expect(b.post('reorderPlantillasFin', { tipo: 'fondo', ids: [f2, f1] }).ok).toBe(true)
     expect(filas('PLANTILLAS_FINANCIERAS').find(r => r[0] === f2)![13]).toBe(1)
-    expect(filas('PLANTILLAS_FINANCIERAS').find(r => r[0] === s)![13]).toBe(1)
-    expect(b.post('deletePlantillaFin', { id: s }).data.eliminada).toBe(true)
-    expect(filas('PLANTILLAS_FINANCIERAS').map(r => r[1])).toEqual(['fondo', 'fondo'])
+    expect(filas('PLANTILLAS_FINANCIERAS').find(r => r[0] === s)![13]).toBe(7)
+    expect(b.post('deletePlantillaFin', { id: s }).data.eliminada).toBe(false)     // las subcajas antiguas ni se leen ni se borran
+    expect(filas('PLANTILLAS_FINANCIERAS').map(r => r[1])).toEqual(['fondo', 'fondo', 'subcaja'])
     expect(b.post('savePlantillaFin', { id: f1, tipo: 'subcaja', nombre: 'X', monto: 1, campo: 'Categoría', valor: 'Y' }).ok).toBe(false)
   })
 
@@ -1674,18 +1525,16 @@ describe('v1.20: el frontend deduce el mismo ID de entidad que crea el backend (
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const ids = ['pf-4e870b82-7519-44dc-b406-8bad102c664e', 'pf-f555815c-fb2d-48e5-9d08-5b4c07027f19', 'ps-1', 'pf-' + 'x'.repeat(58), 'pf-ok_con-guion']
-  for (const tipo of ['fondo', 'subcaja'] as const) {
+  for (const tipo of ['fondo'] as const) {
     it(`${tipo}: crea la entidad con el ID que predice el frontend, y las plantillas aplicadas figuran «aplicadas» sin recalcular`, async () => {
       const { idEntidadPlantilla, estadoRealPlantilla, operacionPlantilla } = await import('./lib/planificar')
       ids.forEach((id, i) => {
-        const r = b.post('savePlantillaFin', tipo === 'fondo'
-          ? { id, tipo, nombre: `Fondo ${i}`, monto: 100 + i, moneda: 'PEN', medios: '', recurrencia: 'mensual' }
-          : { id, tipo, nombre: `Subcaja ${i}`, monto: 100 + i, campo: 'Categoría', valor: `Valor ${i}` })
+        const r = b.post('savePlantillaFin', { id, tipo, nombre: `Fondo ${i}`, monto: 100 + i, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
         expect(r.ok, JSON.stringify(r)).toBe(true)
       })
       expect(b.post('aplicarPlantillasFin', { mes: '2026-11', items: ids.map((id, i) => ({ id, accion: 'aplicar', monto: 100 + i })) }).ok).toBe(true)
       const fresco = b.post('data', { fresh: true }).data
-      const entidades: string[] = (tipo === 'fondo' ? fresco.fondos : fresco.cajas).map((x: unknown[]) => String(x[0]))
+      const entidades: string[] = fresco.fondos.map((x: unknown[]) => String(x[0]))
       ids.forEach(id => expect(entidades, id).toContain(idEntidadPlantilla({ id, tipo })))
       // Y con la lectura real (ya parseada por el frontend) el estado y la operación salen coherentes.
       const api = createApi(async (action, payload) => { const x = b.post(action, payload); if (!x.ok) throw new Error(x.error.message); return x.data })
@@ -1702,43 +1551,40 @@ describe('v1.20: el frontend deduce el mismo ID de entidad que crea el backend (
   }
 })
 
-describe('v1.20.1: aplicar plantillas cuando la hoja quedó con marcas «aplicada» pero sin el fondo/subcaja (caso real)', () => {
+describe('v1.20.1: aplicar plantillas cuando la hoja quedó con marcas «aplicada» pero sin el fondo (caso real)', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
-  const F = 'pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4', S = 'pf-8f6c6f6b-4b44-41d9-9d13-4f44777c212a'
+  const F = 'pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4'
   const datos = () => b.post('data', { fresh: true }).data
-  const vaciar = () => { for (const n of ['FONDOS_PRESUPUESTO', 'CAJAS', 'FONDOS_PRESUPUESTO_MESES', 'PRESUPUESTOS']) { const sh = b.ss.getSheetByName(n)!; sh.rows.splice(1, sh.rows.length) } }
+  const vaciar = () => { for (const n of ['FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES']) { const sh = b.ss.getSheetByName(n)!; sh.rows.splice(1, sh.rows.length) } }
   for (const mes of ['2026-10', '2026-11']) {
-    it(`${mes}: tras borrar FONDOS_PRESUPUESTO/CAJAS/importes del mes, volver a aplicar recrea todo y deja lo aplicado verificable`, async () => {
+    it(`${mes}: tras borrar FONDOS_PRESUPUESTO e importes del mes, volver a aplicar recrea todo y deja lo aplicado verificable`, async () => {
       b.post('savePlantillaFin', { id: F, tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
-      b.post('savePlantillaFin', { id: S, tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' })
-      const items = [{ id: F, accion: 'aplicar', monto: 3000 }, { id: S, accion: 'aplicar', monto: 700 }]
+      const items = [{ id: F, accion: 'aplicar', monto: 3000 }]
       expect(b.post('aplicarPlantillasFin', { mes, items }).ok).toBe(true)
       expect(datos().fondos).toHaveLength(1)
       vaciar()                                                         // las marcas «aplicada» de PLANTILLAS_FINANCIERAS siguen ahí
       expect(datos().fondos).toHaveLength(0)
-      expect(datos().cajas).toHaveLength(0)
       const r = b.post('aplicarPlantillasFin', { mes, items })
       expect(r.ok, JSON.stringify(r)).toBe(true)
-      const d = datos()
-      expect(d.fondos).toHaveLength(1); expect(d.cajas).toHaveLength(1)
+      expect(datos().fondos).toHaveLength(1)
       const { createApi } = await import('./lib/api'), { verificarPlantillasAplicadas } = await import('./lib/planificar')
       const api = createApi(async (a, p) => { const x = b.post(a, p); if (!x.ok) throw new Error(x.error.message); return x.data })
       const fresco = await api.getData(true), pls = await api.getPlantillas()
-      const problemas = verificarPlantillasAplicadas(fresco, pls.filter(p => p.id === F || p.id === S).map(p => ({ plantilla: p, monto: p.tipo === 'fondo' ? 3000 : 700 })), mes)
+      const problemas = verificarPlantillasAplicadas(fresco, pls.filter(p => p.id === F).map(p => ({ plantilla: p, monto: 3000 })), mes)
       expect(problemas).toEqual([])
       // Idempotente: una tercera vez no duplica ni escribe de más.
       b.post('aplicarPlantillasFin', { mes, items })
-      expect(datos().fondos).toHaveLength(1); expect(datos().cajas).toHaveLength(1)
+      expect(datos().fondos).toHaveLength(1)
     })
   }
-  it('si solo falta el importe del mes (FONDOS_PRESUPUESTO_MESES/PRESUPUESTOS vacíos) en un mes aislado, también se reescribe', () => {
-    b.post('savePlantillaFin', { id: S, tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' })
-    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: S, accion: 'aplicar', monto: 650 }] })
-    expect(datos().presupuestos).toHaveLength(1)
-    const sh = b.ss.getSheetByName('PRESUPUESTOS')!; sh.rows.splice(1, sh.rows.length)
-    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: S, accion: 'aplicar', monto: 650 }] })
-    expect(datos().presupuestos).toEqual([['2026-11', expect.any(String), 650]])
+  it('si solo falta el importe del mes (FONDOS_PRESUPUESTO_MESES vacía) en un mes aislado, también se reescribe', () => {
+    b.post('savePlantillaFin', { id: F, tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: F, accion: 'aplicar', monto: 650 }] })
+    expect(datos().fondosMeses).toHaveLength(1)
+    const sh = b.ss.getSheetByName('FONDOS_PRESUPUESTO_MESES')!; sh.rows.splice(1, sh.rows.length)
+    b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: F, accion: 'aplicar', monto: 650 }] })
+    expect(datos().fondosMeses).toEqual([[expect.any(String), '2026-11', 650, 'solo']])
   })
   it('una plantilla sana y ya aplicada sigue sin escribir nada (no hay regresión del atajo)', () => {
     b.post('savePlantillaFin', { id: F, tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'mensual' })
@@ -1846,7 +1692,7 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
     ['f-340b9ebe-953b-45c9-ab40-c52e2bb3974b', 'Carpeta Tésis', 1900, 'PEN', '#3B6FD9', 'auto', true, 4, 'unica', '2026-10', 'Transferencia', '2026-10-15T22:28:55.919Z', '2026-10-15T22:28:55.919Z', 'ahorro_asignado'],
     ['f-eda22309-23f1-4fb8-934e-85022ba5d799', 'Viaje a Ica', 1414, 'PEN', '#1E3A8A', 'auto', true, 5, 'unica', '2026-10', 'Libre', '2026-10-16T02:14:57.515Z', '2026-10-19T18:38:30.607Z', 'ahorro_asignado'],
   ]
-  const CTX = (d: Awaited<ReturnType<ReturnType<typeof api>['getData']>>) => ({ base: 'PEN', rates: { USD: 4.07 }, today: '2026-10-19', cajas: d.cajas, presupuestos: d.presupuestos, fondos: d.fondos, fondosMeses: d.fondosMeses })
+  const CTX = (d: Awaited<ReturnType<ReturnType<typeof api>['getData']>>) => ({ base: 'PEN', rates: { USD: 4.07 }, today: '2026-10-19', fondos: d.fondos, fondosMeses: d.fondosMeses, asignaciones: d.asignaciones })
   const oct = { preset: 'custom' as const, desde: '2026-10-01', hasta: '2026-10-31', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
 
   beforeEach(() => {
@@ -1861,7 +1707,7 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
     expect(d.fondos.map(f => [f.nombre, f.tipo])).toEqual([['General', 'mensual'], ['Aporte Pareja', 'mensual'], ['Sodexo', 'mensual'], ['Carpeta Tésis', 'ahorro_asignado'], ['Viaje a Ica', 'ahorro_asignado']])
     expect(d.revisionesPresupuesto).toHaveLength(1)
     expect(d.revisionesPresupuesto[0]).toMatchObject({ periodo: '2026-10', estado: 'revisado_con_observaciones' })
-    expect(aggregate([], oct, CTX(d)).cajas.presupuesto).toBe((3000 + 200 + 280 + 1900 + 1414) * 100)
+    expect(aggregate([], oct, CTX(d)).presupuesto.presupuesto).toBe((3000 + 200 + 280 + 1900 + 1414) * 100)
   })
 
   it('crear → editar → anular → restaurar un gasto persiste en la hoja y se refleja en el cálculo, sin duplicar', async () => {
@@ -1874,14 +1720,14 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
     await a.saveGasto({ ...creado, monto: 150 } as never, 'update')
     expect(filas('GASTOS')[0][1]).toBe(150)
     let d = await a.getData(true)
-    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe((6794 - 150) * 100)
+    expect(aggregate(d.gastos, oct, CTX(d)).presupuesto.disponible).toBe((6794 - 150) * 100)
     await a.setEstado(creado.id, 'Anulado')
     d = await a.getData(true)
     expect(filas('GASTOS')[0][10]).toBe('Anulado')
-    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe(6794 * 100)
+    expect(aggregate(d.gastos, oct, CTX(d)).presupuesto.disponible).toBe(6794 * 100)
     await a.setEstado(creado.id, 'Activo')
     d = await a.getData(true)
-    expect(aggregate(d.gastos, oct, CTX(d)).cajas.disponible).toBe((6794 - 150) * 100)
+    expect(aggregate(d.gastos, oct, CTX(d)).presupuesto.disponible).toBe((6794 - 150) * 100)
   })
 
   it('fondos: crear, editar, desactivar y modificar el importe de un mes persisten sin tocar los demás', async () => {
@@ -1895,7 +1741,7 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
     expect(filas('FONDOS_PRESUPUESTO')[5][2]).toBe(120)
     await a.saveFondo({ ...nuevo, monto: 120, activo: false })
     let d = await a.getData(true)
-    expect(aggregate([], oct, CTX(d)).cajas.presupuesto).toBe(679400)                       // inactivo: no suma
+    expect(aggregate([], oct, CTX(d)).presupuesto.presupuesto).toBe(679400)                       // inactivo: no suma
     await a.saveFondoMes({ fondoId: 'f-pf-880ed1f8-57b4-44c3-a2f2-9981fc3dc2c4', mes: '2026-12', monto: 3300, modo: 'solo' })
     d = await a.getData(true)
     expect(d.fondosMeses).toHaveLength(1)
@@ -2037,10 +1883,10 @@ describe('seguridad del backend', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const ADMIN = ['setup', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba',
-    'repararIds', 'repararHojas', 'migrarGeneralAFondo']
+    'repararIds', 'repararHojas', 'retirarCajas']
   // Acciones de uso diario (no administrativas), clasificadas a propósito: una acción nueva sin clasificar rompe esta prueba.
   const DIARIAS = ['data', 'saveGasto', 'setEstado', 'setEstadoLote', 'saveCatalogo', 'renameCatalogo', 'reorderCategorias', 'deleteCategoria',
-    'saveMedio', 'saveCaja', 'deleteCaja', 'reorderCajas', 'savePresupuesto', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',
+    'saveMedio', 'saveAsignacion', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',
     'deletePlantilla', 'reorderPlantillas', 'saveGastosBatch', 'reorderGastos', 'vincularGasto', 'saveRevision', 'saveRevisionPresupuesto',
     'saveFondo', 'saveFondoMes', 'reorderFondos', 'savePlantillaFin', 'deletePlantillaFin', 'reorderPlantillasFin', 'aplicarPlantillasFin',
     'aplicarEntidadesMes', 'deleteFondo', 'completarVacios', 'carpetaRespaldo', 'saveCarpetaRespaldo', 'misArchivos', 'autorizarRespaldos']
@@ -2159,7 +2005,7 @@ describe('seguridad del backend', () => {
         b.post('saveGastosBatch', { loteId: `lote-00000000-0000-4000-8000-${hex(n)}`, gastos: [{ ...gasto({ id: `bbbbbbbb-0000-4000-8000-${hex(n)}`, descripcion: h }), mode: undefined }] })
         b.post('saveCatalogo', { ambito: h, categoria: h, subcategoria: h, activo: true })
         b.post('saveMedio', { nombre: h })
-        b.post('saveCaja', { nombre: h, presupuesto: 100, filtroCampo: 'Categoría', filtroValor: h, color: '#16A085', orden: 9 })
+        b.post('saveFondo', { id: `f-r${n}`, nombre: `R${n}`, monto: 10, moneda: 'PEN', orden: 1, recurrencia: 'mensual', mes: '', reglas: [{ desde: '', medios: 'solo', listaMedios: [h.replace(/\|/g, '')].filter(Boolean), cobertura: 'personalizada', rutas: [{ ambito: h, categoria: h, subcategoria: h }], restringeMedio: false }] })
         b.post('saveConfig', { clave: 'nota_' + n, valor: h })
         b.post('savePlantilla', { id: `pl-aaaaaaaa-0000-4000-8000-${hex(n)}`, mode: 'create', ambito: h, categoria: h, subcategoria: h, descripcion: h, monto: '', medioPago: h })
         b.post('savePlantillaFin', { id: `pf-aaaaaaaa-0000-4000-8000-${hex(n)}`, tipo: 'fondo', nombre: h, monto: 10, moneda: 'PEN', medios: h, recurrencia: 'mensual' })

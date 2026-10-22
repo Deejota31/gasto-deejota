@@ -3,7 +3,7 @@ import { calentar, createApi, httpTransport, type Api, type Connection, type Apl
 import { demoTransport } from './demo'
 import { todayIn } from './dates'
 import type { RevisionPresInput } from './api'
-import type { AppData, Caja, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fondo, FondoMes, Gasto, Medio, Plantilla, Presupuesto, Revision } from './types'
+import type { AppData, PlantillaFin, TipoPlantillaFin, CatalogoItem, Fondo, FondoMes, Gasto, Medio, ParteManual, Plantilla, Revision } from './types'
 import { ordenTrasReordenarCategorias, sortCatalogo } from './orden'
 import { ambitoLook, categoriaLook, claveDeIcono, registrarMedios, subcategoriaLook } from './visual'
 import { dismiss, showToast, updateToast, type ToastAction } from './toast'
@@ -53,7 +53,7 @@ export function buildApi(conn: Connection | null): Api {
   // Solo modo demo: ?demo=10000 carga más filas; ?latencia=2000 simula un Apps Script lento; ?falla=1 hace fallar las escrituras.
   const q = new URLSearchParams(location.search)
   const n = Math.min(Number(q.get('demo')) || 400, 20000)
-  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('cajas')) || 0, 10), Math.min(Number(q.get('fondos')) || 0, 25), q.get('vacio') === '1')
+  const demo = demoTransport(todayIn(), n, Math.min(Number(q.get('latencia')) || 250, 20000), Math.min(Number(q.get('fondos')) || 0, 25), q.get('vacio') === '1')
   // ?falla=aplicar: solo fallan las acciones «aplicar…» (permite crear plantillas y probar el error del guardado en segundo plano).
   const falla = q.get('falla') === '1' || q.get('falla') === 'timeout' || q.get('falla') === 'aplicar'
   const soloAplicar = q.get('falla') === 'aplicar'
@@ -262,18 +262,9 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
     /** Elimina una categoría (y, con `cascada`, sus subcategorías) del catálogo. Nunca borra gastos. */
     deleteCategoria: (ambito: string, categoria: string, cascada = false) => lanzar('deleteCategoria', [ambito, categoria, cascada]),
     async saveMedio(m: Medio) { await lanzar('saveMedio', [m]) },
-    async saveCaja(c: Caja) { await lanzar('saveCaja', [c]) },
-    /** Elimina una caja. Sus gastos pasan a "fuera de cajas" (u otra caja que coincida); no se borra ningún gasto. */
-    async deleteCaja(id: string) { await lanzar('deleteCaja', [id]) },
-    /** Orden manual de subcajas: se ve al instante; si falla, vuelve al anterior. */
-    async reorderCajas(ids: string[]) {
-      let previo: Caja[] = []
-      const aplicar = (d: AppData) => ({ ...d, cajas: d.cajas.map(c => c.filtroCampo === 'Todos' ? { ...c, orden: 1 } : { ...c, orden: ids.indexOf(c.id) >= 0 ? ids.indexOf(c.id) + 2 : ids.length + 2 }) })
-      setData(d => { previo = d?.cajas ?? []; return d && aplicar(d) })
-      try { await api.reorderCajas(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, cajas: previo }); throw e }
-    },
-    async savePresupuesto(p: Presupuesto) { await lanzar('savePresupuesto', [p]) },
-    /** Plantillas de fondos/subcajas. Solo guardan configuración: no crean fondos, subcajas, dinero ni gastos. */
+    /** Asignación manual de un gasto a fondos (vacía = automática). No cambia el gasto: solo cómo se reparte entre fondos. */
+    saveAsignacion: (gastoId: string, partes: ParteManual[]) => lanzar('saveAsignacion', [gastoId, partes]),
+    /** Plantillas de fondos. Solo guardan configuración: no crean fondos, dinero ni gastos. */
     savePlantillaFin: (p: PlantillaFinInput) => lanzar('savePlantillaFin', [p]),
     async deletePlantillaFin(id: string) { await lanzar('deletePlantillaFin', [id]) },
     /** Orden de las plantillas: se ve al instante; si falla, vuelve al anterior (una sola solicitud por arrastre). */
@@ -283,22 +274,22 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       setData(d => { previo = d?.plantillasFin ?? []; return d && aplicar(d) })
       try { await api.reorderPlantillasFin(tipo, ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, plantillasFin: previo }); throw e }
     },
-    /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fondos, cajas, importes del mes). */
+    /** Aplica / omite / devuelve a Pendiente en un mes. Después relee solo lo que puede haber cambiado (fondos e importes del mes). */
     async aplicarPlantillasFin(mes: string, items: AplicarItem[]) {
       const pl = await api.aplicarPlantillasFin(mes, items)
       const raw = await api.getData(true)   // relectura real de Sheets: de aquí sale la verificación de lo aplicado
       patch(d => ({
         ...d, plantillasFin: (d.plantillasFin ?? []).map(x => pl.find(y => y.id === x.id) ?? x).concat(pl.filter(y => !(d.plantillasFin ?? []).some(x => x.id === y.id))),
-        fondos: raw.fondos, fondosMeses: raw.fondosMeses, cajas: raw.cajas, presupuestos: raw.presupuestos,
+        fondos: raw.fondos, fondosMeses: raw.fondosMeses,
       }))
-      return { plantillas: pl, datos: { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos } }
+      return { plantillas: pl, datos: { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [] } }
     },
-    /** Aplica fondos o subcajas existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
-    async aplicarEntidadesMes(tipo: 'fondo' | 'subcaja', mes: string, items: { id: string; monto: number }[]) {
-      await api.aplicarEntidadesMes(tipo, mes, items)
+    /** Aplica fondos existentes a un mes y relee solo lo necesario (todo o nada; idempotente). */
+    async aplicarFondosMes(mes: string, items: { id: string; monto: number }[]) {
+      await api.aplicarFondosMes(mes, items)
       const raw = await api.getData(true)
-      patch(d => ({ ...d, fondos: raw.fondos, fondosMeses: raw.fondosMeses, cajas: raw.cajas, presupuestos: raw.presupuestos }))
-      return { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [], cajas: raw.cajas, presupuestos: raw.presupuestos }
+      patch(d => ({ ...d, fondos: raw.fondos, fondosMeses: raw.fondosMeses }))
+      return { fondos: raw.fondos ?? [], fondosMeses: raw.fondosMeses ?? [] }
     },
     /** Crea o edita un fondo. Upsert por ID: un reintento o doble clic con el mismo ID no crea otra. */
     saveFondo: (f: FondoInput) => lanzar('saveFondo', [f]),
@@ -313,21 +304,10 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
       setData(d => { previo = d?.fondos ?? []; return d && aplicar(d) })
       try { await api.reorderFondos(ids); patch(aplicar) } catch (e) { setData(d => d && { ...d, fondos: previo }); throw e }
     },
-    /** Migración pedida por el usuario: fondo General desde la caja general (con sus ajustes mensuales). Idempotente. */
-    async migrarGeneralAFondo() {
-      const r = await api.migrarGeneralAFondo()
-      const f = r.fondo
-      if (f) patch(d => ({
-        ...d,
-        fondos: [...(d.fondos ?? []).filter(x => x.id !== f.id), f],
-        fondosMeses: [...(d.fondosMeses ?? []).filter(x => x.fondoId !== f.id), ...r.ajustes],
-      }))
-      return r
-    },
     async saveConfig(clave: string, valor: string) { await lanzar('saveConfig', [clave, valor]) },
     /** Asocia (o desasocia con '') un movimiento existente a un compromiso. No cambia el gasto. */
     async vincular(gastoId: string, plantillaId: string) { await lanzar('vincular', [gastoId, plantillaId]) },
-    /** Revisión del presupuesto: solo agrega filas a REVISIONES_PRESUPUESTO. Nunca modifica fondos, gastos, cajas ni presupuestos. */
+    /** Revisión del presupuesto: solo agrega filas a REVISIONES_PRESUPUESTO. Nunca modifica fondos ni gastos. */
     async saveRevisionPresupuesto(i: RevisionPresInput) { const f = await api.saveRevisionPresupuesto(i); patch(d => ({ ...d, revisionesPresupuesto: [...(d.revisionesPresupuesto ?? []).filter(x => x.id !== f.id), f] })) },
     /** Decisión sobre una coincidencia (legítima, pendiente o duplicado confirmado). Nunca modifica movimientos. */
     async saveRevision(r: Pick<Revision, 'id' | 'ids' | 'estado' | 'firma'>) {
@@ -346,7 +326,7 @@ export function useAppData(conn: Connection | null, apiOverride?: Api) {
         return { ambito: c.ambito, categoria: c.categoria, subcategoria: c.subcategoria, icono: claveDeIcono(l.Icon), color: l.color }
       })
       const r = await api.completarVacios(defs)
-      const n = r.cajas + r.fondos + r.catalogo + r.config + (r.medios ?? 0)
+      const n = r.fondos + r.catalogo + r.config + (r.medios ?? 0)
       if (n > 0) await refresh(true)
       return { ...r, total: n }
     },

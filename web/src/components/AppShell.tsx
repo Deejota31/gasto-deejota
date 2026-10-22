@@ -6,7 +6,7 @@ import { guardarSidebarContraido, leerSidebarContraido, TABS, type TabId } from 
 /**
  * Estructura de la aplicación: Sidebar (escritorio ≥1024 px, contraído por defecto) · Topbar compacta · Contenido.
  *  - 640–1023 px: el sidebar es un panel temporal (botón ☰ en la topbar) con fondo oscurecido.
- *  - < 640 px: barra inferior Dashboard · Gastos · Cajas · Más (Catálogo, Salud financiera, Configuración).
+ *  - < 640 px: barra inferior Dashboard · Gastos · Presupuestos · Más (Catálogo, Salud financiera, Configuración).
  * Jerarquía de capas: contenido < topbar (20) < sidebar fijo y barra inferior (30) < fondo del panel (40) < panel y hoja "Más" (50)
  * < avisos (60) < desplegables (300). Los modales usan <dialog> (capa superior del navegador) y siempre quedan por encima.
  * Todos los accesos comparten el mismo estado de módulo activo (`tab`).

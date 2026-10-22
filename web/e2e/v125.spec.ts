@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', () => {
-  const ids = ['cons-libre-inicial', 'cons-gastado-fuera-de-reservas', 'cons-saldo-libre-actual', 'cons-consumido', 'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
+  const ids = ['cons-fondos-activos', 'cons-fondos-con-excedente', 'cons-sin-fondo-asignable', 'cons-consumido', 'kpi-promedio-diario', 'kpi-promedio-por-movimiento', 'kpi-mayor-gasto', 'kpi-movimientos']
   for (const [w, h] of [[1366, 768], [834, 1112], [390, 844]] as const) {
     test(`${w}×${h}: icono a la izquierda del título y del valor, ⓘ a la derecha, sin desborde ni solapes`, async ({ page }) => {
       await page.setViewportSize({ width: w, height: h })
@@ -72,7 +72,7 @@ test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', 
     expect(fila2[0].y).toBeGreaterThan(fila1[0].y)
     await expect(page.getByTestId('consolidado-resumen').locator('svg')).toHaveCount(0)       // cifras clave en línea, sin tarjetas
     // los iconos pedidos
-    for (const [id, cls] of [['cons-libre-inicial', 'lucide-wallet'], ['cons-gastado-fuera-de-reservas', 'lucide-arrow-up-right'], ['cons-saldo-libre-actual', 'lucide-scale'], ['cons-consumido', 'lucide-gauge']] as const) {
+    for (const [id, cls] of [['cons-fondos-activos', 'lucide-circle-dollar-sign'], ['cons-fondos-con-excedente', 'lucide-shuffle'], ['cons-sin-fondo-asignable', 'lucide-unlink'], ['cons-consumido', 'lucide-gauge']] as const) {
       await expect(page.getByTestId(id).locator(`svg.${cls}`).first(), id).toBeVisible()
     }
     expect((await page.getByTestId('consolidado').boundingBox())!.height).toBeLessThanOrEqual(420)
@@ -87,7 +87,7 @@ test.describe('Presupuesto consolidado: ocho indicadores con el mismo diseño', 
     await page.waitForTimeout(200)
     const ys2 = await Promise.all(ids.map(async id => Math.round((await page.getByTestId(id).boundingBox())!.y)))
     expect(new Set(ys2).size).toBe(4)
-    for (const id of ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-reservado-en-cajas']) await expect(page.getByTestId(id)).toBeVisible()
+    for (const id of ['cons-presupuesto-consolidado', 'cons-gastado-del-período', 'cons-disponible-consolidado', 'cons-exceso']) await expect(page.getByTestId(id)).toBeVisible()
   })
 })
 
