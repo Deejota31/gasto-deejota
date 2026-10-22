@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Copy, KeyRound, Loader2, Maximize2, Minimize2, Play, Terminal } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, Copy, KeyRound, Loader2, Lock, Maximize2, Minimize2, Play, Terminal } from 'lucide-react'
 import { showToast } from '../lib/toast'
 import type { AppStore } from '../lib/store'
 import { Button, Card, Field, SelectField, inputCls } from './ui'
@@ -13,27 +13,28 @@ interface Funcion {
   grupo: 'Conexión y archivos' | 'Mantenimiento de la hoja' | 'Atajo de iPhone' | 'Datos de prueba'
   cambiaHoja?: boolean            // relee los datos al terminar
   confirmar?: string              // pide confirmación antes de ejecutar
+  admin?: boolean                 // exige el token de administración (S-04)
   parametros?: 'datosPrueba'      // abre un formulario (cantidad y período) en lugar de la confirmación simple
 }
 
 /** Todas las funciones de Code.gs que se ejecutaban desde el editor de Apps Script. */
 export const FUNCIONES: Funcion[] = [
   { grupo: 'Conexión y archivos', nombre: 'misArchivos', titulo: 'Mis archivos', desc: 'Dónde está el proyecto, la hoja y la URL /exec. No modifica nada.' },
-  { grupo: 'Conexión y archivos', nombre: 'setup', titulo: 'Instalar / verificar (setup)', desc: 'Crea las hojas que falten y devuelve el token de la API.', cambiaHoja: true },
+  { grupo: 'Conexión y archivos', nombre: 'setup', admin: true, titulo: 'Instalar / verificar (setup)', desc: 'Crea las hojas que falten y devuelve el token de la API.', cambiaHoja: true },
   { grupo: 'Conexión y archivos', nombre: 'autorizarRespaldos', titulo: 'Autorizar respaldos', desc: 'Da permiso a Drive y muestra la carpeta donde se guardan.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'diagnose', titulo: 'Diagnóstico', desc: 'Filas por hoja, versión y estado.' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'completarVacios', titulo: 'Completar vacíos', desc: 'Rellena las celdas vacías (Activo, Icono, Orden, Medio…).', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'migrarPlantillas', titulo: 'Migrar plantillas', desc: 'Copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada).', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'actualizarCatalogo', titulo: 'Actualizar catálogo', desc: 'Agrega la columna Orden y ordena el catálogo. Crea respaldo antes.', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'repararIds', titulo: 'Reparar IDs', desc: 'Asigna ID a movimientos sin ID o repetidos. Crea respaldo antes.', cambiaHoja: true },
-  { grupo: 'Mantenimiento de la hoja', nombre: 'repararHojas', titulo: 'Reparar hojas', desc: 'Compacta filas, agrega columnas y reordena medios. Crea respaldo antes.', cambiaHoja: true,
+  { grupo: 'Mantenimiento de la hoja', nombre: 'migrarPlantillas', admin: true, titulo: 'Migrar plantillas', desc: 'Copia las plantillas de gastos de la hoja anterior PLANTILLAS_MENSUALES a PLANTILLAS_FINANCIERAS (una sola vez; no borra nada).', cambiaHoja: true },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'actualizarCatalogo', admin: true, titulo: 'Actualizar catálogo', desc: 'Agrega la columna Orden y ordena el catálogo. Crea respaldo antes.', cambiaHoja: true },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'repararIds', admin: true, titulo: 'Reparar IDs', desc: 'Asigna ID a movimientos sin ID o repetidos. Crea respaldo antes.', cambiaHoja: true },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'repararHojas', admin: true, titulo: 'Reparar hojas', desc: 'Compacta filas, agrega columnas y reordena medios. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },
-  { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
-  { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
-  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', titulo: 'Agregar datos de prueba', desc: 'Agrega la cantidad de gastos que indiques, repartidos en el período que elijas, con un presupuesto de prueba por mes. Se marcan para poder borrarlos. Crea respaldo.', cambiaHoja: true, parametros: 'datosPrueba' },
-  { grupo: 'Datos de prueba', nombre: 'generarCasosEspecialesPrueba', titulo: 'Agregar casos especiales de Salud financiera', desc: 'Agrega los casos de ejemplo de jul–sep 2026 (compromisos, errores de calidad, duplicados). Crea respaldo.', cambiaHoja: true,
+  { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', admin: true, titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
+  { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', admin: true, titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
+  { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', admin: true, titulo: 'Agregar datos de prueba', desc: 'Agrega la cantidad de gastos que indiques, repartidos en el período que elijas, con un presupuesto de prueba por mes. Se marcan para poder borrarlos. Crea respaldo.', cambiaHoja: true, parametros: 'datosPrueba' },
+  { grupo: 'Datos de prueba', nombre: 'generarCasosEspecialesPrueba', admin: true, titulo: 'Agregar casos especiales de Salud financiera', desc: 'Agrega los casos de ejemplo de jul–sep 2026 (compromisos, errores de calidad, duplicados). Crea respaldo.', cambiaHoja: true,
     confirmar: 'Se agregarán datos de ejemplo a tu hoja real. ¿Continuar?' },
-  { grupo: 'Datos de prueba', nombre: 'borrarDatosPrueba', titulo: 'Borrar datos de prueba', desc: 'Elimina solo lo marcado como prueba. Crea respaldo antes.', cambiaHoja: true,
+  { grupo: 'Datos de prueba', nombre: 'borrarDatosPrueba', admin: true, titulo: 'Borrar datos de prueba', desc: 'Elimina solo lo marcado como prueba. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Se borrarán los datos de prueba marcados. ¿Continuar?' },
 ]
 
@@ -121,14 +122,20 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
   const [consola, setConsola] = useState(false)                       // la consola inicia compacta
   const [estados, setEstados] = useState<Record<string, 'ok' | 'error'>>({})
   const [ancho, setAncho] = useState(false)       // consola expandida
+  const [adminToken, setAdminToken] = useState('')    // solo en memoria: nunca se guarda ni se envía en funciones que no lo piden
 
   const alternar = (g: string) => setAbiertos(a => { const n = new Set(a); if (!n.delete(g)) n.add(g); return n })
 
   async function ejecutar(f: Funcion, payload?: Record<string, unknown>) {
-    setPide(''); setBusy(f.nombre); setConsola(true)
+    setPide('')
+    if (f.admin && !store.isDemo && !adminToken.trim()) {
+      showToast('error', `${f.titulo}: escribe el token de administración (arriba). Se crea con crearTokenAdmin() en el editor de Apps Script.`)
+      return
+    }
+    setBusy(f.nombre); setConsola(true)
     const t0 = performance.now()
     try {
-      const r = f.nombre === 'completarVacios' ? await store.actions.completarVacios() : await store.actions.ejecutarFuncion(f.nombre, !!f.cambiaHoja, payload)
+      const r = f.nombre === 'completarVacios' ? await store.actions.completarVacios() : await store.actions.ejecutarFuncion(f.nombre, !!f.cambiaHoja, payload, f.admin ? adminToken.trim() : undefined)
       setEstados(e => ({ ...e, [f.nombre]: 'ok' }))
       setRes({ nombre: f.nombre, ok: true, texto: JSON.stringify(r ?? { ok: true }, null, 2), ms: Math.round(performance.now() - t0), secretos: secretos(r) })
       if (f.nombre === 'completarVacios') {
@@ -153,6 +160,12 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
       info={{ title: 'Funciones del backend', body: <p>Son las funciones de tu Code.gs que antes ejecutabas desde el editor de Apps Script. Aquí las llamas con un clic y ves su respuesta (tokens, URLs, conteos…) en la consola de resultados.</p> }}>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start" data-testid="funciones-backend">
         <div className="min-w-0 space-y-2">
+          <div className="rounded-xl border border-line p-3">
+            <label htmlFor="fb-admin" className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted"><Lock className="size-3.5" /> Token de administración</label>
+            <input id="fb-admin" type="password" autoComplete="off" spellCheck={false} className={inputCls} value={adminToken} onChange={e => setAdminToken(e.target.value)}
+              placeholder="adm_…" />
+            <p className="mt-1 text-[11px] text-muted">Las funciones marcadas con <Lock className="inline size-3" /> lo exigen además del token de la API. Se crea y revoca solo desde el editor de Apps Script (<code>crearTokenAdmin()</code>); aquí no se guarda: se borra al cerrar o recargar la página.</p>
+          </div>
           {GRUPOS.map(g => {
             const fs = FUNCIONES.filter(f => f.grupo === g)
             const abierto = abiertos.has(g)
@@ -178,7 +191,7 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                       <li key={f.nombre} className="rounded-lg bg-bg/50 px-2.5 py-2">
                        <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-card px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code></p>
+                          <p className="truncate text-sm font-medium text-ink">{f.titulo} <code className="ml-1 rounded bg-card px-1 py-0.5 text-[10px] font-normal text-muted">{f.nombre}()</code>{f.admin && <Lock className="ml-1 inline size-3 text-muted" aria-label="Requiere token de administración" />}</p>
                           <p className="text-[11px] text-muted">{pide === f.nombre && f.confirmar ? <span className="font-medium text-warning"><AlertTriangle className="mr-1 inline size-3" />{f.confirmar}</span> : f.desc}</p>
                         </div>
                         {pide === f.nombre && f.confirmar ? (
