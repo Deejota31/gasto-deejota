@@ -37,6 +37,18 @@ web/           Frontend estático + pruebas (Vitest, Playwright)
 - **Actualización**: publicar primero la versión nueva de `Code.gs` y después la web. La base de datos actual fue verificada con el esquema vigente. No se necesitan pasos de migración histórica.
 - **Pruebas**: motor financiero, backend, API, componentes y E2E sobre el contrato actual. Los apartados antiguos del historial de versiones se mantienen como registro documental, no como instrucciones de operación.
 
+## Novedades v1.27.0 — Auditoría de arquitectura: seguridad, limpieza y pruebas
+
+Cambia **`Code.gs`** (redesplegar como nueva versión) y la web. Sin cambios en las reglas financieras ni en el esquema de las 12 hojas. Detalle y evidencia: `docs/AUDITORIA-2026-10-22.md`; despliegue paso a paso: `docs/DESPLIEGUE-1.27.0.md`.
+
+- **Token de administración (S-04)**: `setup`, `crearTokenAtajo`, `revocarTokenAtajo`, los datos de prueba y las reparaciones exigen un segundo token (`crearTokenAdmin()` en el editor de Apps Script). No se guarda en el navegador. El token de uso diario ya no puede emitir tokens ni borrar o generar datos.
+- **Atajo de iPhone (S-03)**: el token se valida antes del bloqueo por intentos; un tercero ya no puede dejar fuera al atajo legítimo. El límite de 20 registros por minuto sigue vigente.
+- **Fórmulas en Sheets (S-05)**: un único `safeCell_` cubre `=`, `+`, `-`, `@`, tabulador y saltos; se cerraron dos huecos (medios de pago de fondos y plantillas).
+- **Cabeceras y CSP (S-01)**: `netlify.toml` define cabeceras de seguridad; la CSP viaja en modo «solo informe» y una prueba en navegador real comprueba que la versión obligatoria no rompe la app.
+- **Rotación del token de la API (S-02)**: `rotarTokenApi()` en el editor invalida el anterior al instante.
+- **Código retirado (O-01, O-02)**: migración de `PLANTILLAS_MENSUALES` y `actualizarCatalogo`.
+- **CI (T-01)**: `.github/workflows/ci.yml` (tipos, lint, pruebas, build, auditoría de dependencias y secretos).
+
 ## Novedades v1.25.1 — Presupuesto consolidado más compacto
 
 Solo frontend (`Code.gs` sigue en 1.23.0). Sin cambios de fórmulas ni de datos.
