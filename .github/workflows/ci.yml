@@ -1,0 +1,45 @@
+name: CI
+
+# Puerta de calidad: se ejecuta en cada pull request y en cada push a develop o main.
+# No despliega nada: Netlify y Apps Script se publican aparte, a mano.
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calidad:
+    name: Calidad (tipos, lint, pruebas, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Secretos evidentes
+        working-directory: .
+        run: node scripts/check-secretos.mjs
+      - name: Tipos
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Pruebas unitarias, de integración y de contrato (incluye Code.gs real)
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Dependencias de producción (vulnerabilidades altas o críticas)
+        run: npm audit --omit=dev --audit-level=high

@@ -30,6 +30,8 @@ async function clic(page: Page, n: 0 | 1, dia: number, tap = false) {
 const lineaX = async (page: Page, n: 0 | 1) => { const b = (await grafico(page, n).locator('.recharts-reference-line line').first().boundingBox())!; return b.x }
 
 test.beforeEach(async ({ page }) => {
+  // La demo reparte los gastos según «hoy»: sin fijar el reloj estas pruebas dependían del día en que se ejecutaran (T-02).
+  await page.clock.setFixedTime(new Date('2026-10-19T12:00:00-05:00'))
   await page.addInitScript(() => { try { sessionStorage.setItem('vistaDefecto', '1') } catch { /* */ } })
 })
 
