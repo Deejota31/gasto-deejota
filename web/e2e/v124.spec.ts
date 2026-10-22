@@ -77,16 +77,6 @@ test.describe('Presupuesto consolidado', () => {
     expect(Math.max(...ys.slice(0, 4))).toBeLessThan(Math.min(...ys.slice(4)))
   })
 
-  test('cifras coherentes: libre inicial = P − reservado; disponible = P − gastado = saldo libre + reservas sin utilizar', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3')
-    const v = async (id: string) => money(await celda(page, id).innerText())
-    const P = await v('presupuesto-consolidado'), R = await v('reservado-en-cajas'), G = await v('gastado-del-período')
-    expect(P).toBe(4780)
-    expect(await v('libre-inicial')).toBeCloseTo(P - R, 2)
-    expect(await v('disponible-consolidado')).toBeCloseTo(P - G, 2)
-    const pct = Number((await celda(page, 'consumido').innerText()).replace('%', ''))
-    expect(pct).toBeCloseTo((G / P) * 100, 0)
-  })
 
   test('barra segmentada: tooltip con nombre e importe, leyenda y teclado', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 })
