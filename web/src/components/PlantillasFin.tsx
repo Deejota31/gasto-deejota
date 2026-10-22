@@ -5,18 +5,20 @@ import { formatearDescripcion } from '../lib/texto'
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowLeft, Ban, CalendarDays, Check, ChevronDown, ChevronUp, CircleDollarSign, Copy, Info, ListChecks, Loader2, Pencil,
-  Plus, Power, RotateCcw, Save, Search, Send, Trash2, X,
+  Plus, Power, RotateCcw, Save, Search, Send, Trash2,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { PlantillaFinInput } from '../lib/api'
-import type { AppData, PlantillaFin } from '../lib/types'
+import { TIPOS_FONDO, TIPO_FONDO_TXT, type AppData, type Fondo, type ModoMedios, type PlantillaFin, type ReglaFondo, type Ruta, type TipoCobertura, type TipoFondo } from '../lib/types'
+import { describirCobertura, describirMedios, reglaActual, validarRegla } from '../lib/presupuesto'
+import { COBERTURAS, EditorCobertura, MediosCampos } from './fondoCampos'
 import { entidadDePlantilla, estadoRealPlantilla, operacionPlantilla, ETIQUETA_OPERACION, verificarPlantillasAplicadas, type ContextoPlan, type OperacionPlantilla } from '../lib/planificar'
 import { nombreMes } from '../lib/plan'
 import { formatMoney, toCents } from '../lib/money'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
 import { mediosDeFondo, unirMedios } from '../lib/fondoMedios'
-import { fondoLook, medioLook, sortMedios } from '../lib/visual'
+import { fondoLook, sortMedios } from '../lib/visual'
 import { Combobox, type Opcion } from './Combobox'
 import { MonthPicker } from './DatePicker'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
@@ -404,7 +406,15 @@ function PlantillaFinForm({ store, plantilla, origenId, existente, clonDe, todas
   const [nombre, setNombre] = useState(base ? (clonDe ? `${clonDe.nombre.slice(0, 31)} (Copia)` : base.nombre) : '')
   const [monto, setMonto] = useState(base ? String(base.monto) : '')
   const [moneda, setMoneda] = useState(base?.moneda || data.config.moneda || 'PEN')
-  const [elegidos, setElegidos] = useState<string[]>(base ? mediosDeFondo(base.medios) : [])
+  const reglaIni = (f?: Fondo | null) => { const r = f ? reglaActual(f) : null; return r ? { modo: r.medios, lista: r.listaMedios, cob: r.cobertura, rutas: r.rutas, restringe: r.restringeMedio } : null }
+  const d0 = base?.datos?.regla
+  const [tipoFondo, setTipoFondo] = useState<TipoFondo>(base?.datos?.tipo || (base?.recurrencia === 'unica' ? 'extra' : 'mensual'))
+  const [vigencia, setVigencia] = useState(base?.datos?.vigencia ?? '')
+  const [modoMedios, setModoMedios] = useState<ModoMedios>(d0?.medios ?? (base && mediosDeFondo(base.medios).length ? 'solo' : 'todos'))
+  const [elegidos, setElegidos] = useState<string[]>(d0?.listaMedios ?? (base ? mediosDeFondo(base.medios) : []))
+  const [cobertura, setCobertura] = useState<TipoCobertura>(d0?.cobertura ?? 'todos')
+  const [rutas, setRutas] = useState<Ruta[]>(d0?.rutas ?? [])
+  const [restringe, setRestringe] = useState(d0?.restringeMedio ?? false)
   const [recurrencia, setRecurrencia] = useState<'mensual' | 'unica'>(base?.recurrencia ?? 'mensual')
   const [descripcion, setDescripcion] = useState(base?.descripcion ?? '')
   const [activo, setActivo] = useState(base ? base.activo : true)
@@ -416,14 +426,17 @@ function PlantillaFinForm({ store, plantilla, origenId, existente, clonDe, todas
     setErrors({})
     const f = fondos.find(x => x.id === oid)
     if (!f) return
-    setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setElegidos(mediosDeFondo(f.medioPago)); setRecurrencia(f.recurrencia)
+    setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setRecurrencia(f.recurrencia); setTipoFondo(f.tipo); setVigencia(f.recurrencia === 'mensual' ? f.mes : '')
+    const r = reglaIni(f)!
+    setModoMedios(r.modo); setElegidos(r.lista); setCobertura(r.cob); setRutas(r.rutas); setRestringe(r.restringe)
   }
   useEffect(() => { if (origenId && !plantilla) cargarDesde(origenId) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const yaVinculada = origen ? todas.find(p => p.origenId === origen && p.id !== id) : undefined
   const entidades = fondos.map(f => ({ id: f.id, nombre: f.nombre, look: fondoLook(f, fondos) }))
   const opcionesExistente: Opcion[] = entidades.map(x => ({ value: x.id, label: x.nombre, Icon: x.look.Icon, color: x.look.color, hint: todas.some(p => p.origenId === x.id) ? 'Ya tiene plantilla' : undefined }))
-  const mediosOpc = useMemo(() => medios.filter(m => !elegidos.some(e => normName(e) === normName(m))).map(m => { const l = medioLook(m); return { value: m, label: m, Icon: l.Icon, color: l.color } as Opcion }), [medios, elegidos])
+  const regla: ReglaFondo = { desde: '', medios: modoMedios, listaMedios: modoMedios === 'todos' ? [] : elegidos, cobertura, rutas: cobertura === 'todos' ? [] : rutas, restringeMedio: modoMedios === 'solo' && restringe }
+  const errorRegla = validarRegla(regla)
 
   function save() {
     const errs: Record<string, string> = {}
@@ -432,13 +445,16 @@ function PlantillaFinForm({ store, plantilla, origenId, existente, clonDe, todas
     else if (todas.some(p => p.id !== id && normName(p.nombre) === normName(nombre))) errs.nombre = `Ya existe una plantilla llamada “${nombre.trim()}”.`
     if (!AMOUNT.test(monto.trim()) || !(n >= 0)) errs.monto = 'Ingresa un monto válido (puede ser 0).'
     if (yaVinculada) errs.origen = `Ya existe la plantilla “${yaVinculada.nombre}” para este registro.`
+    if (errorRegla) errs.reglas = errorRegla
+    if (vigencia && !/^\d{4}-(0[1-9]|1[0-2])$/.test(vigencia)) errs.vigencia = 'Mes inválido'
     setErrors(errs)
     if (Object.keys(errs).length) return
     const input: PlantillaFinInput = {
-      id, tipo, nombre: nombre.trim(), monto: n, moneda, medios: unirMedios(elegidos), descripcion: formatearDescripcion(descripcion),
+      id, tipo, nombre: nombre.trim(), monto: n, moneda, medios: modoMedios === 'solo' ? unirMedios(elegidos) : '', descripcion: formatearDescripcion(descripcion),
       color: base?.color ?? (origen ? fondos.find(f => f.id === origen)?.color : undefined) ?? '#1e3a8a',
       icono: base?.icono ?? (origen ? fondos.find(f => f.id === origen)?.icono : undefined) ?? '',
       recurrencia, activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
+      datos: { tipo: tipoFondo, vigencia: recurrencia === 'mensual' ? vigencia : '', regla: { medios: regla.medios, listaMedios: regla.listaMedios, cobertura: regla.cobertura, rutas: regla.rutas, restringeMedio: regla.restringeMedio } },
     }
     const ok = store.track(`pf:${id}`, { pending: 'Guardando la plantilla…', ok: `Plantilla ${input.nombre} guardada.`, error: 'No se pudo guardar la plantilla.' }, () => store.actions.savePlantillaFin(plantilla ? input : { ...input, orden: undefined }))
     if (ok) onDone()
@@ -471,31 +487,42 @@ function PlantillaFinForm({ store, plantilla, origenId, existente, clonDe, todas
           <input id="pf-monto" className={`${inputCls} tabular text-right ${errors.monto ? 'border-danger' : ''}`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} placeholder="0.00" autoComplete="off" />
         </Field>
       </div>
-      <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Moneda" htmlFor="pf-moneda"><Combobox id="pf-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={[...new Set([...monedas, moneda])].map(m => ({ value: m, label: m }))} /></Field>
-            <Field label="Recurrencia">
-              <Segmented label="Recurrencia" value={recurrencia} onChange={setRecurrencia} options={[{ value: 'mensual', label: 'Todos los meses' }, { value: 'unica', label: 'Un solo mes' }]} />
-            </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Moneda" htmlFor="pf-moneda"><Combobox id="pf-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={[...new Set([...monedas, moneda])].map(m => ({ value: m, label: m }))} /></Field>
+        <Field label="Tipo de fondo" htmlFor="pf-tipo">
+          <Combobox id="pf-tipo" label="Tipo de fondo" value={tipoFondo} onChange={v => setTipoFondo(v as TipoFondo)} options={TIPOS_FONDO.map(t => ({ value: t, label: TIPO_FONDO_TXT[t] }))} />
+        </Field>
+        <Field label="Periodo" htmlFor="pf-recurrencia">
+          <Combobox id="pf-recurrencia" label="Periodo del fondo" value={recurrencia} onChange={v => setRecurrencia(v as 'mensual' | 'unica')} options={[{ value: 'mensual', label: 'Todos los meses' }, { value: 'unica', label: 'Solo un mes' }]} />
+        </Field>
+        <Field label="Vigencia desde" htmlFor="pf-vigencia" error={errors.vigencia} hint={recurrencia === 'unica' ? 'Un fondo de un solo mes toma el mes en que se aplica.' : 'Vacío: rige desde el mes en que se aplica.'}>
+          {recurrencia === 'mensual' ? <MonthPicker id="pf-vigencia" label="Vigencia desde" value={vigencia} onChange={setVigencia} invalid={!!errors.vigencia} /> : <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted">Se define al aplicar la plantilla.</p>}
+        </Field>
+      </div>
+      <MediosCampos idBase="pf" medios={medios} modo={modoMedios} onModo={v => { setModoMedios(v); if (v !== 'solo') setRestringe(false) }} lista={elegidos} onLista={setElegidos} invalid={!!errors.reglas} />
+      <div className="space-y-2">
+        <Field label="¿Qué gastos cubre?" htmlFor="pf-cobertura">
+          <Combobox id="pf-cobertura" label="Cobertura del fondo" value={cobertura} onChange={v => { setCobertura(v as TipoCobertura); setRutas([]) }} options={COBERTURAS} />
+        </Field>
+        {cobertura === 'todos'
+          ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted">Este fondo puede utilizarse para cualquier gasto compatible.</p>
+          : <EditorCobertura key={cobertura} tipo={cobertura} rutas={rutas} onRutas={setRutas} catalogo={data.catalogo} />}
+      </div>
+      {errors.reglas && <p className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger" role="alert">{errors.reglas}</p>}
+      <p className="rounded-xl border border-line bg-bg/60 p-3 text-xs text-muted" data-testid="pf-vista-previa">
+        <b className="text-ink">Vista previa: </b>{errorRegla ? errorRegla : `Fondo ${TIPO_FONDO_TXT[tipoFondo].toLowerCase()} de ${monto.trim() || '—'} ${moneda}, cubre ${cobertura === 'todos' ? 'cualquier gasto compatible' : describirCobertura(regla)}, con ${describirMedios(regla).toLowerCase()}.`}
+      </p>
+      <div className={`grid gap-3 ${modoMedios === 'solo' ? 'sm:grid-cols-2' : ''}`}>
+        <div className="rounded-xl border border-line p-3"><Switch checked={activo} onChange={setActivo} label="Plantilla activa" /></div>
+        {modoMedios === 'solo' && (
+          <div className="rounded-xl border border-line p-3">
+            <Switch checked={restringe} onChange={setRestringe} label="Restringir el uso de estos medios a lo que cubre el fondo" />
           </div>
-          <Field label="Medios de pago asociados (opcional)" htmlFor="pf-medio" hint="Los gastos pagados con esos medios se atribuyen al fondo. El importe no se divide entre medios.">
-            <div className="space-y-2">
-              <ul className="flex flex-wrap gap-1.5" aria-label="Medios elegidos" data-testid="pf-medios">
-                {!elegidos.length && <li className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted">Ninguno (fondo libre)</li>}
-                {elegidos.map(m => { const l = medioLook(m); return (
-                  <li key={m} className="flex items-center gap-1.5 rounded-full py-1 pr-1 pl-2 text-xs font-medium" style={{ background: `${l.color}1A`, color: l.color }}>
-                    <l.Icon className="size-3.5" />{m}
-                    <button type="button" aria-label={`Quitar ${m}`} onClick={() => setElegidos(xs => xs.filter(x => x !== m))} className="grid size-5 place-items-center rounded-full hover:bg-black/10"><X className="size-3" /></button>
-                  </li>) })}
-              </ul>
-              <Combobox id="pf-medio" label="Agregar medio de pago" value="" onChange={v => setElegidos(xs => [...xs, v])} placeholder="Agregar medio de pago…" options={mediosOpc} vacio="No hay más medios." />
-            </div>
-          </Field>
-        </>
+        )}
+      </div>
       <Field label="Descripción (opcional)" htmlFor="pf-desc">
         <input id="pf-desc" className={inputCls} maxLength={200} value={descripcion} onChange={e => setDescripcion(e.target.value)} onBlur={() => setDescripcion(formatearDescripcion(descripcion))} autoComplete="off" />
       </Field>
-      <Switch checked={activo} onChange={setActivo} label="Plantilla activa" />
       {clonDe && <p className="text-[11px] text-muted">Se creará una plantilla nueva (ID nuevo, sin vínculo). La original no cambia y no se copia ningún movimiento.</p>}
     </form>
   )

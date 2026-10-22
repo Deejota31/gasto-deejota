@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, KeyRound, Loader2, Lock, Maximize2, Minimize2, Play, Terminal } from 'lucide-react'
 import { showToast } from '../lib/toast'
 import type { AppStore } from '../lib/store'
-import { Button, Card, Field, SelectField, inputCls } from './ui'
+import { Button, Card, Field, inputCls } from './ui'
+import { Combobox } from './Combobox'
 import { PRUEBA_MAX_MESES, PRUEBA_MAX_REGISTROS, mesesEntre, periodoPorDefecto, validarPrueba } from '../lib/datosPrueba'
 import { todayIn } from '../lib/dates'
 
@@ -63,12 +64,10 @@ function SelectorMes({ id, etiqueta, value, onChange, anios }: { id: string; eti
     <fieldset className="min-w-0">
       <legend className="mb-1 text-xs font-medium text-muted">{etiqueta}</legend>
       <div className="grid grid-cols-[1fr_6.75rem] gap-1.5">
-        <SelectField id={`${id}-mes`} label={`${etiqueta}: mes`} value={m} onChange={v => onChange(`${y}-${v}`)}>
-          {MESES.map((n, i) => <option key={n} value={String(i + 1).padStart(2, '0')}>{n}</option>)}
-        </SelectField>
-        <SelectField id={`${id}-anio`} label={`${etiqueta}: año`} value={y} onChange={v => onChange(`${v}-${m}`)}>
-          {anios.map(a => <option key={a} value={String(a)}>{a}</option>)}
-        </SelectField>
+        <Combobox id={`${id}-mes`} label={`${etiqueta}: mes`} value={m} onChange={v => onChange(`${y}-${v}`)}
+          options={MESES.map((n, i) => ({ value: String(i + 1).padStart(2, '0'), label: n }))} />
+        <Combobox id={`${id}-anio`} label={`${etiqueta}: año`} value={y} onChange={v => onChange(`${v}-${m}`)}
+          options={anios.map(a => ({ value: String(a), label: String(a) }))} />
       </div>
     </fieldset>
   )

@@ -108,6 +108,8 @@ export interface FondoMes { fondoId: string; mes: string; monto: number; modo: '
  */
 export type TipoPlantillaFin = 'fondo'
 export type EstadoPlantillaMes = 'pendiente' | 'aplicada' | 'omitida'
+/** Configuración completa del fondo guardada en la plantilla (v1.29). Sin esto la plantilla funciona como en 1.28. */
+export interface DatosPlantillaFin { tipo: TipoFondo | ''; vigencia: string; regla?: Omit<ReglaFondo, 'desde'> }
 export interface PlantillaFin {
   id: string; tipo: TipoPlantillaFin; nombre: string; monto: number
   moneda: string; medios: string                                  // 'A|B' o vacío
@@ -115,6 +117,7 @@ export interface PlantillaFin {
   recurrencia: Recurrencia; activo: boolean; orden: number
   origenId: string; estados: Record<string, { e: 'aplicada' | 'omitida'; m: number }>
   creadoEn: string; actualizadoEn: string
+  datos?: DatosPlantillaFin | null
 }
 
 export interface AppData {

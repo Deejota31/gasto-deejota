@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { dialog, go } from './util'
+import { dialog, go, pick } from './util'
 
 // v1.26 — Fondos del presupuesto y Revisión del presupuesto. Modo demostración. Los 10 escenarios de la especificación.
 const money = (s: string) => Number(s.replace(/[^\d.-]/g, ''))
@@ -26,8 +26,8 @@ async function nuevoFondo(page: Page, { nombre, monto, tipo }: { nombre: string;
   const d = dialog(page)
   await d.getByLabel('Nombre del fondo').fill(nombre)
   await d.getByLabel('Importe').fill(monto)
-  await d.getByRole('radiogroup', { name: 'Tipo de fondo' }).getByRole('radio', { name: tipo, exact: true }).click()
-  if (tipo !== 'Mensual') await d.getByRole('radio', { name: 'Solo un mes' }).click()
+  await pick(page, '#fondo-tipo', tipo)
+  if (tipo !== 'Mensual') await pick(page, '#fondo-recurrencia', 'Solo un mes')
   await d.getByRole('button', { name: 'Crear fondo' }).click()
   await expect(d).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: `${nombre} creado` })).toBeVisible({ timeout: 15_000 })
@@ -169,13 +169,13 @@ test.describe('v1.26 terminología e interfaz', () => {
     const d = dialog(page)
     await d.getByLabel('Nombre del fondo').fill('Ahorro tesis nuevo')
     await d.getByLabel('Importe').fill('300')
-    await d.getByRole('radio', { name: 'Ahorro asignado', exact: true }).click()
+    await pick(page, '#fondo-tipo', 'Ahorro asignado')
     await expect(d.getByTestId('fondo-tipo-ayuda')).toContainText('Dinero ya separado')
-    await expect(d.getByRole('radio', { name: 'Todos los meses' })).toBeChecked()     // elegir tipo no cambia la recurrencia
+    await expect(d.locator('#fondo-recurrencia')).toContainText('Todos los meses')     // elegir tipo no cambia la recurrencia
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Ahorro tesis nuevo creado' })).toBeVisible({ timeout: 15_000 })
     const fila = page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo').filter({ hasText: 'Ahorro tesis nuevo' })
     await fila.getByRole('button', { name: /^Editar fondo / }).first().click()
-    await expect(dialog(page).getByRole('radio', { name: 'Ahorro asignado', exact: true })).toBeChecked()
+    await expect(dialog(page).locator('#fondo-tipo')).toContainText('Ahorro asignado')
   })
 })

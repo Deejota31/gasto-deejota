@@ -1210,6 +1210,26 @@ describe('plantillas de fondos (v1.17)', () => {
     expect(datos().plantillasFin).toHaveLength(1)
   })
 
+  it('v1.29: la plantilla guarda la configuración completa y al aplicarla crea el fondo con sus reglas (idempotente)', () => {
+    const datos29 = { tipo: 'ahorro_asignado', vigencia: '', regla: { medios: 'solo', listaMedios: ['Sodexo'], cobertura: 'categoria', rutas: [{ ambito: 'Personal', categoria: 'Alimentación', subcategoria: '' }], restringeMedio: true } }
+    const r = plF({ id: 'pf-v29', nombre: 'Almuerzos', monto: 280, medios: 'Sodexo', datos: datos29 })
+    expect(r.ok).toBe(true)
+    expect(r.data[18]).toMatchObject({ tipo: 'ahorro_asignado', regla: { medios: 'solo', cobertura: 'categoria', restringeMedio: true } })
+    const aplicar = () => b.post('aplicarPlantillasFin', { mes: '2026-11', items: [{ id: 'pf-v29', accion: 'aplicar', monto: 280 }] })
+    expect(aplicar().ok).toBe(true)
+    expect(aplicar().ok).toBe(true)                                                   // reintento: sin duplicados
+    const fs = datos().fondos.filter((f: unknown[]) => f[1] === 'Almuerzos')
+    expect(fs).toHaveLength(1)
+    expect(fs[0][13]).toBe('ahorro_asignado')
+    expect(JSON.parse(fs[0][14])[0]).toMatchObject({ medios: 'solo', listaMedios: ['Sodexo'], cobertura: 'categoria', restringeMedio: true })
+    // validaciones: medios "solo" sin lista, restricción con cobertura "todos" y tipo inválido se rechazan
+    expect(plF({ id: 'pf-m1', nombre: 'M1', datos: { tipo: 'mensual', vigencia: '', regla: { medios: 'solo', listaMedios: [], cobertura: 'todos', rutas: [], restringeMedio: false } } }).ok).toBe(false)
+    expect(plF({ id: 'pf-m2', nombre: 'M2', datos: { tipo: 'mensual', vigencia: '', regla: { medios: 'solo', listaMedios: ['Yape'], cobertura: 'todos', rutas: [], restringeMedio: true } } }).ok).toBe(false)
+    expect(plF({ id: 'pf-m3', nombre: 'M3', datos: { tipo: 'otro', vigencia: '' } }).ok).toBe(false)
+    // una plantilla de 1.28 (sin datos) sigue funcionando y no guarda configuración extra
+    expect(plF({ id: 'pf-old', nombre: 'Vieja' }).data[18]).toBeNull()
+  })
+
   it('no duplica la plantilla de un mismo registro ni por nombre', () => {
     fondo()
     plF({ id: 'pf-g', nombre: 'General (plantilla)', origenId: 'f-general' })

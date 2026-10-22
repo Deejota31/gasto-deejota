@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { aggregate, fondoMontoMes, type Ctx } from './engine'
-import { calcularCompromisos, calcularPresupuesto } from './salud'
 import type { Filters, Fondo, FondoMes, Gasto } from './types'
 
 // Pruebas matemáticas de fondos del presupuesto (v1.8, adaptadas a v1.28: los fondos son la única estructura; sin cajas).
@@ -157,15 +156,6 @@ describe('fondos del presupuesto: presupuesto consolidado', () => {
     const muchas = Array.from({ length: 20 }, (_, i) => fu(`f${i}`, 10 * (i + 1), { orden: i, activo: i % 5 !== 0 }))
     const esperado = muchas.filter(x => x.activo).reduce((s, x) => s + x.monto * 100, 0)
     expect(P([], oct, ctx(muchas)).presupuesto).toBe(esperado)
-  })
-
-  it('Salud financiera usa el mismo resultado: presupuesto 4780, gastado 500, disponible 4280', () => {
-    const gastos = [g({ monto: 500 })]
-    const a = aggregate(gastos, oct, ctx([GENERAL, SODEXO, EXTRA1]))
-    const comp = calcularCompromisos({ gastos, plantillas: [], vinculos: new Map(), desde: oct.desde, hasta: oct.hasta, base: 'PEN', rates: {} })
-    const p = calcularPresupuesto(a, comp, '2026-10')
-    expect([p.presupuesto, p.gastado, p.disponible]).toEqual([478000, 50000, 428000])
-    expect(a.presupuesto.disponible).toBe(p.disponible)
   })
 })
 

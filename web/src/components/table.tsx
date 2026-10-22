@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
+import { Combobox } from './Combobox'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 
 export const PAGE_SIZES = [5, 10, 15, 25, 50]
@@ -26,13 +27,11 @@ export function Pagination({ page, pageSize, total, onPage, onPageSize, noun = '
     <div className="flex flex-col gap-3 border-t border-line pt-3 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
         <span>Mostrando <b className="tabular text-ink">{from}–{to}</b> de <b className="tabular text-ink">{total}</b> {noun}</span>
-        <label className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5">
           <span className="hidden sm:inline">Por página</span>
-          <select aria-label="Registros por página" value={pageSize} onChange={e => onPageSize(Number(e.target.value))}
-            className="h-8 rounded-lg border border-line bg-card px-2 text-xs text-ink outline-none focus:border-navy">
-            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
+          <Combobox label="Registros por página" compact className="w-[4.5rem]" value={String(pageSize)} onChange={v => v && onPageSize(Number(v))}
+            options={PAGE_SIZES.map(n => ({ value: String(n), label: String(n) }))} />
+        </div>
       </div>
       <nav aria-label="Paginación" className="flex items-center gap-1 self-center sm:self-auto">
         <button type="button" className={`${btn} hover:bg-bg`} aria-label="Primera página" disabled={page === 0} onClick={() => onPage(0)}><ChevronsLeft className="size-4" /></button>

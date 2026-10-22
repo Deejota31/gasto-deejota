@@ -76,10 +76,9 @@ export default function Gastos({ store, openGasto, filters, setFilters, today, o
   const imputaciones = useImputaciones(store.data)
   const nombresFondo = useMemo(() => new Map((store.data?.fondos ?? []).map(f => [f.id, f.nombre])), [store.data?.fondos])
   const nombreFondo = (id: string) => nombresFondo.get(id) ?? 'Fondo'
-  const moneyBase = (c: number) => formatMoney(c, cfg.moneda || 'PEN')
   const [asignar, setAsignar] = useState<Gasto | null>(null)
   const indicador = (g: Gasto) => g.estado === 'Activo' && (store.data?.fondos?.length ?? 0) > 0
-    ? <IndicadorFondos imp={imputaciones.get(g.id)} nombre={nombreFondo} money={moneyBase} onClick={() => setAsignar(g)} /> : null
+    ? <IndicadorFondos imp={imputaciones.get(g.id)} nombre={nombreFondo} onClick={() => setAsignar(g)} /> : null
 
   // Orden personalizado: los que tienen posición guardada, por esa posición; los nuevos (sin posición) arriba,
   // del más reciente al más antiguo. Así un gasto nuevo nunca reordena los anteriores.
