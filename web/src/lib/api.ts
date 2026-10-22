@@ -200,10 +200,19 @@ function leerAsignaciones(rows: [string, string][]): Record<string, ParteManual[
 }
 const toFondoMes = (r: z.infer<typeof fondoMesRow>): FondoMes => ({ fondoId: r[0], mes: r[1], monto: r[2], modo: r[3] === 'desde' ? 'desde' : 'solo' })
 // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripción, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
-const plantillaFinRow = z.tuple([str, str, str, z.number(), str, str, str, str, str, str, str, str, z.boolean(), z.number(), str, z.record(z.string(), z.object({ e: z.enum(['aplicada', 'omitida']), m: z.number() })), str, str])
+const plantillaFinRow = z.tuple([str, str, str, z.number(), str, str, str, str, str, str, str, str, z.boolean(), z.number(), str, z.record(z.string(), z.object({ e: z.enum(['aplicada', 'omitida']), m: z.number() })), str, str]).rest(z.unknown())
+const datosPlantilla = z.object({
+  tipo: z.string().optional(), vigencia: z.string().optional(),
+  regla: z.object({ medios: z.enum(['todos', 'excepto', 'solo']), listaMedios: z.array(z.string()), cobertura: z.enum(['todos', 'ambito', 'categoria', 'subcategoria', 'personalizada']),
+    rutas: z.array(z.object({ ambito: z.string(), categoria: z.string(), subcategoria: z.string() })), restringeMedio: z.boolean() }).optional(),
+})
+const leerDatos = (raw: unknown): PlantillaFin['datos'] => {
+  const r = datosPlantilla.safeParse(raw)
+  return r.success ? { tipo: (TIPOS_FONDO as readonly string[]).includes(r.data.tipo ?? '') ? (r.data.tipo as TipoFondo) : '', vigencia: r.data.vigencia ?? '', regla: r.data.regla } : null
+}
 const toPlantillaFin = (r: z.infer<typeof plantillaFinRow>): PlantillaFin => ({
   id: r[0], tipo: 'fondo', nombre: r[2], monto: r[3], moneda: r[4], medios: r[5] === 'Libre' ? '' : r[5], descripcion: r[8],
-  color: r[9] || '#1e3a8a', icono: r[10], recurrencia: r[11] === 'unica' ? 'unica' : 'mensual', activo: r[12], orden: r[13], origenId: r[14], estados: r[15], creadoEn: r[16], actualizadoEn: r[17],
+  color: r[9] || '#1e3a8a', icono: r[10], recurrencia: r[11] === 'unica' ? 'unica' : 'mensual', activo: r[12], orden: r[13], origenId: r[14], estados: r[15], creadoEn: r[16], actualizadoEn: r[17], datos: leerDatos(r[18]),
 })
 export type PlantillaFinInput = Omit<PlantillaFin, 'creadoEn' | 'actualizadoEn' | 'estados' | 'orden'> & { orden?: number }
 export interface AplicarItem { id: string; accion: 'aplicar' | 'omitir' | 'pendiente'; monto?: number }

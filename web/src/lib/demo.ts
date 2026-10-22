@@ -150,7 +150,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
   // ---- Plantillas de fondos (misma lógica que el backend) ----
   const pfPub = (r: unknown[]) => {
     const est = r[15] as Record<string, { e: string; m: number }>
-    return [...r.slice(0, 15), Object.fromEntries(Object.entries(est).map(([m, v]) => [m, { e: v.e, m: v.m }])), r[16], r[17]]
+    return [...r.slice(0, 15), Object.fromEntries(Object.entries(est).map(([m, v]) => [m, { e: v.e, m: v.m }])), r[16], r[17], r[18] ?? null]
   }
   const MES = /^\d{4}-(0[1-9]|1[0-2])$/
   // Igual que pfIdSeguro_ del backend: cabe en el límite (60); si "pf-"+UUID no cabe con el prefijo, se omite su "pf-".
@@ -358,7 +358,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
       const row = [p.id, tipo, nombre, Math.round(Number(p.monto) * 100) / 100, String(p.moneda || 'PEN'), [...new Set(medios)].join('|'),
         '', '', formatearDescripcion(String(p.descripcion ?? '')), String(p.color || '#1e3a8a'), String(p.icono ?? ''),
         p.recurrencia === 'unica' ? 'unica' : 'mensual', p.activo !== false, prev ? prev[13] : p.orden === undefined ? maxOrden + 1 : Number(p.orden),
-        prev && !origen ? prev[14] : origen, prev ? prev[15] : {}, prev ? prev[16] : now, now]
+        prev && !origen ? prev[14] : origen, prev ? prev[15] : {}, prev ? prev[16] : now, now,
+        p.datos === undefined ? (prev ? prev[18] ?? null : null) : (p.datos ?? null)]
       upsert(db.plantillasFin, 1, row)
       return pfPub(row)
     },
@@ -407,7 +408,11 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
           let w = false, origen = String(r[14])
           if (!db.fondos.some(f => f[0] === origen)) {
             origen = seguro('f-', r[0])
-            if (!db.fondos.some(f => f[0] === origen)) handlers.saveFondo({ id: origen, nombre: r[2], monto: r[3], moneda: r[4], color: r[9], icono: r[10], recurrencia: r[11], mes, activo: true, medioPago: r[5] || 'Libre', orden: db.fondos.length + 1 })
+            if (!db.fondos.some(f => f[0] === origen)) {
+              const dat = r[18] as { tipo?: string; regla?: Record<string, unknown> } | null
+              handlers.saveFondo({ id: origen, nombre: r[2], monto: r[3], moneda: r[4], color: r[9], icono: r[10], recurrencia: r[11], mes, activo: true, medioPago: r[5] || 'Libre', orden: db.fondos.length + 1,
+                ...(dat?.tipo ? { tipo: dat.tipo } : {}), ...(dat?.regla ? { reglas: [{ desde: '', ...dat.regla }] } : {}) })
+            }
           }
           const ef = efectivoFondo(db.fondos.find(f => f[0] === origen)!, mes)
           const prev = ef.solo

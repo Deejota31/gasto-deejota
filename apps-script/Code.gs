@@ -1189,12 +1189,32 @@ function pfEstados_(raw) {
   try { var o = JSON.parse(str_(raw) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (err) { return {}; }
 }
 
+// v1.29: configuración completa del fondo dentro de la plantilla (columna Datos, JSON): { tipo, vigencia, regla }. Sin Datos = plantilla de 1.28 (se comporta igual).
+function pfDatos_(d) {
+  if (d === undefined || d === null || d === '') return null;
+  if (typeof d !== 'object' || Array.isArray(d)) throw appError_('VALIDATION', 'Configuración de la plantilla inválida.');
+  var tipo = str_(d.tipo);
+  if (tipo && TIPOS_FONDO_.indexOf(tipo) < 0) throw appError_('VALIDATION', 'Tipo de fondo inválido (mensual, extra o ahorro asignado).');
+  var vig = str_(d.vigencia);
+  if (vig && !MES_RE.test(vig)) throw appError_('VALIDATION', 'Vigencia inválida (AAAA-MM).');
+  var out = { tipo: tipo, vigencia: vig };
+  if (d.regla) {
+    var x = d.regla;
+    var r = validarReglas_([{ desde: '', medios: x.medios, listaMedios: x.listaMedios, cobertura: x.cobertura, rutas: x.rutas, restringeMedio: x.restringeMedio }])[0];
+    out.regla = { medios: r.medios, listaMedios: r.listaMedios, cobertura: r.cobertura, rutas: r.rutas, restringeMedio: r.restringeMedio };
+  }
+  return out;
+}
+function pfDatosLeer_(raw) {
+  try { var o = JSON.parse(str_(raw) || 'null'); return o && typeof o === 'object' && (o.regla || o.tipo) ? o : null; } catch (err) { return null; }
+}
+
 // [id, tipo, nombre, monto, moneda, medios, campo, valor, descripcion, color, icono, recurrencia, activo, orden, origenId, estados, creado, actualizado]
 function pfOut_(r) {
   var est = pfEstados_(r[15]), pub = {};
   Object.keys(est).forEach(function (m) { if (est[m] && (est[m].e === 'aplicada' || est[m].e === 'omitida')) pub[m] = { e: est[m].e, m: num_(est[m].m) }; });
   return [str_(r[0]), str_(r[1]), str_(r[2]).replace(/^'/, ''), num_(r[3]), str_(r[4]) || 'PEN', libreVacio_(r[5]), str_(r[6]), str_(r[7]), str_(r[8]),
-    str_(r[9]), autoVacio_(r[10]), str_(r[11]) === 'unica' ? 'unica' : 'mensual', str_(r[12]) === '' ? true : bool_(r[12]), num_(r[13]), str_(r[14]), pub, iso_(r[16]), iso_(r[17])];
+    str_(r[9]), autoVacio_(r[10]), str_(r[11]) === 'unica' ? 'unica' : 'mensual', str_(r[12]) === '' ? true : bool_(r[12]), num_(r[13]), str_(r[14]), pub, iso_(r[16]), iso_(r[17]), pfDatosLeer_(r[18])];
 }
 
 function savePlantillaFin_(p) {
@@ -1212,6 +1232,7 @@ function savePlantillaFin_(p) {
   if (origen && !(ss.getSheetByName('FONDOS_PRESUPUESTO') && findRowByValue_(ss.getSheetByName('FONDOS_PRESUPUESTO'), 1, origen))) throw appError_('NOT_FOUND', 'El fondo original ya no existe.');
   var icono = p.icono === undefined || p.icono === null ? '' : str_(p.icono);
   if (icono && !/^[a-z0-9-]{1,30}$/.test(icono)) throw appError_('VALIDATION', 'Icono inválido.');
+  var datos = p.datos === undefined ? undefined : pfDatos_(p.datos);
   var sh = plantillasFinSheet_();
   var rows = pfRows_(sh);
   var idx = -1, maxOrden = 0;
@@ -1229,7 +1250,7 @@ function savePlantillaFin_(p) {
   var row = [id, tipo, nombre, monto, moneda, medios || 'Libre', campo, valor, descText_(p.descripcion, false),
     /^#[0-9a-fA-F]{6}$/.test(p.color || '') ? p.color : '#1e3a8a', icono || 'auto', recurrencia, activo,
     prev ? num_(prev[13]) : (p.orden === undefined ? maxOrden + 1 : num_(p.orden)), prev && origen === '' ? str_(prev[14]) : origen,
-    prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now, prev ? str_(prev[18]) : ''];
+    prev ? str_(prev[15]) : '', prev ? (iso_(prev[16]) || now) : now, now, datos !== undefined ? (datos ? JSON.stringify(datos) : '') : (prev ? str_(prev[18]) : '')];
   if (idx >= 0) sh.getRange(idx + 2, 1, 1, row.length).setValues([row]); else appendRows_(sh, [row]);
   return pfOut_(row);
 }
@@ -1374,8 +1395,13 @@ function aplicarPlantillasFin_(p) {
       if (!origen || !fRows.some(function (x) { return str_(x[0]) === origen; })) {
         origen = pfIdSeguro_('f-', r[0], 60);
         fSh = fondosSheets_().fondos;
-        if (!findRowByValue_(fSh, 1, origen)) saveFondo_({ id: origen, nombre: str_(r[2]).replace(/^'/, ''), monto: num_(r[3]), moneda: str_(r[4]), color: str_(r[9]), icono: autoVacio_(r[10]) || 'auto',
-          recurrencia: str_(r[11]) === 'unica' ? 'unica' : 'mensual', mes: mes, activo: true, medioPago: libreVacio_(r[5]), orden: fRows.length + 1 });
+        if (!findRowByValue_(fSh, 1, origen)) {
+          var dat = pfDatosLeer_(r[18]), nuevo = { id: origen, nombre: str_(r[2]).replace(/^'/, ''), monto: num_(r[3]), moneda: str_(r[4]), color: str_(r[9]), icono: autoVacio_(r[10]) || 'auto',
+            recurrencia: str_(r[11]) === 'unica' ? 'unica' : 'mensual', mes: mes, activo: true, medioPago: libreVacio_(r[5]), orden: fRows.length + 1 };
+          if (dat && dat.tipo) nuevo.tipo = dat.tipo;
+          if (dat && dat.regla) { nuevo.reglas = [{ desde: '', medios: dat.regla.medios, listaMedios: dat.regla.listaMedios, cobertura: dat.regla.cobertura, rutas: dat.regla.rutas, restringeMedio: dat.regla.restringeMedio }]; }
+          saveFondo_(nuevo);
+        }
         fRows = fondosRows_(fSh);
       }
       var f = fondoOut_(fRows.filter(function (x) { return str_(x[0]) === origen; })[0]);

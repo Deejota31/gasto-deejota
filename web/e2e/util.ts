@@ -25,3 +25,10 @@ export async function newGasto(page: Page, { ambito = 'Personal', categoria = 'A
   await d.getByRole('button', { name: 'Registrar gasto' }).click()
   await expect(d).toHaveCount(0)
 }
+
+/** Elige una opción en un Combobox (por "#id" o nombre accesible); la lista se pinta en un portal. */
+export async function pick(page: Page, trigger: string, option: string) {
+  const btn = trigger.startsWith('#') ? page.locator(trigger) : page.getByRole('combobox', { name: trigger, exact: true })
+  await btn.click()
+  await page.getByRole('listbox').getByRole('option', { name: option, exact: true }).first().click()
+}

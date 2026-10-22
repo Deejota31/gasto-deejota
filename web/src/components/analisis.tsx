@@ -238,7 +238,7 @@ interface LinkPos { medio: string; ambito: string; cents: number; count: number;
 
 /** Disposición de un Sankey de dos columnas: nodos proporcionales al monto y enlaces apilados en el mismo orden. */
 export function layoutSankey(s: Aggregates['sankey'], width: number, height: number, labelW: number, colorMedio: (n: string) => string, colorAmb: (n: string) => string) {
-  const nodeW = 14, gap = 14
+  const nodeW = 14, gap = 18
   const total = s.medios.reduce((x, m) => x + m.cents, 0)
   const n = Math.max(s.medios.length, s.ambitos.length)
   const usable = Math.max(40, height - gap * (n - 1))
@@ -286,9 +286,10 @@ function FlujoMedios({ a, currency, catalogo, periodo, rango }: { a: Aggregates;
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
   const s = a.sankey
   const n = Math.max(s.medios.length, s.ambitos.length)
-  const height = Math.max(240, Math.min(460, n * 46))
+  const height = Math.max(320, Math.min(640, n * 58))
   const narrow = width < 520
-  const labelW = Math.round(Math.min(150, Math.max(92, width * 0.26)))
+  const movil = width > 0 && width < 560     // en pantallas angostas el diagrama no cabe: se muestra la misma información como lista
+  const labelW = Math.round(Math.min(200, Math.max(112, width * 0.25)))
   const L = useMemo(() => width > 0 && s.links.length
     ? layoutSankey(s, width, height, labelW, m => medioLook(m).color, x => ambitoLook(x, catalogo).color)
     : null, [s, width, height, labelW, catalogo])
@@ -354,7 +355,8 @@ function FlujoMedios({ a, currency, catalogo, periodo, rango }: { a: Aggregates;
         Del {rango.replace(' – ', ' al ')} · {plural(a.count, 'movimiento', 'movimientos')} en el rango. Pasa el mouse (o toca) un medio, un ámbito o una conexión.
       </Subtitulo>
       <div ref={ref} className="relative select-none" onMouseLeave={salir}>
-        {L && (
+        {movil && <FlujoLista s={s} total={a.total} currency={currency} catalogo={catalogo} />}
+        {L && !movil && (
           <svg width={width} height={height} role="group" aria-label="Flujo del gasto desde cada medio de pago hacia cada ámbito" className="block overflow-visible">
             <defs>
               {L.links.map((l, i) => (
@@ -406,7 +408,7 @@ function FlujoMedios({ a, currency, catalogo, periodo, rango }: { a: Aggregates;
             })}
           </svg>
         )}
-        {!L && <div style={{ height }} />}
+        {!L && !movil && <div style={{ height }} />}
         {foco && tip && tipContent && (
           <div className="pointer-events-none absolute z-10" role="tooltip" data-testid="sankey-tooltip"
             style={{ left: tip.x > width / 2 ? tip.x - 14 : tip.x + 14, top: tip.y > height / 2 ? tip.y - 10 : tip.y + 14,
@@ -415,9 +417,9 @@ function FlujoMedios({ a, currency, catalogo, periodo, rango }: { a: Aggregates;
           </div>
         )}
       </div>
-      <div className="mt-2 flex justify-between px-1 text-[10px] font-semibold tracking-wide text-muted uppercase" aria-hidden>
+      {!movil && <div className="mt-2 flex justify-between px-1 text-[10px] font-semibold tracking-wide text-muted uppercase" aria-hidden>
         <span>Medio de pago</span><span>Ámbito</span>
-      </div>
+      </div>}
       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4" data-testid="sankey-resumen">
         <Dato icon={<CalendarRange className="size-3.5" />} label="Primer movimiento" value={r.primerFecha ? formatDate(r.primerFecha, periodo.dateFormat) : '—'} />
         <Dato icon={<CalendarRange className="size-3.5" />} label="Último movimiento" value={r.ultimaFecha ? formatDate(r.ultimaFecha, periodo.dateFormat) : '—'} />
@@ -426,6 +428,37 @@ function FlujoMedios({ a, currency, catalogo, periodo, rango }: { a: Aggregates;
           sub={r.medioDominante ? `${pct(r.medioDominante.cents, a.total)} del gasto` : undefined} color={r.medioDominante ? medioLook(r.medioDominante.name).color : undefined} />
       </dl>
     </div>
+  )
+}
+
+/** Alternativa móvil del Sankey: los mismos montos por medio de pago, con barras hacia cada ámbito. */
+function FlujoLista({ s, total, currency, catalogo }: { s: Aggregates['sankey']; total: number; currency: string; catalogo: CatalogoItem[] }) {
+  return (
+    <ul className="space-y-3" data-testid="sankey-lista" aria-label="Flujo del gasto por medio de pago y ámbito">
+      {s.medios.map(m => {
+        const look = medioLook(m.name)
+        const enlaces = s.links.filter(l => l.medio === m.name).sort((x, y) => y.cents - x.cents)
+        return (
+          <li key={m.name} className="rounded-2xl border border-line p-3">
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="flex min-w-0 items-center gap-2 font-semibold"><span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: `${look.color}1A`, color: look.color }}><look.Icon className="size-4" /></span><span className="truncate">{m.name}</span></span>
+              <span className="tabular shrink-0 text-right"><b>{formatMoney(m.cents, currency)}</b> <span className="text-[11px] text-muted">{pct(m.cents, total)}</span></span>
+            </div>
+            <ul className="mt-2 space-y-1.5">
+              {enlaces.map(l => {
+                const c = ambitoLook(l.ambito, catalogo).color
+                return (
+                  <li key={l.ambito} className="text-xs" data-testid="sankey-lista-enlace">
+                    <div className="flex justify-between gap-2"><span className="truncate">{l.ambito}</span><span className="tabular shrink-0 text-muted">{formatMoney(l.cents, currency)} · {pct(l.cents, m.cents)}</span></div>
+                    <Barra value={l.cents} max={m.cents} color={c} />
+                  </li>
+                )
+              })}
+            </ul>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
