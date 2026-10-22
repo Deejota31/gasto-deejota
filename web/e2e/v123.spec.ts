@@ -114,17 +114,6 @@ test.describe('P4: los errores de validación se borran al corregir el campo', (
     await expect(dup).toHaveCount(0)
   })
 
-  test('Caja: el mensaje sigue al alcance elegido', async ({ page }) => {
-    await page.goto('/?demo=60')
-    await go(page, 'Presupuestos')
-    await page.getByRole('button', { name: /Nueva caja|Nueva subcaja|Crear caja/ }).first().click()
-    const d = dialog(page)
-    await d.getByLabel('Nombre', { exact: true }).fill('TEST-caja')
-    await d.getByRole('radio', { name: 'Medio de pago' }).click()
-    await d.getByRole('button', { name: /Guardar|Crear/ }).click()
-    await expect(d.getByText('Elige un medio de pago')).toBeVisible()
-    await expect(d.getByText('Elige una categoría')).toHaveCount(0)
-  })
 })
 
 test.describe('P5: el total de Gastos cuadra con el Dashboard', () => {

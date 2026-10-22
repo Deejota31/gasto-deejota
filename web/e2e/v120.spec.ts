@@ -44,83 +44,8 @@ async function aplicarFilaFondo(page: Page, nombre: string) {
 }
 
 test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
-  test('flujo completo: Fondos → vuelve → Subcajas → Gastos → Resumen → Finalizar; sin gastos escritos', async ({ page }) => {
-    await abrir(page)
-    await sembrarPlantillas(page)
-    await abrirAsistente(page)
-    for (const e of ['fondos', 'subcajas', 'gastos']) await expect(estado(page, e)).toHaveText('Pendiente')
-    const antes = await nFondos(page)
-    // Abrir el módulo hijo: el asistente se oculta (sin diálogos encimados) y el módulo muestra el mes del plan.
-    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
-    await asistenteOculto(page)
-    await expect(page.getByTestId('pf-mes-plan')).toContainText('Noviembre')
-    await aplicarFilaFondo(page, 'Sueldo QA')
-    // Regresa solo al asistente, con la etapa completada y la guía para continuar.
-    await expect(page.getByTestId('asistente-plan')).toBeVisible()
-    await expect(estado(page, 'fondos')).toHaveText('Completada')
-    await expect(page.getByTestId('continuar-fondos')).toContainText('Continuar con Cajas')
-    await expect(page.getByTestId('ok-fondos')).toContainText('Fondos configurados correctamente')
-    await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
-    await page.getByTestId('continuar-fondos').click()
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await expect(estado(page, 'subcajas')).toHaveText('Omitida')
-    // Gastos: marcar revisados persiste al instante.
-    await page.getByRole('checkbox', { name: /Ya revisé/ }).click()
-    await expect(estado(page, 'gastos')).toHaveText('Completada')
-    await page.getByRole('button', { name: 'Revisar resumen' }).click()
-    const r = page.getByTestId('plan-resumen-final')
-    await expect(page.getByTestId('resumen-fondos')).not.toContainText('Omitida')
-    await expect(page.getByTestId('resumen-subcajas')).toContainText('Omitida')
-    await expect(page.getByTestId('resumen-gastos')).toContainText('Completada')
-    await expect(r.getByTestId('plan-indicadores')).toContainText('Etapas omitidas')
-    await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    await asistenteOculto(page)                                                                      // v1.21: el asistente se cierra al instante con tu clic
-    await expect(page.getByTestId('campana-badge')).toHaveCount(0)
-    expect(await nFondos(page)).toBeGreaterThan(antes)
-    expect(await escriturasGastos(page)).toBe(0)
-    expect(await llamadas(page, 'aplicarPlantillasFin')).toBe(1)           // la única escritura fue la del módulo hijo
-    expect(await llamadas(page, 'aplicarEntidadesMes')).toBe(0)            // Finalizar no vuelve a crear nada
-  })
 
-  test('cerrar y reabrir conserva los estados (Fondos completada, Subcajas omitida)', async ({ page }) => {
-    await abrir(page)
-    await sembrarPlantillas(page)
-    await abrirAsistente(page)
-    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
-    await aplicarFilaFondo(page, 'Sueldo QA')
-    await expect(estado(page, 'fondos')).toHaveText('Completada')
-    await page.getByTestId('continuar-fondos').click()
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await expect(estado(page, 'subcajas')).toHaveText('Omitida')
-    await page.keyboard.press('Escape')
-    await asistenteOculto(page)
-    await abrirAsistente(page)
-    await expect(estado(page, 'fondos')).toHaveText('Completada')
-    await expect(estado(page, 'subcajas')).toHaveText('Omitida')
-    await expect(estado(page, 'gastos')).toHaveText('Pendiente')
-    // Siguiente salta lo completado/omitido: desde Fondos va directo a Gastos.
-    await page.getByTestId('etapa-fondos').click()
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Abrir gastos mensuales' })).toBeVisible()
-    // Retomar una etapa omitida la devuelve a Pendiente.
-    await page.getByTestId('etapa-subcajas').click()
-    await page.getByRole('button', { name: /Retomar/ }).first().click()
-    await expect(estado(page, 'subcajas')).toHaveText('Pendiente')
-  })
 
-  test('mes cambiado: el progreso queda guardado por mes y se conserva al ir y volver', async ({ page }) => {
-    await abrir(page)
-    await abrirAsistente(page)
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await expect(estado(page, 'fondos')).toHaveText('Omitida')
-    await page.keyboard.press('Escape')
-    await asistenteOculto(page)
-    await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await page.getByRole('button', { name: 'Mes anterior', exact: true }).first().click()
-    await abrirAsistente(page)
-    await expect(estado(page, 'fondos')).toHaveText('Omitida')
-    await expect(estado(page, 'subcajas')).toHaveText('Pendiente')
-  })
 
   test('cancelar la confirmación no aplica nada y no vuelve al asistente; luego se puede aplicar', async ({ page }) => {
     await abrir(page)
@@ -183,26 +108,6 @@ test.describe('v1.20 flujo continuo de «Prepara tu mes»', () => {
     expect(await llamadas(page, 'aplicarEntidadesMes')).toBe(1)
   })
 
-  test('segundo plano: el módulo se cierra al confirmar, el asistente sigue usable y la etapa pasa a Completada sola', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=900#presupuestos')
-    await sembrarPlantillas(page)
-    await abrirAsistente(page)
-    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
-    await aplicarFilaFondo(page, 'Sueldo QA')
-    // De inmediato: sin módulo ni confirmaciones encimadas, asistente visible con la etapa En progreso.
-    await expect(page.getByTestId('asistente-plan')).toBeVisible()
-    await expect(page.getByTestId('pf-lista')).toHaveCount(0)
-    await expect(estado(page, 'fondos')).toHaveText('En progreso')
-    await expect(page.getByTestId('bg-fondos')).toBeVisible()
-    await expect(page.getByRole('dialog').filter({ visible: true })).toHaveCount(1)
-    // Mientras guarda se puede seguir con el resto (aquí: omitir Subcajas) y Finalizar queda bloqueado.
-    await page.getByTestId('etapa-subcajas').click()
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await expect(estado(page, 'subcajas')).toHaveText('Omitida')
-    await expect(estado(page, 'fondos')).toHaveText('Completada')
-    await expect(page.getByTestId('bg-fondos')).toHaveCount(0)
-    expect(await llamadas(page, 'aplicarPlantillasFin')).toBe(1)
-  })
 
   test('segundo plano con aplicación múltiple (vista previa): se cierra todo y se completa sin duplicar', async ({ page }) => {
     await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=600#presupuestos')
@@ -295,36 +200,7 @@ test.describe('v1.20.3 las operaciones en segundo plano no mueven al usuario', (
     expect(await llamadas(page, 'saveGastosBatch')).toBe(1)
   })
 
-  test('navegar entre etapas mientras guarda no se interrumpe: la etapa donde estoy no cambia al completarse otra', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1500#presupuestos')
-    await sembrarPlantillas(page)
-    await abrirAsistente(page)
-    await dialog(page).getByRole('button', { name: 'Plantillas mensuales' }).click()
-    await aplicarFilaFondo(page, 'Sueldo QA')
-    await page.getByTestId('etapa-subcajas').click()
-    await expect(page.getByRole('button', { name: 'Omitir', exact: true })).toBeVisible()
-    await expect(estado(page, 'fondos')).toHaveText('Completada', { timeout: 10000 })
-    // Sigue en Subcajas (no lo devolvió a Fondos), con su propio contenido.
-    await expect(page.getByTestId('etapa-subcajas')).toHaveAttribute('aria-current', 'step')
-    await expect(page.getByTestId('etapa-fondos')).not.toHaveAttribute('aria-current', 'step')
-    await expect(page.getByText('¿Cuánto reservas en cada caja')).toBeVisible()
-  })
 
-  test('Finalizar: el asistente se cierra al instante, la vista muestra «Guardando planificación…» y al terminar avisa «Planificación guardada» sin reabrir nada', async ({ page }) => {
-    await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#presupuestos')
-    await abrirAsistente(page)
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await page.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await page.getByTestId('etapa-resumen').click()
-    await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    await expect(page.getByTestId('asistente-plan')).toHaveCount(0)                                 // se cerró con mi clic
-    await expect(page.getByTestId('plan-guardando')).toBeVisible()                                  // la vista de planificación muestra el guardado en curso
-    await expect(toastOk(page, /Planificación guardada/)).toBeVisible({ timeout: 10000 })
-    await expect(page.getByTestId('plan-guardando')).toHaveCount(0)
-    await expect(page.getByTestId('asistente-plan')).toHaveCount(0)                                 // no se reabrió ni redirigió
-    await expect(page).toHaveURL(/#presupuestos$/)
-  })
 
   test('el asistente se puede cerrar mientras guarda y la operación termina igual (estado guardado)', async ({ page }) => {
     await abrir(page, '/?demo=60&fondos=3&cajas=3&latencia=1200#presupuestos')

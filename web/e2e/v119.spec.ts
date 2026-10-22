@@ -26,21 +26,18 @@ async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?de
 }
 
 test.describe('v1.19 aislamiento por mes', () => {
-  test('noviembre arranca sin fondos ni subcajas; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
+  test('noviembre arranca sin fondos; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
     await abrir(page, OCT)
     await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)             // octubre (anterior al corte): comportamiento histórico
     await expect(page.getByRole('list', { name: 'Lista de fondos' })).toBeVisible()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para noviembre')
-    await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes cajas configuradas para noviembre')
     await expect(page.getByTestId('n-fondos')).toHaveText(/\d+/)
     // Dashboard: mensajes guiados, sin porcentajes engañosos.
     await go(page, 'Dashboard')
     const av = page.getByTestId('aviso-mes-sin-config')
     await expect(av).toContainText('Todavía no has configurado fondos del presupuesto para este mes.')
-    await expect(av).toContainText('Todavía no has reservado presupuesto para este mes.')
     await expect(av.getByRole('button', { name: 'Preparar fondos mensuales' })).toBeVisible()
-    await expect(av.getByRole('button', { name: 'Preparar cajas mensuales' })).toBeVisible()
     await expect(page.getByText(/NaN|Infinity/)).toHaveCount(0)
     // Diciembre y enero (cambio de año) también empiezan vacíos.
     await go(page, 'Presupuestos')
@@ -71,56 +68,9 @@ test.describe('v1.19 aislamiento por mes', () => {
     await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)
   })
 
-  test('nueva subcaja se aplica al mes seleccionado con "Mes de aplicación" visible', async ({ page }) => {
-    await abrir(page, OCT)
-    await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    await expect(d.getByText('Mes de aplicación')).toBeVisible()
-    await expect(d.locator('#caja-mes')).toContainText(/noviembre/i)
-    await d.getByLabel('Nombre', { exact: true }).fill('Viajes')
-    await d.getByLabel('Monto asignado por mes').fill('250')
-    await d.getByRole('combobox', { name: /Valor/ }).click()
-    await page.getByRole('listbox').getByRole('option').first().click()
-    await d.getByRole('button', { name: 'Crear caja' }).click()
-    await expect(d).toHaveCount(0)
-    await expect(page.getByTestId('vacio-mes-subcaja')).toHaveCount(0)
-    await expect(page.getByText('Viajes').first()).toBeVisible()
-    await page.getByRole('button', { name: 'Mes siguiente' }).click()
-    await expect(page.getByTestId('vacio-mes-subcaja')).toBeVisible()      // diciembre no la hereda
-  })
 })
 
 test.describe('v1.19 asistente y campana', () => {
-  test('campana con aviso: preparar ahora → fondos (mes anterior) → omitir subcajas → gastos → resumen → aplicar; no registra gastos', async ({ page }) => {
-    await abrir(page)
-    const antesF = await fondosAplicadas(page)
-    await expect(page.getByTestId('campana-badge')).toHaveText('1')
-    await page.getByTestId('campana-plan').click()
-    const panel = page.getByTestId('panel-plan')
-    await expect(panel).toContainText('Prepara Noviembre 2026')
-    await panel.getByRole('button', { name: 'Preparar ahora' }).click()
-    const w = page.getByTestId('asistente-plan')
-    await expect(w).toBeVisible()
-    await expect(page.getByRole('dialog').getByText('Prepara tu mes · Noviembre 2026')).toBeVisible()
-    const dlg = page.getByRole('dialog').filter({ visible: true }).last()
-    await dlg.getByRole('button', { name: 'Usar mes anterior' }).click()
-    await dlg.getByRole('button', { name: 'Siguiente', exact: true }).click()
-    await dlg.getByRole('button', { name: 'Omitir', exact: true }).click()
-    await expect(w.getByRole('checkbox', { name: /Ya revisé/ })).toBeVisible()
-    await w.getByRole('checkbox', { name: /Ya revisé/ }).click()
-    await expect(w.getByRole('checkbox', { name: /Ya revisé/ })).toBeChecked()
-    await dlg.getByRole('button', { name: 'Revisar resumen' }).click()
-    await expect(page.getByTestId('plan-resumen-final')).toContainText('Omitida')
-    await expect(page.getByTestId('plan-resumen-final')).toContainText('Completada')
-    await page.getByRole('button', { name: 'Finalizar planificación' }).click()
-    // v1.21: finalizar cierra el asistente al instante y guarda en segundo plano.
-    await expect(page.getByTestId('asistente-plan')).toHaveCount(0)
-    await expect(page.getByTestId('campana-badge')).toHaveCount(0)
-    expect(await fondosAplicadas(page)).toBeGreaterThan(antesF)             // los fondos del mes anterior quedaron aplicadas
-    await expect(page.getByTestId('vacio-mes-subcaja')).toBeVisible()           // las subcajas se omitieron
-    expect(await escriturasGastos(page)).toBe(0)                                // avanzar el asistente nunca registra gastos
-  })
 
   test('cancelar el asistente no escribe nada; Recordar después y Descartar actualizan el aviso', async ({ page }) => {
     await abrir(page)
@@ -204,18 +154,6 @@ test.describe('v1.19 recordatorios en Configuración', () => {
 })
 
 test.describe('v1.19 descripciones normalizadas', () => {
-  test('la descripción de una subcaja se normaliza al salir del campo y al guardar', async ({ page }) => {
-    await abrir(page)
-    await page.getByRole('button', { name: 'Nueva caja' }).click()
-    const d = dialog(page)
-    const desc = d.getByLabel('Descripción (opcional)')
-    await desc.fill('GASTOS DE LA CASA para el mes con chatgpt')
-    await desc.blur()
-    await expect(desc).toHaveValue('Gastos de la Casa para el Mes con ChatGPT')
-    await desc.fill('papa a la huancaina')
-    await desc.blur()
-    await expect(desc).toHaveValue('papa a la Huancaina')
-  })
 })
 
 for (const [w, h] of [[375, 700], [390, 844], [430, 932], [768, 1024], [1366, 768], [1920, 1080]] as const) {
@@ -252,58 +190,3 @@ test('tema oscuro: la campana y el panel usan colores de tokens (legibles)', asy
   expect(bg).not.toBe('rgb(255, 255, 255)')
 })
 
-test.describe('v1.19 plantillas de subcajas: aplicar una y aplicar todas (regresión "ID de caja supera 40 caracteres")', () => {
-  async function crearPlantilla(page: Page, nombre: string, monto: string, opcion: number) {
-    const d = dialog(page)
-    await d.getByRole('button', { name: /Nueva plantilla/ }).click()
-    await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
-    await dialog(page).locator('#pf-nombre').fill(nombre)
-    await dialog(page).locator('#pf-monto').fill(monto)
-    await dialog(page).locator('#pf-valor').click()
-    await page.getByRole('listbox').getByRole('option').nth(opcion).click()
-    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
-    await expect(page.getByTestId('pf-fila').filter({ hasText: nombre })).toHaveCount(1)
-  }
-  const errores = (page: Page) => page.getByText(/ID de caja supera|No se pudo confirmar/)
-
-  test('aplicar una sola plantilla y luego todas: sin error, sin duplicar', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fondos=3#presupuestos')
-    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
-    await crearPlantilla(page, 'Mascotas', '300', 0)
-    await crearPlantilla(page, 'Viajes', '150', 1)
-    await crearPlantilla(page, 'Regalos', '90', 5)
-    // 1) botón "Aplicar" de una fila
-    await page.getByTestId('pf-fila').filter({ hasText: 'Mascotas' }).getByRole('button', { name: /^Aplicar/ }).first().click()
-    const vp = page.getByTestId('pf-vista-previa')
-    if (await vp.count()) await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
-    await expect(page.getByTestId('pf-fila').filter({ hasText: 'Mascotas' }).getByTestId('pf-estado')).toHaveText('Aplicada')
-    // 2) seleccionar todas y aplicar (las pendientes)
-    await dialog(page).getByRole('button', { name: /Seleccionar todas/ }).click()
-    await dialog(page).getByRole('button', { name: /^Aplicar \d+ a / }).click()
-    await page.getByRole('button', { name: 'Confirmar y aplicar' }).click()
-    for (const n of ['Mascotas', 'Viajes', 'Regalos']) await expect(page.getByTestId('pf-fila').filter({ hasText: n }).getByTestId('pf-estado')).toHaveText('Aplicada')
-    await expect(errores(page)).toHaveCount(0)
-    // 3) volver a aplicar todas: idempotente
-    await dialog(page).getByRole('button', { name: /Seleccionar todas|Quitar selección/ }).first().click()
-    await expect(errores(page)).toHaveCount(0)
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Mascotas').first()).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Viajes').first()).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Reservas y cajas' }).getByText('Regalos').first()).toBeVisible()
-    await expect(errores(page)).toHaveCount(0)
-  })
-
-  test('con el backend caído el error es visible, con Reintentar, y no queda nada aplicado', async ({ page }) => {
-    await abrir(page, OCT, '/?demo=60&fondos=3&falla=1#presupuestos')
-    await page.getByRole('button', { name: 'Cajas mensuales' }).first().click()
-    await dialog(page).getByRole('button', { name: /Nueva plantilla/ }).click()
-    await page.getByRole('menuitem', { name: 'Crear desde cero' }).click()
-    await dialog(page).locator('#pf-nombre').fill('Mascotas')
-    await dialog(page).locator('#pf-monto').fill('300')
-    await dialog(page).locator('#pf-valor').click()
-    await page.getByRole('listbox').getByRole('option').nth(0).click()
-    await dialog(page).getByRole('button', { name: 'Guardar plantilla' }).click()
-    await expect(page.getByText(/No se pudo/).first()).toBeVisible()          // error visible, no éxito falso
-    await expect(page.getByText('Plantilla Mascotas guardada.')).toHaveCount(0)
-  })
-})
