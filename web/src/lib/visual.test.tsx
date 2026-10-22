@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { ICONOS, ICONS } from './iconos'
-import { ambitoLook, cajaLook, categoriaLook, claveDeIcono, COLORS, fondoLook, medioLook, PALETA, subcategoriaLook } from './visual'
+import { ambitoLook, categoriaLook, claveDeIcono, COLORS, fondoLook, medioLook, PALETA, subcategoriaLook } from './visual'
 import { COLORES_RAPIDOS } from '../components/Apariencia'
 import { useApariencia } from '../components/Apariencia'
-import type { Caja, Fondo } from './types'
+import type { Fondo } from './types'
 
 const fu = (over: Partial<Fondo>): Pick<Fondo, 'nombre' | 'medioPago' | 'icono' | 'color'> => ({ nombre: 'X', medioPago: '', icono: '', color: '', ...over })
-const cj = (over: Partial<Caja>): Pick<Caja, 'filtroCampo' | 'filtroValor' | 'color' | 'icono'> => ({ filtroCampo: 'Categoría', filtroValor: 'Auto', color: '#123456', icono: '', ...over })
 
 describe('paleta e iconos (v1.10)', () => {
   it('64 colores únicos y válidos; incluye los predeterminados de siempre', () => {
@@ -63,23 +62,12 @@ describe('coherencia visual: un mismo medio / alcance se ve igual en toda la web
     // sin General en la lista: aspecto base
     expect(fondoLook(ica, [])).toEqual(fondoLook(general, []))
   })
-  it('caja automática: hereda el look de su alcance (medio, ámbito, categoría, subcategoría)', () => {
-    expect(cajaLook(cj({ filtroCampo: 'Medio de pago', filtroValor: 'Sodexo' }))).toEqual(medioLook('Sodexo'))
-    expect(cajaLook(cj({ filtroCampo: 'Ámbito', filtroValor: 'Familia' }))).toEqual(ambitoLook('Familia'))
-    expect(cajaLook(cj({ filtroCampo: 'Categoría', filtroValor: 'Auto' }))).toEqual(categoriaLook('Auto'))
+  it('categorías por defecto que antes usaban las cajas siguen con su icono (Viajes → avión; catálogo con icono propio manda)', () => {
     const cat = [{ ambito: 'Personal', categoria: 'Viajes', subcategoria: '', activo: true, icono: 'tree-palm', color: '#0E8FA8' }]
-    expect(cajaLook(cj({ filtroValor: 'Viajes' }), cat)).toEqual(categoriaLook('Viajes', cat))
-    expect(cajaLook(cj({ filtroValor: 'Viajes' }), cat).Icon).toBe(ICONS['tree-palm'])
-    expect(cajaLook(cj({ filtroCampo: 'Categoría', filtroValor: 'Viajes' })).Icon).toBe(ICONS.plane) // por defecto
-    expect(cajaLook(cj({ filtroCampo: 'Subcategoría', filtroValor: 'Auto › Gasolina' })).color).toBe(categoriaLook('Auto').color) // sub = color de su categoría
-    expect(cajaLook(cj({ filtroCampo: 'Todos', filtroValor: '', color: '#1E3A8A' })).Icon).toBe(ICONS.wallet)
-  })
-  it('caja con icono elegido: manda su icono y su color; el color guardado se ignora mientras sea automática', () => {
-    const l = cajaLook(cj({ icono: 'rocket', color: '#E5484D' }))
-    expect(l.Icon).toBe(ICONS.rocket)
-    expect(l.color).toBe('#E5484D')
-    expect(cajaLook(cj({ icono: 'no-existe', color: '#E5484D' }))).toEqual(categoriaLook('Auto')) // clave rota → vuelve al automático
-    expect(cajaLook(cj({ color: '#E5484D' })).color).toBe(categoriaLook('Auto').color)
+    expect(categoriaLook('Viajes', cat).Icon).toBe(ICONS['tree-palm'])
+    expect(categoriaLook('Viajes').Icon).toBe(ICONS.plane)
+    expect(subcategoriaLook('Gasolina', 'Auto').color).toBe(categoriaLook('Auto').color) // sub = color de su categoría
+    expect(ambitoLook('Familia')).toEqual(ambitoLook('Familia'))
   })
 })
 
@@ -98,10 +86,10 @@ describe('categorías y subcategorías compartidas entre ámbitos', () => {
       expect(subcategoriaLook('Gasolina', 'Auto', cat, a).color).toBe('#E5484D') // sub = color de su categoría
     }
   })
-  it('sin nada guardado usa el predeterminado; una caja por categoría ve lo mismo que el catálogo', () => {
+  it('sin nada guardado usa el predeterminado; cualquier ámbito ve lo mismo que el catálogo', () => {
     expect(categoriaLook('Auto', [fila('Trabajo', 'Auto', '')]).Icon).toBe(ICONS.car)
-    expect(cajaLook(cj({ filtroCampo: 'Categoría', filtroValor: 'Auto' }), cat)).toEqual(categoriaLook('Auto', cat, 'Trabajo'))
-    expect(cajaLook(cj({ filtroCampo: 'Subcategoría', filtroValor: 'Auto › Gasolina' }), cat)).toEqual(subcategoriaLook('Gasolina', 'Auto', cat, 'Amigos'))
+    expect(categoriaLook('Auto', cat, 'Trabajo')).toEqual(categoriaLook('Auto', cat, 'Personal'))
+    expect(subcategoriaLook('Gasolina', 'Auto', cat, 'Amigos')).toEqual(subcategoriaLook('Gasolina', 'Auto', cat, 'Personal'))
   })
 })
 

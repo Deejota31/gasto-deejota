@@ -106,11 +106,11 @@ export function Button({ variant = 'primary', loading, children, className = '',
   )
 }
 
-/** Botón principal de creación (Nuevo gasto, Nuevo fondo, Nueva subcaja…): misma variante en todos los módulos. */
+/** Botón principal de creación (Nuevo gasto, Nuevo fondo…): misma variante en todos los módulos. */
 export function BotonNuevo({ children, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> & { loading?: boolean }) {
   return <Button variant="primary" {...rest}><Plus className="size-4" aria-hidden />{children}</Button>
 }
-/** Botón secundario de módulos mensuales (Gastos / Fondos / Subcajas mensuales): idéntico en los tres. Va justo después de BotonNuevo. */
+/** Botón secundario de módulos mensuales (Gastos / Fondos mensuales). Va justo después de BotonNuevo. */
 export function BotonMensual({ children, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'>) {
   return <Button variant="soft" {...rest}><CalendarDays className="size-4" aria-hidden />{children}</Button>
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { aggregate, type Ctx } from './engine'
-import { dependenciasCaja, dependenciasFondo } from './dependencias'
-import type { AppData, Caja, Filters, Fondo, FondoMes, Gasto } from './types'
+import { dependenciasFondo } from './dependencias'
+import type { AppData, Filters, Fondo, FondoMes, Gasto, Ruta } from './types'
 
 const g = (over: Partial<Gasto>): Gasto => ({
   fecha: '2026-10-05', monto: 10, moneda: 'PEN', categoria: 'Alimentación', subcategoria: 'Almuerzo', descripcion: '',
@@ -9,13 +9,13 @@ const g = (over: Partial<Gasto>): Gasto => ({
   comprobanteUrl: '', id: crypto.randomUUID(), creadoEn: '', actualizadoEn: '', ...over,
 })
 const fu = (id: string, monto: number, over: Partial<Fondo> = {}): Fondo => ({
-  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '',
-  creadoEn: '', actualizadoEn: '', ...over,
+  id, nombre: id, monto, moneda: 'PEN', color: '#000000', icono: '', activo: true, orden: 1, recurrencia: 'mensual', mes: '', medioPago: '', tipo: 'mensual',
+  creadoEn: '', actualizadoEn: '', reglas: [], ...over,
 })
-const caja = (id: string, presupuesto: number, filtroCampo: Caja['filtroCampo'], filtroValor: string, orden = 2): Caja =>
-  ({ id, nombre: id, presupuesto, filtroCampo, filtroValor, color: '#000000', orden })
+const cubre = (rutas: Partial<Ruta>[], cobertura: 'categoria' | 'subcategoria' | 'ambito' = 'categoria') =>
+  [{ desde: '', medios: 'todos' as const, listaMedios: [], cobertura, rutas: rutas.map(r => ({ ambito: '', categoria: '', subcategoria: '', ...r })), restringeMedio: false }]
 const data = (over: Partial<AppData>): AppData => ({
-  version: 't', sheetUrl: '', gastos: [], catalogo: [], medios: [], cajas: [], presupuestos: [], config: { moneda: 'PEN' }, fondos: [], fondosMeses: [], vinculos: [], revisiones: [], ...over,
+  version: 't', sheetUrl: '', gastos: [], catalogo: [], medios: [], config: { moneda: 'PEN' }, fondos: [], fondosMeses: [], vinculos: [], revisiones: [], ...over,
 } as AppData)
 const HOY = '2026-10-10'
 
@@ -31,30 +31,31 @@ describe('dependencias antes de eliminar (v1.12)', () => {
   it('fondo libre secundaria: solo tiene gastos si la cascada le llegó; los importes por mes se cuentan aparte', () => {
     const meses: FondoMes[] = [{ fondoId: 'ica', mes: '2026-10', monto: 50, modo: 'solo' }, { fondoId: 'otra', mes: '2026-10', monto: 5, modo: 'solo' }]
     const poco = data({ fondos: [fu('general', 3500), fu('ica', 1000, { orden: 2 })], fondosMeses: meses, gastos: [g({ monto: 100 })] })
-    expect(dependenciasFondo(poco.fondos![1], poco, HOY)).toEqual({ gastos: 0, ajustes: 1 })
+    expect(dependenciasFondo(poco.fondos![1], poco, HOY)).toEqual({ gastos: 0, ajustes: 1, manuales: 0 })
     const mucho = { ...poco, gastos: [g({ monto: 4000 })] }                 // agota General y pasa a Ica
     expect(dependenciasFondo(mucho.fondos![1], mucho, HOY).gastos).toBe(1)
   })
 
-  it('subcaja: gastos de todo el historial que coinciden con su alcance y ajustes mensuales', () => {
-    const c = caja('c1', 100, 'Categoría', 'Alimentación')
-    const d = data({ cajas: [c], presupuestos: [{ periodo: '2026-10', cajaId: 'c1', monto: 90 }], gastos: [g({}), g({ categoria: 'Auto', subcategoria: 'Gasolina' }), g({ estado: 'Anulado' })] })
-    expect(dependenciasCaja(c, d)).toEqual({ gastos: 1, presupuestos: 1 })
-    expect(dependenciasCaja(caja('c2', 1, 'Categoría', 'Mascotas'), d).gastos).toBe(0)
+  it('fondo por categoría: cuenta los gastos que cubre y las asignaciones manuales que lo usan', () => {
+    const ali = fu('ali', 100, { orden: 2, reglas: cubre([{ categoria: 'Alimentación' }]) })
+    const d = data({ fondos: [fu('general', 3500), ali, fu('masc', 1, { orden: 3, reglas: cubre([{ categoria: 'Mascotas' }]) })],
+      gastos: [g({}), g({ categoria: 'Auto', subcategoria: 'Gasolina' }), g({ estado: 'Anulado' })], asignaciones: { x: [{ fondoId: 'masc', monto: 1 }] } })
+    expect(dependenciasFondo(ali, d, HOY)).toEqual({ gastos: 1, ajustes: 0, manuales: 0 })
+    expect(dependenciasFondo(d.fondos![2], d, HOY)).toEqual({ gastos: 0, ajustes: 0, manuales: 1 })
   })
 })
 
 describe('montos: base registrado vs ajuste vs aporte efectivo del período', () => {
   const oct: Filters = { preset: 'mes', desde: '2026-10-01', hasta: '2026-10-31', ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
   const nov: Filters = { ...oct, desde: '2026-11-01', hasta: '2026-11-30' }
-  const ctx = (fondos: Fondo[], fondosMeses: FondoMes[]): Ctx => ({ base: 'PEN', rates: {}, today: HOY, cajas: [], presupuestos: [], fondos, fondosMeses })
+  const ctx = (fondos: Fondo[], fondosMeses: FondoMes[]): Ctx => ({ base: 'PEN', rates: {}, today: HOY, fondos, fondosMeses })
 
   it('un ajuste del mes cambia solo ese mes (Sodexo 280 → 282.90 y Carpeta Tesis 1,000 → 1,900) y se marca como ajustado', () => {
     const fondos = [fu('sodexo', 280, { medioPago: 'Sodexo' }), fu('tesis', 1000, { orden: 2 })]
     const meses: FondoMes[] = [{ fondoId: 'sodexo', mes: '2026-10', monto: 282.9, modo: 'solo' }, { fondoId: 'tesis', mes: '2026-10', monto: 1900, modo: 'solo' }]
-    const o = aggregate([], oct, ctx(fondos, meses)).cajas.fondos.lista
+    const o = aggregate([], oct, ctx(fondos, meses)).presupuesto.fondos
     expect(o.map(x => [x.fondo.id, x.asignado, x.ajustado])).toEqual([['sodexo', 28290, true], ['tesis', 190000, true]])
-    const n = aggregate([], nov, ctx(fondos, meses)).cajas.fondos.lista
+    const n = aggregate([], nov, ctx(fondos, meses)).presupuesto.fondos
     expect(n.map(x => [x.fondo.id, x.asignado, x.ajustado])).toEqual([['sodexo', 28000, false], ['tesis', 100000, false]])   // la hoja FONDOS_PRESUPUESTO (base) sigue en 280 y 1,000
   })
 })
@@ -70,14 +71,15 @@ describe('dependencias de una categoría (v1.15)', () => {
   it('cuenta gastos (también anulados), plantillas y compromisos; solo de ese ámbito+categoría', () => {
     const d = data({ catalogo, gastos: [g({ categoria: 'Salud' }), g({ categoria: 'Salud', estado: 'Anulado' }), g({ categoria: 'Ocio' }), g({ categoria: 'Salud', ambito: 'Hogar' })] })
     const r = dependenciasCategoria('Personal', 'Salud', d, [pl({}), pl({ id: 'q', esCompromiso: true }), pl({ id: 'r', categoria: 'Ocio' })])
-    expect(r).toMatchObject({ gastos: 2, plantillas: 2, compromisos: 1, cajas: 0, subcategorias: 2 })
+    expect(r).toMatchObject({ gastos: 2, plantillas: 2, compromisos: 1, fondos: 0, subcategorias: 2 })
   })
-  it('subcajas: por categoría o por subcategoría, salvo que esa opción exista también en otro ámbito', () => {
-    const d = data({ catalogo, cajas: [caja('c1', 10, 'Categoría', 'Salud'), caja('c2', 10, 'Subcategoría', 'Dentista'), caja('c3', 10, 'Categoría', 'Ocio'), caja('c4', 10, 'Ámbito', 'Personal')] })
-    expect(dependenciasCategoria('Personal', 'Salud', d, []).cajas).toBe(2)
-    expect(dependenciasCategoria('Personal', 'Ocio', d, []).cajas).toBe(0)   // “Ocio” también existe en Hogar: la subcaja sigue viva
+  it('fondos cuya cobertura apunta a la categoría (en ese ámbito, o en todos si no existe en otro); un fondo por ámbito no cuenta', () => {
+    const d = data({ catalogo, fondos: [fu('c1', 10, { reglas: cubre([{ ambito: 'Personal', categoria: 'Salud' }]) }), fu('c2', 10, { reglas: cubre([{ categoria: 'Salud', subcategoria: 'Dentista' }], 'subcategoria') }),
+      fu('c3', 10, { reglas: cubre([{ categoria: 'Ocio' }]) }), fu('c4', 10, { reglas: cubre([{ ambito: 'Personal' }], 'ambito') })] })
+    expect(dependenciasCategoria('Personal', 'Salud', d, []).fondos).toBe(2)
+    expect(dependenciasCategoria('Personal', 'Ocio', d, []).fondos).toBe(0)   // “Ocio” también existe en Hogar: el fondo sigue vigente
   })
   it('una categoría sin uso devuelve todo en cero', () => {
-    expect(dependenciasCategoria('Personal', 'Ocio', data({ catalogo }), [])).toMatchObject({ gastos: 0, plantillas: 0, compromisos: 0, cajas: 0 })
+    expect(dependenciasCategoria('Personal', 'Ocio', data({ catalogo }), [])).toMatchObject({ gastos: 0, plantillas: 0, compromisos: 0, fondos: 0 })
   })
 })

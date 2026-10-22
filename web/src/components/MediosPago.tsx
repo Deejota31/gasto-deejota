@@ -64,7 +64,7 @@ function MedioForm({ store, medio, existentes, onClose }: { store: AppStore; med
   }
   return (
     <Modal open onClose={onClose} size="md" title={medio ? `Personalizar ${medio.nombre}` : 'Nuevo medio de pago'} icon={<Wallet className="size-5" />}
-      subtitle="Su icono y color se ven igual en gastos, filtros, fondos y cajas, y se guardan en tu hoja."
+      subtitle="Su icono y color se ven igual en gastos, filtros y fondos, y se guardan en tu hoja."
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{medio ? 'Guardar cambios' : 'Crear medio de pago'}</Button></>}>
       <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }}>
         <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }} data-testid="medio-vista-previa">

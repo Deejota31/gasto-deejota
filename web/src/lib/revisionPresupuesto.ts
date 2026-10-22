@@ -5,7 +5,7 @@ import type { AppData, EstadoRevisionPres, Filters, RevisionPres } from './types
 
 /**
  * Revisión del presupuesto (v1.26): ayuda a comprobar que el PERÍODO está completo y es coherente, solo con datos del presupuesto
- * (fondos, reservas y gastos registrados). No usa saldos de banco, ingresos ni patrimonio, y nunca inventa importes: lo que falta por
+ * (fondos y gastos registrados). No usa saldos de banco, ingresos ni patrimonio, y nunca inventa importes: lo que falta por
  * registrar se anota como texto y se regulariza creando un gasto normal (con el antiduplicado habitual).
  */
 export const ESTADO_REV_TXT: Record<EstadoRevisionPres, string> = {
@@ -56,18 +56,19 @@ export function revisarPeriodo(data: AppData, periodo: string, today: string): R
   const hasta = monthEnd(periodo)
   const filtros: Filters = { preset: 'custom', desde: `${periodo}-01`, hasta, ambitos: [], categorias: [], subcategorias: [], medios: [], tipos: [] }
   const a = aggregate(data.gastos, filtros, {
-    base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today, cajas: data.cajas, presupuestos: data.presupuestos,
-    fondos: data.fondos ?? [], fondosMeses: data.fondosMeses ?? [], aislarDesde: aislaDesde(data.config),
+    base: data.config.moneda || 'PEN', rates: ratesFromConfig(data.config), today,
+    fondos: data.fondos ?? [], fondosMeses: data.fondosMeses ?? [], asignaciones: data.asignaciones, aislarDesde: aislaDesde(data.config),
   })
-  const c = a.cajas
+  const c = a.presupuesto
   const chequeos: Chequeo[] = []
   const add = (id: string, severidad: Severidad, titulo: string, detalle: string) => chequeos.push({ id, severidad, titulo, detalle })
 
-  if (!c || !c.presupuesto) add('sin-presupuesto', 'alerta', 'El período no tiene presupuesto', 'Ningún fondo activo suma en este período. Aplica o crea un fondo para medir el consumo.')
-  if (c?.sobreasignado) add('reservas-exceden', 'alerta', 'Las reservas superan el presupuesto', 'Las cajas reservan más dinero del que aportan los fondos del período.')
-  if (c && c.fondos.countSinFondo > 0) add('sin-fondo', 'aviso', 'Gastos sin fondo al cual atribuirse', `${c.fondos.countSinFondo} gasto(s) no tienen un fondo activo; igual descuentan del presupuesto consolidado.`)
-  if (c && c.fondos.countInactivas > 0) add('fondo-inactivo', 'aviso', 'Gastos de fondos inactivos', `${c.fondos.countInactivas} gasto(s) se pagaron con el medio de un fondo inactivo; siguen descontando del presupuesto.`)
-  if (c && c.presupuesto > 0 && c.gastadoPeriodo > c.presupuesto) add('excedido', 'aviso', 'Gasto por encima del presupuesto', 'Lo gastado en el período supera el presupuesto consolidado.')
+  if (!c.presupuesto) add('sin-presupuesto', 'alerta', 'El período no tiene presupuesto', 'Ningún fondo activo suma en este período. Aplica o crea un fondo para medir el consumo.')
+  if (c.incompatibles > 0) add('medio-restringido', 'alerta', 'Gastos con un medio restringido', `${c.incompatibles} gasto(s) usan un medio fuera de la cobertura que le configuraste (registrados antes de la regla). Corrige su clasificación o su medio.`)
+  if (c.conflictos > 0) add('asignacion-conflicto', 'aviso', 'Asignaciones manuales por revisar', `${c.conflictos} asignación(es) manual(es) ya no son válidas (cambió el gasto o una regla); esos gastos usan la asignación automática hasta que las revises.`)
+  if (c.sinFondo.count > 0) add('sin-fondo', 'aviso', 'Gastos sin fondo asignable', `${c.sinFondo.count} gasto(s) no los cubre ningún fondo activo; igual descuentan del presupuesto consolidado.`)
+  if (c.sobregirados > 0) add('sobregiro', 'aviso', 'Fondos sobregirados', `${c.sobregirados} fondo(s) tienen imputado más que su presupuesto.`)
+  if (c.presupuesto > 0 && c.gastadoPeriodo > c.presupuesto) add('excedido', 'aviso', 'Gasto por encima del presupuesto', 'Lo gastado en el período supera el presupuesto consolidado.')
 
   const ultimo = today < hasta && today >= `${periodo}-01` ? today : hasta
   const conMov = new Set(data.gastos.filter(g => g.estado === 'Activo' && g.fecha.startsWith(periodo)).map(g => g.fecha))
@@ -77,7 +78,7 @@ export function revisarPeriodo(data: AppData, periodo: string, today: string): R
   if (total > 0 && dias.length >= Math.max(3, Math.ceil(total / 2))) add('dias-vacios', 'aviso', 'Muchos días sin movimientos', `${dias.length} de ${total} días no tienen gastos registrados: confirma que no olvidaste anotar alguno.`)
 
   const movimientos = data.gastos.filter(g => g.estado === 'Activo' && g.fecha.startsWith(periodo)).length
-  if (!chequeos.length) add('todo-en-orden', 'ok', 'Sin observaciones del presupuesto', 'Fondos, reservas y gastos del período son coherentes entre sí.')
+  if (!chequeos.length) add('todo-en-orden', 'ok', 'Sin observaciones del presupuesto', 'Fondos y gastos del período son coherentes entre sí.')
   return {
     periodo, enCurso: today <= hasta && today >= `${periodo}-01`, chequeos,
     alertas: chequeos.filter(x => x.severidad === 'alerta').length, avisos: chequeos.filter(x => x.severidad === 'aviso').length,

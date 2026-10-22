@@ -45,7 +45,7 @@ async function abrirGrupo(page: Page, g: string) {
   const b = page.getByTestId('funciones-backend').getByRole('button', { name: new RegExp(`^${g}`) })
   if ((await b.getAttribute('aria-expanded')) !== 'true') await b.click()
 }
-const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', cajas: 'Cajas', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
+const ETIQUETA_TAB: Record<string, string> = { dashboard: 'Dashboard', gastos: 'Gastos', cajas: 'Presupuestos', catalogo: 'Catálogo', salud: 'Salud financiera', config: 'Configuración' }
 /** Cifras del Presupuesto consolidado: viven en el Dashboard (la pestaña Cajas ya no tiene el panel grande). Si se está en otra pestaña, se lee desde el Dashboard y se vuelve. */
 async function cons(page: Page, id: string) {
   const el = page.getByTestId(`cons-${id}`)
@@ -1067,7 +1067,7 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
 
   test('crear por subcategoría descuenta la reserva del libre; duplicado rechazado; editar, desactivar y eliminar sin tocar gastos', async ({ page }) => {
     const total0 = await total(page)
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
     const res0 = await resumen(page, 'Reservado en cajas'), libre0 = await resumen(page, 'Libre inicial')
     await page.getByRole('button', { name: 'Nueva caja' }).click()
@@ -1111,7 +1111,7 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
   })
 
   test('con muchas cajas: buscar, filtrar por alcance y estado, ordenar, vista lista y reordenar con una solicitud', async ({ page }) => {
-    await page.goto('/?demo=60&cajas=10#cajas')
+    await page.goto('/?demo=60&cajas=10#presupuestos')
     const cards = page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja')
     await expect(cards).toHaveCount(13)
     await page.getByLabel('Buscar caja').fill('salud')
@@ -1146,13 +1146,13 @@ test.describe('v1.7: pestaña Cajas con cajas personalizadas', () => {
     await acc.click()
     await expect(page.getByRole('list', { name: 'Cajas del período' }).getByRole('listitem')).toHaveCount(13)
     await page.getByRole('region', { name: 'Cajas / reservas' }).getByRole('button', { name: 'Administrar en Cajas' }).click()
-    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Cajas' })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Presupuestos' })).toHaveAttribute('aria-current', 'page')
   })
 
   test('responsive: la pestaña Cajas no genera scroll horizontal en móvil ni tablet', async ({ page }) => {
     for (const vp of [{ width: 360, height: 780 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(vp)
-      await page.goto('/?demo=60&cajas=10#cajas')
+      await page.goto('/?demo=60&cajas=10#presupuestos')
       await expect(page.getByRole('heading', { name: 'Cajas y presupuestos' })).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
@@ -1165,7 +1165,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
   const saludValor = (page: Page, id: string) => page.getByTestId(id).innerText().then(money)
 
   test('General 3500 + Sodexo 280 + Extra 1 1000 = 4780; desactivar Extra 1 → 3780 con aviso; reactivar → 4780; mismas cifras en Dashboard y Salud', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect(page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')).toHaveCount(3)
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     const gastado = await cons(page, 'gastado-del-período')
@@ -1187,7 +1187,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     expect(await saludValor(page, 'pres-presupuesto')).toBe(3780)
     expect(await saludValor(page, 'pres-disponible')).toBeCloseTo(3780 - gastado, 2)
     // reactivar
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await fondo(page, 'Extra 1').getByRole('switch', { name: 'Activar Extra 1' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await go(page, 'Dashboard')
@@ -1195,7 +1195,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
   })
 
   test('por mes: noviembre empieza vacío (v1.19), se copia de octubre sin Extra 1; ajustar General solo en noviembre no cambia octubre ni diciembre', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(0)                     // nada se arrastra solo
@@ -1221,7 +1221,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
   })
 
   test('nuevo fondo: valida, suma sin tocar General, doble clic no duplica y no bloquea la navegación', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3&latencia=2500#cajas')
+    await page.goto('/?demo=60&fondos=3&latencia=2500#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
@@ -1243,7 +1243,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     // mientras Apps Script responde se puede seguir navegando
     await go(page, 'Gastos')
     await expect(page.getByRole('navigation', { name: 'Secciones' }).getByRole('button', { name: 'Gastos' })).toHaveAttribute('aria-current', 'page')
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect(page.getByRole('status').filter({ hasText: 'Bonificación creado' })).toBeVisible({ timeout: 15_000 })
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4980)
     await expect(fondo(page, 'General').getByTestId('fondo-aporte')).toHaveText('S/ 3,500.00')
@@ -1252,7 +1252,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
   })
 
   test('sin fondos: sigue la caja general; migrar crea General con el mismo importe (idempotente) y no convierte Sodexo', async ({ page }) => {
-    await page.goto('/?demo=60#cajas')
+    await page.goto('/?demo=60#presupuestos')
     await expect(page.getByTestId('sin-fondos')).toBeVisible()
     // estado vacío igual al de subcajas, con acción para crear el primer fondo
     await expect(page.getByTestId('vacio-fondos')).toContainText('Aún no tienes fondos registrados. Registra un fondo para empezar')
@@ -1272,7 +1272,7 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
   })
 
   test('20 fondos: se muestran 6 con "Ver todas", buscar y filtrar; sin scroll horizontal en móvil, iPhone y tablet', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=20#cajas')
+    await page.goto('/?demo=60&fondos=20#presupuestos')
     const cards = page.getByRole('list', { name: 'Lista de fondos' }).getByTestId('fondo')
     await expect(cards).toHaveCount(6)
     await page.getByRole('button', { name: 'Ver las 20 fondos' }).click()
@@ -1287,21 +1287,21 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await expect(cards).toHaveCount(20)
     for (const n of [2, 5, 10, 20]) for (const vp of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(vp)
-      await page.goto(`/?demo=60&fondos=${n}#cajas`)
+      await page.goto(`/?demo=60&fondos=${n}#presupuestos`)
       await expect(page.getByTestId('n-fondos')).toHaveText(String(n))
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     }
   })
 
   test('gasto con Sodexo: se atribuye al fondo Sodexo, descuenta una sola vez; eliminar y restaurar lo devuelven exacto', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado')).toBe(4780)
     const gSodexo = () => fondo(page, 'Sodexo').innerText().then(t => money(/Gastado\s+S\/\s*([\d,.]+)/.exec(t)![1]))
     const s0 = await gSodexo(), g0 = await cons(page, 'gastado-del-período'), d0 = await cons(page, 'disponible-consolidado')
     await go(page, 'Gastos')
     await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: '25', medio: 'Sodexo', desc: 'Menú Sodexo E2E' })
     await expect(page.getByRole('row', { name: /Menú Sodexo E2E/ })).toBeVisible()
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect.poll(gSodexo).toBeCloseTo(s0 + 25, 2)
     expect(await cons(page, 'gastado-del-período')).toBeCloseTo(g0 + 25, 2)
     expect(await cons(page, 'disponible-consolidado')).toBeCloseTo(d0 - 25, 2)
@@ -1310,20 +1310,20 @@ test.describe('v1.8: fondos del presupuesto y presupuesto consolidado', () => {
     await page.getByRole('row', { name: /Menú Sodexo E2E/ }).getByRole('button', { name: 'Eliminar' }).click()
     await dialog(page).getByRole('button', { name: 'Eliminar' }).click()
     await expect(page.getByRole('row', { name: /Menú Sodexo E2E/ })).toHaveCount(0)
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect.poll(() => cons(page, 'disponible-consolidado')).toBeCloseTo(d0, 2)
     await go(page, 'Gastos')
     await page.getByRole('radio', { name: 'Eliminados' }).click()
     await page.getByRole('row', { name: /Menú Sodexo E2E/ }).getByRole('button', { name: 'Restaurar' }).click()
     await page.getByRole('radio', { name: 'Activos' }).click()
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect.poll(() => cons(page, 'disponible-consolidado')).toBeCloseTo(d0 - 25, 2)
     await expect.poll(gSodexo).toBeCloseTo(s0 + 25, 2)
   })
 
   test('menú en el orden pedido y centrado en escritorio', async ({ page }) => {
     const nav = page.getByRole('navigation', { name: 'Secciones' })
-    expect(await nav.getByRole('button').evaluateAll(bs => bs.map(b => b.getAttribute('aria-label') || (b.textContent ?? '').trim()))).toEqual(['Dashboard', 'Gastos', 'Cajas', 'Catálogo', 'Salud financiera', 'Configuración'])
+    expect(await nav.getByRole('button').evaluateAll(bs => bs.map(b => b.getAttribute('aria-label') || (b.textContent ?? '').trim()))).toEqual(['Dashboard', 'Gastos', 'Presupuestos', 'Catálogo', 'Salud financiera', 'Configuración'])
     await page.setViewportSize({ width: 1366, height: 900 })
     // Escritorio: barra lateral a la izquierda (contraída por defecto); tablet: panel temporal; móvil: barra inferior.
     const lat = await page.getByRole('complementary', { name: 'Barra lateral' }).boundingBox()
@@ -1372,7 +1372,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
       await expect(page.getByTestId('consolidado')).toBeVisible()
       const dash = await celdas(page)
       await page.getByTestId('disponible-consolidado').innerText()
-      await go(page, 'Cajas')                                                                   // Cajas ya no repite el panel: sus indicadores superiores coinciden con el Dashboard
+      await go(page, 'Presupuestos')                                                                   // Cajas ya no repite el panel: sus indicadores superiores coinciden con el Dashboard
       await expect(page.getByTestId('consolidado')).toHaveCount(0)
       const res = (l: string) => page.getByTestId('cajas-resumen').locator('dt', { hasText: l }).locator('xpath=following-sibling::dd[1]').innerText().then(money)
       expect(await res('Presupuesto consolidado')).toBe(money(dash['cons-presupuesto-consolidado']))
@@ -1393,7 +1393,7 @@ test.describe('v1.9: Dashboard compacto, cifras idénticas entre pestañas e ico
     await newGasto(page, { ambito: 'Personal', categoria: 'Auto', sub: 'Gasolina', monto: '40', medio: 'Plin', desc: 'Grifo v1.9' })
     await expect.poll(async () => money(await page.getByTestId('disponible-consolidado').innerText())).toBeCloseTo(d0 - 40, 2)
     const dash = await celdas(page)
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect(page.getByTestId('consolidado')).toHaveCount(0)
     expect(money(await page.getByTestId('cajas-resumen').locator('dt', { hasText: 'Presupuesto consolidado' }).locator('xpath=following-sibling::dd[1]').innerText())).toBe(money(dash['cons-presupuesto-consolidado']))
     expect(((await calls(page)).data ?? 0) - (c0.data ?? 0)).toBe(0)                                  // sin lecturas extra del Sheet
@@ -1479,14 +1479,14 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
   const disponible = async (page: Page, n: string) => money(/disponible\s+(-?S\/\s*[\d,.]+)/.exec(await fondo(page, n).innerText())![1])
 
   test('cascada: un gasto que agota General pasa a la siguiente fondo libre; nadie queda en negativo y todo suma el consolidado', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     const dGeneral = await disponible(page, 'General')
     const dExtra = await disponible(page, 'Extra 1')
     const exceso = 100
     await go(page, 'Gastos')
     await newGasto(page, { ambito: 'Personal', categoria: 'Alimentación', sub: 'Almuerzo', monto: String(Math.ceil(dGeneral) + exceso), medio: 'Yape', desc: 'Cascada E2E' })
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await expect.poll(() => disponible(page, 'General')).toBeCloseTo(0, 2)
     await expect(fondo(page, 'General')).not.toContainText('Excedida')
     await expect.poll(() => disponible(page, 'Extra 1')).toBeCloseTo(dExtra - (Math.ceil(dGeneral) + exceso - dGeneral), 2)
@@ -1497,7 +1497,7 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
   })
 
   test('Nuevo fondo: sin selector de icono/color; la vista previa toma el aspecto del medio (Plin) o de General', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     await expect(d.getByTestId('apariencia')).toHaveCount(0)
@@ -1512,7 +1512,7 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
   })
 
   test('un fondo con medio de pago se ve igual que ese medio en Cajas, Dashboard y Catálogo', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     const tile = fondo(page, 'Sodexo').locator('span.size-11').first()
     await expect(tile.locator('svg.lucide-ticket')).toHaveCount(1)
@@ -1526,7 +1526,7 @@ test.describe('v1.10: cascada de fondos, iconos y colores unificados, plantillas
   })
 
   test('Nueva caja: sin selector de icono/color; toma el aspecto de su alcance (medio de pago)', async ({ page }) => {
-    await page.goto('/?demo=60#cajas')
+    await page.goto('/?demo=60#presupuestos')
     await expect(page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: 'Caja Auto' }).locator('svg.lucide-car')).toHaveCount(1)
     await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
@@ -1585,7 +1585,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
   const tarjetaCat = (page: Page, n: string) => page.locator('article').filter({ has: page.getByRole('button', { name: `Acciones de ${n}`, exact: true }) })
 
   test('fondo: sin medio es como General; con medio es exactamente el del medio (Yape = Yape)', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     // los fondos libres existentes se ven igual que General
     const icono = (n: string) => fondo(page, n).locator('span.size-11 svg').first().getAttribute('class')
     await expect.poll(() => fondo(page, 'Extra 1').count()).toBe(1)
@@ -1609,7 +1609,7 @@ test.describe('v1.11: aspecto automático, categorías compartidas, Catálogo, C
   })
 
   test('caja: el alcance (ámbito, categoría, subcategoría, medio) fija su icono y color automáticos', async ({ page }) => {
-    await page.goto('/?demo=60#cajas')
+    await page.goto('/?demo=60#presupuestos')
     await page.getByRole('button', { name: 'Nueva caja' }).click()
     const d = dialog(page)
     const tile = d.locator('span.size-11').first()
@@ -1942,7 +1942,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
   const caja = (page: Page, n: string) => page.getByRole('list', { name: 'Lista de cajas' }).getByTestId('caja').filter({ hasText: n })
   const actualizar = async (page: Page) => { await page.getByRole('button', { name: 'Actualizar datos' }).click(); await expect(page.getByRole('button', { name: 'Actualizar datos' })).toBeEnabled({ timeout: 15_000 }) }
   test.beforeEach(async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
   })
 
@@ -2130,7 +2130,7 @@ test.describe('v1.12: administración de fondos y subcajas (Subir, Bajar, Clonar
   })
 
   test('fallo de Apps Script: una operación que falla restaura la interfaz y no duplica nada', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3&falla=1#cajas')
+    await page.goto('/?demo=60&fondos=3&falla=1#presupuestos')
     await expect.poll(() => cons(page, 'presupuesto-consolidado'), { timeout: 15_000 }).toBe(4780)
     const orden0 = await nombresFondos(page)
     await menuF(page, 'General').click()
@@ -2227,7 +2227,7 @@ test.describe('v1.15: descripción dinámica, selectores, orden y eliminación d
   })
 
   test('Combobox: busca, se maneja con teclado, muestra icono y no se corta dentro del modal', async ({ page }) => {
-    await go(page, 'Cajas')
+    await go(page, 'Presupuestos')
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
     const medio = d.locator('#fondo-medio')
@@ -2449,7 +2449,7 @@ test.describe('v1.16: navegación, preferencias, medios, calendarios y operacion
 
   test('fondo con varios medios: chips sin dividir el monto; fondos y subcajas abren en Lista', async ({ page }) => {
     await page.evaluate(() => { sessionStorage.setItem('vistaDefecto', '1'); localStorage.removeItem('deejota.vista.fondos'); localStorage.removeItem('deejota.vista.subcajas') })
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await expect(page.getByRole('radio', { name: 'Lista' }).first()).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByRole('list', { name: 'Lista de fondos' })).toBeVisible()
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
@@ -2489,7 +2489,7 @@ test.describe('v1.16: navegación, preferencias, medios, calendarios y operacion
   })
 
   test('reordenar con teclado: Espacio y flechas sobre el asa de un fondo', async ({ page }) => {
-    await page.goto('/?demo=60&fondos=3#cajas')
+    await page.goto('/?demo=60&fondos=3#presupuestos')
     await page.getByRole('radio', { name: 'Lista' }).first().click()
     const asas = page.getByRole('list', { name: 'Lista de fondos' }).locator('[data-asa-orden]')
     await expect(asas.first()).toBeVisible()

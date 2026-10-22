@@ -14,7 +14,7 @@ interface Funcion {
   cambiaHoja?: boolean            // relee los datos al terminar
   confirmar?: string              // pide confirmación antes de ejecutar
   admin?: boolean                 // exige el token de administración (S-04)
-  parametros?: 'datosPrueba'      // abre un formulario (cantidad y período) en lugar de la confirmación simple
+  parametros?: 'datosPrueba' | 'retirarCajas'   // abre un formulario en lugar de la confirmación simple
 }
 
 /** Todas las funciones de Code.gs que se ejecutaban desde el editor de Apps Script. */
@@ -27,6 +27,8 @@ export const FUNCIONES: Funcion[] = [
   { grupo: 'Mantenimiento de la hoja', nombre: 'repararIds', admin: true, titulo: 'Reparar IDs', desc: 'Asigna ID a movimientos sin ID o repetidos. Crea respaldo antes.', cambiaHoja: true },
   { grupo: 'Mantenimiento de la hoja', nombre: 'repararHojas', admin: true, titulo: 'Reparar hojas', desc: 'Compacta filas, agrega columnas y reordena medios. Crea respaldo antes.', cambiaHoja: true,
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'retirarCajas', admin: true, titulo: 'Retirar cajas (migración 1.28)', parametros: 'retirarCajas', cambiaHoja: true,
+    desc: 'Primero simula: muestra qué cajas, subcajas y presupuestos antiguos hay y qué haría. Aplicar crea un respaldo y solo archiva esas hojas (no borra datos ni gastos).' },
   { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', admin: true, titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', admin: true, titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
   { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', admin: true, titulo: 'Agregar datos de prueba', desc: 'Agrega la cantidad de gastos que indiques, repartidos en el período que elijas, con un presupuesto de prueba por mes. Se marcan para poder borrarlos. Crea respaldo.', cambiaHoja: true, parametros: 'datosPrueba' },
@@ -69,6 +71,23 @@ function SelectorMes({ id, etiqueta, value, onChange, anios }: { id: string; eti
         </SelectField>
       </div>
     </fieldset>
+  )
+}
+
+/** Retirar cajas: simulación por defecto; aplicar exige marcar que ya revisaste la simulación. */
+function FormRetirarCajas({ ocupado, onCancelar, onEnviar }: { ocupado: boolean; onCancelar: () => void; onEnviar: (aplicar: boolean) => void }) {
+  const [revisado, setRevisado] = useState(false)
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-line bg-card p-2.5 text-[11px] text-muted" data-testid="form-retirar-cajas">
+      <p>1. <b>Simular</b> no escribe nada: lista las hojas antiguas y si se crearía un fondo General (solo cuando no existe ningún fondo).</p>
+      <p>2. <b>Aplicar</b> hace un respaldo completo y renombra las hojas antiguas como archivo. No toca gastos, fondos ni importes. Hazlo después de publicar el Code.gs 1.28.</p>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={revisado} onChange={e => setRevisado(e.target.checked)} /> Ya revisé la simulación y tengo el respaldo</label>
+      <div className="flex flex-wrap justify-end gap-1.5">
+        <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={onCancelar}>Cancelar</Button>
+        <Button variant="soft" className="!px-2 !py-1 text-xs" disabled={ocupado} onClick={() => onEnviar(false)}>Simular</Button>
+        <Button variant="danger" className="!px-2 !py-1 text-xs" disabled={ocupado || !revisado} onClick={() => onEnviar(true)}>Aplicar</Button>
+      </div>
+    </div>
   )
 }
 
@@ -204,6 +223,9 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                           </Button>
                         )}
                        </div>
+                       {pide === f.nombre && f.parametros === 'retirarCajas' && (
+                         <FormRetirarCajas ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={aplicar => void ejecutar(f, aplicar ? { aplicar: true } : {})} />
+                       )}
                        {pide === f.nombre && f.parametros === 'datosPrueba' && (
                          <FormDatosPrueba ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={p => void ejecutar(f, p)} />
                        )}

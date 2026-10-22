@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { z } from 'zod'
-import { Copy, Link2, Pencil, Plus, Receipt } from 'lucide-react'
+import { AlertTriangle, Copy, Link2, Pencil, Plus, Receipt, Shuffle } from 'lucide-react'
 import type { GastoInput } from '../lib/api'
 import type { AppStore, OpMessages } from '../lib/store'
 import { TIPOS_GASTO, type Gasto, type TipoGasto } from '../lib/types'
-import { todayIn } from '../lib/dates'
+import { monthLabel, todayIn } from '../lib/dates'
+import { asignarMes, avisosPrevios, resumenDistribucion, validarMedioGasto } from '../lib/presupuesto'
+import { ctxReparto } from '../lib/useAgregado'
+import { formatMoney } from '../lib/money'
 import { medioLook, sortMedios } from '../lib/visual'
 import { formatearDescripcion } from '../lib/texto'
 import { ClasificacionPicker, ConfirmarDescripcion, opcionesClasif, useDescripcionSub, type Clasif } from './Clasificacion'
-import { Button, DateField, Field, inputCls, Modal, Segmented, Switch } from './ui'
+import { Button, Checkbox, DateField, ErrorBox, Field, inputCls, Modal, Segmented, Switch } from './ui'
 import { Combobox } from './Combobox'
 
 export type ModalMode = 'create' | 'edit' | 'clone'
@@ -76,7 +79,8 @@ export const GASTO_MSG: Record<ModalMode, OpMessages> = {
  */
 export default function GastoModal({ store, mode, gasto, draft, preset, onClose, onSubmit }: {
   store: AppStore; mode: ModalMode; gasto: Gasto | null; draft?: GastoDraft; preset?: GastoPreset; onClose: () => void
-  onSubmit: (input: GastoInput, mode: ModalMode, draft: GastoDraft) => boolean
+  /** `distribucion`: resumen del reparto entre fondos para el aviso de éxito (se muestra cuando el backend confirma). */
+  onSubmit: (input: GastoInput, mode: ModalMode, draft: GastoDraft, distribucion?: string) => boolean
 }) {
   const [form, setForm] = useState<Form>(() => initial(store, mode, gasto, draft, preset))
   // La descripción sigue a la subcategoría (ver useDescripcionSub): editar/clonar conservan la del registro al abrir.
@@ -107,7 +111,36 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
   else if (!AMOUNT.test(montoTxt) || !(monto > 0)) errs.monto = 'Monto mayor a 0, con hasta 2 decimales'
   if (!parsed.success) parsed.error.issues.forEach(i => { errs[String(i.path[0])] ??= i.message })
   if (form.categoria && subOptions.length && !form.subcategoria) errs.subcategoria = 'Elige una subcategoría'
+
+  // v1.28 — Presupuestos: el medio que viola una restricción configurada BLOQUEA el guardado (el backend aplica la misma regla).
+  // Un fondo sin saldo NO bloquea: se avisa del excedente/sobregiro antes de guardar.
+  const data = store.data
+  const fondos = data?.fondos ?? []
+  const medioCheck = data && form.medioPago && form.categoria ? validarMedioGasto({ ...form }, fondos) : { ok: true as const }
+  // Al editar, solo se exige si cambió algo que afecta a la regla (igual que el backend): un gasto antiguo no queda bloqueado.
+  const relevante = mode !== 'edit' || !gasto || ['medioPago', 'ambito', 'categoria', 'subcategoria'].some(k => gasto[k as keyof Gasto] !== form[k as keyof Form]) || gasto.fecha.slice(0, 7) !== form.fecha.slice(0, 7)
+  if (!medioCheck.ok && relevante) errs.medioPago = medioCheck.mensaje
   const errors = intentado ? errs : {}
+  const base = data?.config.moneda || 'PEN'
+  const money = (c: number) => formatMoney(c, base)
+  const nombre = (id: string) => fondos.find(f => f.id === id)?.nombre ?? 'Fondo'
+  const mesG = /^\d{4}-\d{2}/.test(form.fecha) ? form.fecha.slice(0, 7) : ''
+  // Vista previa del reparto: el mes del gasto con este gasto (nuevo o editado) dentro. Mismo motor que Presupuestos.
+  const previa = useMemo(() => {
+    if (!data || !fondos.length || !mesG || !(monto > 0) || !form.categoria || !form.medioPago) return null
+    const g: Gasto = { ...(gasto && mode === 'edit' ? gasto : {} as Gasto), ...form, descripcion, monto, estado: 'Activo', origen: gasto?.origen ?? 'web',
+      creadoEn: mode === 'edit' && gasto ? gasto.creadoEn : '9999-12-31T23:59:59Z', actualizadoEn: '', id: form.id }
+    const otros = data.gastos.filter(x => x.id !== form.id && (mode !== 'edit' || x.id !== gasto?.id))
+    const r = asignarMes(mesG, [...otros, g], fondos, ctxReparto(data))
+    const imp = r.porGasto.get(g.id)
+    return imp ? { imp, avisos: avisosPrevios(imp, r.porFondo, nombre, money) } : null
+  }, [data, fondos, mesG, monto, form.categoria, form.subcategoria, form.ambito, form.medioPago, form.moneda, form.fecha]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Editar un gasto de un mes ya cerrado cambia los saldos de ese mes: se pide confirmación explícita.
+  const hoyMes = todayIn(data?.config.zona_horaria || 'America/Lima').slice(0, 7)
+  const tocaHistorico = mode === 'edit' && !!gasto && (gasto.fecha.slice(0, 7) < hoyMes || (mesG !== '' && mesG < hoyMes)) &&
+    (['medioPago', 'ambito', 'categoria', 'subcategoria', 'fecha', 'moneda'].some(k => gasto[k as keyof Gasto] !== form[k as keyof Form]) || Number(gasto.monto) !== monto)
+  const [confirmaHistorico, setConfirmaHistorico] = useState(false)
+  if (tocaHistorico && !confirmaHistorico) errs.historico = 'Confirma que quieres modificar un mes cerrado.'
 
   function submit(e?: React.FormEvent) {
     e?.preventDefault()
@@ -116,7 +149,8 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
     // El mismo ID viaja en cada reintento: el backend no duplica aunque llegue dos veces.
     // Solo un alta desde plantilla queda vinculada a ella; editar o clonar nunca crea un compromiso nuevo.
     const plantillaId = mode === 'create' ? form.plantillaId : undefined
-    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl, ...(plantillaId ? { plantillaId } : {}) }, mode, { ...form, descripcion })) onClose()
+    const distribucion = previa ? resumenDistribucion(previa.imp, nombre, money) : undefined
+    if (onSubmit({ ...parsed.data, id: form.id, monto, comprobanteUrl: form.comprobanteUrl, ...(plantillaId ? { plantillaId } : {}) }, mode, { ...form, descripcion }, distribucion)) onClose()
   }
 
   return (
@@ -180,8 +214,21 @@ export default function GastoModal({ store, mode, gasto, draft, preset, onClose,
                 )
               })}
             </div>
-            {errors.medioPago && <span className="text-xs text-danger">{errors.medioPago}</span>}
+            {errors.medioPago && <span className="text-xs text-danger" data-testid="error-medio">{errors.medioPago}</span>}
+            {!errors.medioPago && !medioCheck.ok && relevante && <span className="text-xs text-danger" data-testid="error-medio">{medioCheck.mensaje}</span>}
           </div>
+          {previa && (previa.avisos.length > 0 || previa.imp.partes.length > 0) && (
+            <div className="space-y-1 rounded-xl border border-line px-3 py-2 text-xs" data-testid="previa-fondos">
+              <p className="flex items-center gap-1.5 font-semibold text-ink"><Shuffle className="size-3.5" /> {resumenDistribucion(previa.imp, nombre, money)}</p>
+              {previa.avisos.map(a => <p key={a} className="flex items-start gap-1.5" style={{ color: 'var(--warning)' }}><AlertTriangle className="mt-0.5 size-3 shrink-0" />{a}</p>)}
+            </div>
+          )}
+          {tocaHistorico && (
+            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }} data-testid="confirmar-historico">
+              <Checkbox checked={confirmaHistorico} onChange={setConfirmaHistorico} label={`Confirmo que quiero modificar un gasto de ${monthLabel(gasto!.fecha.slice(0, 7) < hoyMes ? gasto!.fecha.slice(0, 7) : mesG, true)}, un mes cerrado: cambiarán los saldos de sus fondos.`} />
+            </div>
+          )}
+          {intentado && errs.historico && <ErrorBox message={errs.historico} />}
           <Switch checked={form.esRecurrente} onChange={v => set({ esRecurrente: v })} label="Es recurrente" />
         </div>
         <button type="submit" hidden aria-hidden tabIndex={-1} />

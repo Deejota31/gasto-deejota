@@ -28,7 +28,7 @@ import Configuracion, { APP_VERSION } from './tabs/Configuracion'
 // Recharts es la dependencia más pesada: el Dashboard se carga aparte para que Gastos abra rápido.
 const Dashboard = lazy(() => import('./tabs/Dashboard'))
 const Salud = lazy(() => import('./tabs/Salud'))
-const CajasTab = lazy(() => import('./tabs/Cajas'))
+const PresupuestosTab = lazy(() => import('./tabs/Presupuestos'))
 
 export default function App({ api }: { api?: Api }) {
   const [conn, setConn] = useState<Connection | null>(() => (hayDemoParam() ? null : loadConnection()))
@@ -46,7 +46,7 @@ export default function App({ api }: { api?: Api }) {
   const today = useHoy(tz)   // se actualiza solo al cambiar de día (medianoche de la zona configurada / al volver a la pestaña)
   // Planificación mensual (v1.19): campana, asistente y resumen globales. Las plantillas se abren desde el asistente.
   const plantillasApp = usePlantillasFin(store, today.slice(0, 7))
-  const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: ctx => setPlantillasOpen({ key: Date.now(), ctx }), onPlantillas: (t, ctx) => plantillasApp.abrir(t, { modo: 'lista' }, ctx), onConfigurar: () => irATab('config') })
+  const plan = usePlanificacion(store, { hoy: today, onGastosMensuales: ctx => setPlantillasOpen({ key: Date.now(), ctx }), onPlantillas: ctx => plantillasApp.abrir({ modo: 'lista' }, ctx), onConfigurar: () => irATab('config') })
   // Filtros compartidos entre Dashboard y Gastos: lo que filtras en uno se respeta en el otro.
   const [filters, setFilters] = useState<Filters>(() => emptyFilters(todayIn()))
   // Si el período es relativo ("Este mes", "Últimos 3 meses"…) y cambia el día/mes/zona, el filtro avanza con la fecha. Un rango personalizado no se toca.
@@ -117,8 +117,9 @@ export default function App({ api }: { api?: Api }) {
   }, [segundos, !!store.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Guardar no bloquea: el formulario se cierra al aceptar la operación y el resultado real llega como notificación.
-  function submitGasto(input: GastoInput, mode: ModalMode, draft: GastoDraft): boolean {
-    return store.track(`gasto:${input.id}`, GASTO_MSG[mode], () => store.actions.saveGasto(input, mode === 'edit' ? 'update' : 'create'), {
+  function submitGasto(input: GastoInput, mode: ModalMode, draft: GastoDraft, distribucion?: string): boolean {
+    const msg = distribucion ? { ...GASTO_MSG[mode], ok: `${GASTO_MSG[mode].ok} ${distribucion}` } : GASTO_MSG[mode]
+    return store.track(`gasto:${input.id}`, msg, () => store.actions.saveGasto(input, mode === 'edit' ? 'update' : 'create'), {
       onErrorActions: [{ label: 'Abrir formulario', run: () => openGasto(mode, null, draft) }],
     })
   }
@@ -148,12 +149,12 @@ export default function App({ api }: { api?: Api }) {
   const seccionVacia = tab !== 'config' && (store.desconectado || sinDatosPorError)
   const contenido = seccionVacia ? (
     store.desconectado
-      ? <Desconectado seccion={tab as 'dashboard' | 'cajas' | 'gastos' | 'salud' | 'catalogo'} onConectar={() => setConexionAbierta(true)} />
+      ? <Desconectado seccion={tab as 'dashboard' | 'presupuestos' | 'gastos' | 'salud' | 'catalogo'} onConectar={() => setConexionAbierta(true)} />
       : <ErrorBox message={`No se pudieron cargar tus datos: ${store.error}`} onRetry={() => void store.refresh()} />
   ) : (
     <>
-        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard plan={plan} store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrCajas={() => irATab('cajas')} /></Suspense>}
-        {tab === 'cajas' && <Suspense fallback={<Skeleton className="h-96" />}><CajasTab store={store} filters={filters} setFilters={setFilters} today={today} plan={plan} /></Suspense>}
+        {tab === 'dashboard' && <Suspense fallback={<Skeleton className="h-96" />}><Dashboard plan={plan} store={store} filters={filters} setFilters={setFilters} today={today} onNuevoGasto={() => openGasto('create', null)} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })} onIrPresupuestos={() => irATab('presupuestos')} /></Suspense>}
+        {tab === 'presupuestos' && <Suspense fallback={<Skeleton className="h-96" />}><PresupuestosTab store={store} filters={filters} setFilters={setFilters} today={today} plan={plan} /></Suspense>}
         {tab === 'gastos' && <Gastos store={store} openGasto={openGasto} filters={filters} setFilters={setFilters} today={today} onGastosMensuales={() => setPlantillasOpen({ key: Date.now() })}
           foco={foco} onVolverFoco={foco ? () => irATab(foco.desde) : undefined} />}
         {tab === 'salud' && <Suspense fallback={<Skeleton className="h-96" />}><Salud store={store} filters={filters} setFilters={setFilters} today={today}

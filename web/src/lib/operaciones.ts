@@ -1,5 +1,5 @@
 import type { Api, FondoInput, GastoInput, PlantillaFinInput } from './api'
-import type { AppData, Caja, CatalogoItem, Fondo, FondoMes, Gasto, Medio, PlantillaFin, Presupuesto } from './types'
+import type { AppData, CatalogoItem, Fondo, FondoMes, Gasto, Medio, ParteManual, PlantillaFin } from './types'
 
 /**
  * Escrituras optimistas (v1.23). Cada operación tiene:
@@ -38,6 +38,12 @@ function poner<T>(xs: T[] | undefined, x: T, mismo: (a: T) => boolean): T[] {
 function restaurar<T>(xs: T[] | undefined, prev: T | undefined, mismo: (a: T) => boolean): T[] {
   const l = xs ?? []
   return prev === undefined ? l.filter(a => !mismo(a)) : poner(l, prev, mismo)
+}
+
+function conAsignacion(prev: AppData['asignaciones'], id: string, partes: ParteManual[]): Record<string, ParteManual[]> {
+  const m = { ...(prev ?? {}) }
+  if (partes.length) m[id.toLowerCase()] = partes; else delete m[id.toLowerCase()]
+  return m
 }
 
 const claveCat = (c: { ambito: string; categoria: string; subcategoria: string }) => `${c.ambito}|${c.categoria}|${c.subcategoria}`.toLowerCase()
@@ -136,27 +142,13 @@ export const OPS = {
     deshacer: (d, prev, m) => ({ ...d, medios: restaurar(d.medios, prev, x => lcMedio(x) === lcMedio(m)) }),
   }),
 
-  saveCaja: def<[Caja], Caja | undefined, Caja>({
-    capturar: (d, c) => d.cajas.find(x => x.id === c.id),
-    local: (d, _ts, c) => ({ ...d, cajas: poner(d.cajas, c, x => x.id === c.id) }),
-    remoto: (api, c) => api.saveCaja(c),
-    confirmar: (d, s) => ({ ...d, cajas: poner(d.cajas, s, x => x.id === s.id) }),
-    deshacer: (d, prev, c) => ({ ...d, cajas: restaurar(d.cajas, prev, x => x.id === c.id) }),
-  }),
-
-  deleteCaja: def<[string], Caja | undefined, unknown>({
-    capturar: (d, id) => d.cajas.find(x => x.id === id),
-    local: (d, _ts, id) => ({ ...d, cajas: d.cajas.filter(c => c.id !== id) }),
-    remoto: (api, id) => api.deleteCaja(id),
-    deshacer: (d, prev, id) => ({ ...d, cajas: restaurar(d.cajas, prev, x => x.id === id) }),
-  }),
-
-  savePresupuesto: def<[Presupuesto], Presupuesto | undefined, Presupuesto>({
-    capturar: (d, p) => d.presupuestos.find(x => x.periodo === p.periodo && x.cajaId === p.cajaId),
-    local: (d, _ts, p) => ({ ...d, presupuestos: poner(d.presupuestos, p, x => x.periodo === p.periodo && x.cajaId === p.cajaId) }),
-    remoto: (api, p) => api.savePresupuesto(p),
-    confirmar: (d, s) => ({ ...d, presupuestos: poner(d.presupuestos, s, x => x.periodo === s.periodo && x.cajaId === s.cajaId) }),
-    deshacer: (d, prev, p) => ({ ...d, presupuestos: restaurar(d.presupuestos, prev, x => x.periodo === p.periodo && x.cajaId === p.cajaId) }),
+  /** Asignación manual de un gasto (partes vacías = vuelve a la automática). Solo cambia el reparto, nunca el gasto. */
+  saveAsignacion: def<[string, ParteManual[]], ParteManual[] | undefined, ParteManual[]>({
+    capturar: (d, id) => d.asignaciones?.[id.toLowerCase()],
+    local: (d, _ts, id, partes) => ({ ...d, asignaciones: conAsignacion(d.asignaciones, id, partes) }),
+    remoto: (api, id, partes) => api.saveAsignacion(id, partes),
+    confirmar: (d, s, _p, id) => ({ ...d, asignaciones: conAsignacion(d.asignaciones, id, s) }),
+    deshacer: (d, prev, id) => ({ ...d, asignaciones: conAsignacion(d.asignaciones, id, prev ?? []) }),
   }),
 
   saveFondo: def<[FondoInput], Fondo | undefined, Fondo>({

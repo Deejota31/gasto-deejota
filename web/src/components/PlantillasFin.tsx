@@ -1,23 +1,22 @@
-// "Fondos mensuales" y "Subcajas mensuales" (v1.17): plantillas reutilizables de fondos del presupuesto y de subcajas.
-// Una plantilla es SOLO configuración: guardarla, editarla o clonarla no crea dinero, fondos, subcajas ni gastos.
-// Aplicarla a un mes escribe únicamente ese mes (FONDOS_PRESUPUESTO_MESES / PRESUPUESTOS) y es idempotente; ver el backend.
+// "Fondos mensuales" (v1.17): plantillas reutilizables de fondos del presupuesto.
+// Una plantilla es SOLO configuración: guardarla, editarla o clonarla no crea dinero, fondos ni gastos.
+// Aplicarla a un mes escribe únicamente ese mes (FONDOS_PRESUPUESTO_MESES) y es idempotente; ver el backend.
 import { formatearDescripcion } from '../lib/texto'
 import { useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle, ArrowLeft, Ban, Boxes, CalendarDays, Check, ChevronDown, ChevronUp, CircleDollarSign, Copy, Info, ListChecks, Loader2, Pencil,
+  AlertTriangle, ArrowLeft, Ban, CalendarDays, Check, ChevronDown, ChevronUp, CircleDollarSign, Copy, Info, ListChecks, Loader2, Pencil,
   Plus, Power, RotateCcw, Save, Search, Send, Trash2, X,
 } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { PlantillaFinInput } from '../lib/api'
-import type { AppData, Caja, PlantillaFin, TipoPlantillaFin } from '../lib/types'
+import type { AppData, PlantillaFin } from '../lib/types'
 import { entidadDePlantilla, estadoRealPlantilla, operacionPlantilla, ETIQUETA_OPERACION, verificarPlantillasAplicadas, type ContextoPlan, type OperacionPlantilla } from '../lib/planificar'
 import { nombreMes } from '../lib/plan'
 import { formatMoney, toCents } from '../lib/money'
 import { monthLabel } from '../lib/dates'
 import { normName } from '../lib/orden'
 import { mediosDeFondo, unirMedios } from '../lib/fondoMedios'
-import { ALCANCES_LISTA, opcionesAlcanceCombo, opcionesValor, type Alcance } from '../lib/alcance'
-import { cajaLook, fondoLook, medioLook, sortMedios } from '../lib/visual'
+import { fondoLook, medioLook, sortMedios } from '../lib/visual'
 import { Combobox, type Opcion } from './Combobox'
 import { MonthPicker } from './DatePicker'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
@@ -32,10 +31,8 @@ export type InicioPlantillasFin =
 
 const AMOUNT = /^\d{1,9}([.,]\d{1,2})?$/
 const nuevoId = () => `pf-${crypto.randomUUID()}`
-const TXT = {
-  fondo: { titulo: 'Fondos mensuales', sub: 'Plantillas de tus fondos habituales', una: 'fondo', Icon: CircleDollarSign, vacio: 'Aún no tienes plantillas de fondos', ejemplo: 'General, Aporte de Pareja, Sodexo, Ingresos extras…' },
-  subcaja: { titulo: 'Cajas mensuales', sub: 'Plantillas de tus cajas habituales', una: 'caja', Icon: Boxes, vacio: 'Aún no tienes plantillas de cajas', ejemplo: 'Servicios del Hogar, Auto, Bebé, Viaje…' },
-} as const
+const T = { titulo: 'Fondos mensuales', sub: 'Plantillas de tus fondos habituales', una: 'fondo', Icon: CircleDollarSign, vacio: 'Aún no tienes plantillas de fondos', ejemplo: 'General, Aporte de Pareja, Sodexo, Ingresos extras…' } as const
+const tipo = 'fondo' as const
 
 /** Estado de una plantilla en un mes: Pendiente (sin decisión), Aplicada o No aplica este mes. */
 
@@ -44,17 +41,17 @@ const TXT = {
  * Si ya hay una plantilla vinculada a ese registro no se crea otra: se avisa y se ofrece verla o editarla.
  */
 export function usePlantillasFin(store: AppStore, hoyMes: string) {
-  const [ui, setUi] = useState<{ tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; key: number; ctx?: ContextoPlan } | null>(null)
+  const [ui, setUi] = useState<{ inicio: InicioPlantillasFin; key: number; ctx?: ContextoPlan } | null>(null)
   const [yaExiste, setYaExiste] = useState<PlantillaFin | null>(null)
   /** `ctx` = se abrió desde «Prepara tu mes»: al terminar (o cerrar) se avisa al asistente para que recupere su contexto. */
-  const abrir = (tipo: TipoPlantillaFin, inicio: InicioPlantillasFin = { modo: 'lista' }, ctx?: ContextoPlan) => setUi({ tipo, inicio, key: Date.now(), ctx })
-  const guardarComoPlantilla = (tipo: TipoPlantillaFin, origenId: string) => {
-    const ex = (store.data?.plantillasFin ?? []).find(p => p.tipo === tipo && p.origenId === origenId)
-    if (ex) setYaExiste(ex); else abrir(tipo, { modo: 'nueva', origenId })
+  const abrir = (inicio: InicioPlantillasFin = { modo: 'lista' }, ctx?: ContextoPlan) => setUi({ inicio, key: Date.now(), ctx })
+  const guardarComoPlantilla = (origenId: string) => {
+    const ex = (store.data?.plantillasFin ?? []).find(p => p.origenId === origenId)
+    if (ex) setYaExiste(ex); else abrir({ modo: 'nueva', origenId })
   }
   const nodo = (
     <>
-      {ui && <PlantillasFinModal key={ui.key} store={store} tipo={ui.tipo} inicio={ui.inicio} hoyMes={ui.ctx?.mes ?? hoyMes} ctx={ui.ctx}
+      {ui && <PlantillasFinModal key={ui.key} store={store} inicio={ui.inicio} hoyMes={ui.ctx?.mes ?? hoyMes} ctx={ui.ctx}
         onClose={() => { const c = ui.ctx; setUi(null); c?.onCerrar() }}
         onAplicado={r => { ui.ctx?.onAplicado(r) }}   // jamás cierra ni cambia el módulo abierto ahora: solo avisa al asistente
         onSegundoPlano={() => { const c = ui.ctx; setUi(null); c?.onIniciado?.() }} />}
@@ -62,8 +59,8 @@ export function usePlantillasFin(store: AppStore, hoyMes: string) {
         <Modal open onClose={() => setYaExiste(null)} size="sm" title="Ya existe una plantilla" icon={<Info className="size-5" />}
           footer={<>
             <Button variant="outline" onClick={() => setYaExiste(null)}>Cerrar</Button>
-            <Button variant="soft" onClick={() => { const p = yaExiste; setYaExiste(null); abrir(p.tipo, { modo: 'lista' }) }}>Ver plantilla</Button>
-            <Button onClick={() => { const p = yaExiste; setYaExiste(null); abrir(p.tipo, { modo: 'editar', id: p.id }) }}><Pencil className="size-4" /> Editar plantilla</Button>
+            <Button variant="soft" onClick={() => { setYaExiste(null); abrir({ modo: 'lista' }) }}>Ver plantilla</Button>
+            <Button onClick={() => { const p = yaExiste; setYaExiste(null); abrir({ modo: 'editar', id: p.id }) }}><Pencil className="size-4" /> Editar plantilla</Button>
           </>}>
           <p className="text-sm" data-testid="plantilla-ya-existe">Este registro ya tiene la plantilla <b>{yaExiste.nombre}</b>. No se creó otra: puedes verla o editarla.</p>
         </Modal>
@@ -80,18 +77,11 @@ function efecto(p: PlantillaFin, mes: string, monto: number, data: AppData): { t
   const o = operacionPlantilla(p, mes, monto, data)
   const ent = entidadDePlantilla(p, data)
   const nombre = ent?.nombre ?? p.nombre
-  if (p.tipo === 'fondo') {
-    const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
-    if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará el fondo “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
-    if (o.op === 'crear') return { op: o.op, cambia: true, txt: `El fondo ${nombre} ya existe, pero aún no está aplicado a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
-    if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya aporta ${m(o.actual ?? 0)} en ${ml}.` }
-    return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
-  }
-  const mon = data.config.moneda || 'PEN'
-  if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará la caja “${p.nombre}” con reserva de ${formatMoney(toCents(monto), mon)} en ${ml}. Reserva dinero ya existente; no lo crea.` }
-  if (o.op === 'crear') return { op: o.op, cambia: true, txt: `La caja ${nombre} ya existe, pero aún no reserva en ${ml}: se creará su aplicación mensual con ${formatMoney(toCents(monto), mon)}.` }
-  if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya reserva ${formatMoney(o.actual ?? 0, mon)} en ${ml}.` }
-  return { op: o.op, cambia: true, txt: `Reserva de ${ml}: ${formatMoney(o.actual ?? 0, mon)} → ${formatMoney(toCents(monto), mon)}. Otros meses no cambian.` }
+  const m = (c: number) => formatMoney(c, p.moneda || 'PEN')
+  if (!o.entidadExiste) return { op: o.op, cambia: true, txt: `Se creará el fondo “${p.nombre}” (${p.recurrencia === 'unica' ? `solo ${ml}` : `mensual desde ${ml}`}) con ${m(toCents(monto))} y su aplicación a ${ml}. No se duplica si ya existe.` }
+  if (o.op === 'crear') return { op: o.op, cambia: true, txt: `El fondo ${nombre} ya existe, pero aún no está aplicado a ${ml}: se creará su aplicación mensual con ${m(toCents(monto))}.` }
+  if (o.op === 'sin_cambios') return { op: o.op, cambia: false, txt: `Sin cambios: ${nombre} ya aporta ${m(o.actual ?? 0)} en ${ml}.` }
+  return { op: o.op, cambia: true, txt: `Ajuste solo de ${ml}: ${m(o.actual ?? 0)} → ${m(toCents(monto))}. Otros meses no cambian.` }
 }
 
 const BADGE = {
@@ -105,38 +95,37 @@ const BADGE = {
 
 type Vista = { kind: 'lista' } | { kind: 'form'; plantilla: PlantillaFin | null; origenId?: string; existente?: boolean; clonDe?: PlantillaFin }
 
-export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, onAplicado, onSegundoPlano }: {
-  store: AppStore; tipo: TipoPlantillaFin; inicio: InicioPlantillasFin; hoyMes: string; onClose: () => void
+export function PlantillasFinModal({ store, inicio, hoyMes, onClose, ctx, onAplicado, onSegundoPlano }: {
+  store: AppStore; inicio: InicioPlantillasFin; hoyMes: string; onClose: () => void
   ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
 }) {
   const data = store.data
-  const T = TXT[tipo]
   const [vista, setVista] = useState<Vista>(() => {
     if (inicio.modo === 'nueva') return { kind: 'form', plantilla: null, origenId: inicio.origenId, existente: inicio.existente }
     if (inicio.modo === 'editar') { const p = (data?.plantillasFin ?? []).find(x => x.id === inicio.id); if (p) return { kind: 'form', plantilla: p } }
     return { kind: 'lista' }
   })
   const [borrar, setBorrar] = useState<PlantillaFin | null>(null)
-  const todas = useMemo(() => [...(data?.plantillasFin ?? [])].filter(p => p.tipo === tipo).sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)), [data?.plantillasFin, tipo])
+  const todas = useMemo(() => [...(data?.plantillasFin ?? [])].sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)), [data?.plantillasFin])
 
   if (!data) return <Modal open onClose={onClose} title={T.titulo} icon={<T.Icon className="size-5" />}><Skeleton className="h-40" /></Modal>
 
   if (vista.kind === 'form') {
     return (
       <Modal open onClose={onClose} size="lg" title={vista.plantilla ? 'Editar plantilla' : vista.clonDe ? 'Clonar plantilla' : `Nueva plantilla de ${T.una}`} icon={<T.Icon className="size-5" />}
-        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fondos, cajas ni gastos."
+        subtitle="Solo guarda una configuración reutilizable: no crea dinero, fondos ni gastos."
         footer={<>
           <Button type="button" variant="outline" onClick={() => setVista({ kind: 'lista' })}><ArrowLeft className="size-4" /> Volver</Button>
           <Button type="submit" form="plantilla-fin-form"><Save className="size-4" /> {vista.plantilla ? 'Guardar cambios' : 'Guardar plantilla'}</Button>
         </>}>
-        <PlantillaFinForm store={store} tipo={tipo} plantilla={vista.plantilla} origenId={vista.origenId} existente={vista.existente} clonDe={vista.clonDe} todas={todas}
+        <PlantillaFinForm store={store} plantilla={vista.plantilla} origenId={vista.origenId} existente={vista.existente} clonDe={vista.clonDe} todas={todas}
           onEditar={p => setVista({ kind: 'form', plantilla: p })} onDone={() => setVista({ kind: 'lista' })} />
       </Modal>
     )
   }
   return (
     <>
-      <ListaPlantillas store={store} tipo={tipo} items={todas} hoyMes={hoyMes} onClose={onClose} ctx={ctx} onAplicado={onAplicado} onSegundoPlano={onSegundoPlano}
+      <ListaPlantillas store={store} items={todas} hoyMes={hoyMes} onClose={onClose} ctx={ctx} onAplicado={onAplicado} onSegundoPlano={onSegundoPlano}
         onForm={(plantilla, extra) => setVista({ kind: 'form', plantilla, ...extra })} onBorrar={setBorrar} />
       {borrar && (
         <Modal open onClose={() => setBorrar(null)} size="sm" title="Eliminar plantilla" icon={<Trash2 className="size-5" />}
@@ -148,7 +137,7 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
               if (ok) setBorrar(null)
             }}><Trash2 className="size-4" /> Eliminar</Button>
           </>}>
-          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. {borrar.tipo === 'fondo' ? 'El fondo' : 'La caja'} original, los importes ya aplicados en meses y los gastos no cambian.</p>
+          <p className="text-sm" data-testid="eliminar-plantilla-fin">Se eliminará solo la plantilla <b>{borrar.nombre}</b>. El fondo original, los importes ya aplicados en meses y los gastos no cambian.</p>
         </Modal>
       )}
     </>
@@ -157,13 +146,12 @@ export function PlantillasFinModal({ store, tipo, inicio, hoyMes, onClose, ctx, 
 
 /* ------------------------------------- Lista ------------------------------------- */
 
-function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado, onSegundoPlano, onForm, onBorrar }: {
-  store: AppStore; tipo: TipoPlantillaFin; items: PlantillaFin[]; hoyMes: string; onClose: () => void
+function ListaPlantillas({ store, items, hoyMes, onClose, ctx, onAplicado, onSegundoPlano, onForm, onBorrar }: {
+  store: AppStore; items: PlantillaFin[]; hoyMes: string; onClose: () => void
   ctx?: ContextoPlan; onAplicado?: (r: { mes: string; n: number }) => void; onSegundoPlano?: () => void
   onForm: (p: PlantillaFin | null, extra?: { origenId?: string; existente?: boolean; clonDe?: PlantillaFin }) => void; onBorrar: (p: PlantillaFin) => void
 }) {
   const data = store.data!
-  const T = TXT[tipo]
   const movil = useEsMovil()
   const [mes, setMes] = useState(hoyMes)
   const [q, setQ] = useState('')
@@ -175,7 +163,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
   const [errorAplicar, setErrorAplicar] = useState<string | null>(null)
   const monedaPrincipal = data.config.moneda || 'PEN'
   const term = normName(q)
-  const visibles = items.filter(p => !term || normName(`${p.nombre} ${p.medios} ${p.valor}`).includes(term))
+  const visibles = items.filter(p => !term || normName(`${p.nombre} ${p.medios}`).includes(term))
   const puedeOrdenar = !term && items.length > 1
   const dnd = useReorden({
     ids: items.map(p => p.id), habilitado: puedeOrdenar, nombre: id => items.find(p => p.id === id)?.nombre ?? 'Plantilla',
@@ -192,7 +180,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
   }
   const valido = (p: PlantillaFin) => AMOUNT.test(montoDe(p).trim()) && Number(montoDe(p).replace(',', '.')) >= 0
   const numero = (p: PlantillaFin) => Number(montoDe(p).replace(',', '.'))
-  const moneda = (p: PlantillaFin) => (p.tipo === 'fondo' ? p.moneda || 'PEN' : monedaPrincipal)
+  const moneda = (p: PlantillaFin) => p.moneda || monedaPrincipal
   const elegidas = items.filter(p => sel.includes(p.id))
   const totales = new Map<string, number>()
   for (const p of elegidas) if (valido(p)) totales.set(moneda(p), (totales.get(moneda(p)) ?? 0) + toCents(numero(p)))
@@ -306,7 +294,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
             trigger={<><Plus className="size-4" /> Nueva plantilla <ChevronDown className="size-4" /></>}
             acciones={[
               { key: 'cero', label: 'Crear desde cero', icon: <Plus className="size-4" />, onClick: () => onForm(null) },
-              { key: 'existente', label: `Crear desde ${tipo === 'fondo' ? 'un fondo' : 'una caja'} existente`, icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
+              { key: 'existente', label: 'Crear desde un fondo existente', icon: <Copy className="size-4" />, onClick: () => onForm(null, { existente: true }) },
             ]} />
         </div>
         {items.length > 4 && (
@@ -330,14 +318,12 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
         ) : !filas.length ? <Empty icon={<Search className="size-5" />} title="Sin coincidencias">Prueba con otra palabra.</Empty> : (
           <ul aria-label={`Plantillas de ${T.una}s`} className="divide-y divide-line/70 overflow-hidden rounded-xl border border-line" data-testid="pf-lista">
             {filas.map(p => {
-              const look = p.tipo === 'fondo' ? fondoLook({ nombre: p.nombre, medioPago: p.medios, icono: p.icono, color: p.color }) : cajaLook({ filtroCampo: p.campo as Caja['filtroCampo'], filtroValor: p.valor, color: p.color, icono: p.icono }, data.catalogo)
+              const look = fondoLook({ nombre: p.nombre, medioPago: p.medios, icono: p.icono, color: p.color })
               const e = estadoRealPlantilla(p, mes, data)
               const b = BADGE[e]
               const busy = store.pending.has(`pf:${p.id}`)
               const on = sel.includes(p.id)
-              const sub = p.tipo === 'fondo'
-                ? `${p.recurrencia === 'unica' ? 'Un solo mes' : 'Mensual'}${mediosDeFondo(p.medios).length ? ` · ${mediosDeFondo(p.medios).join(', ')}` : ''}${p.origenId ? '' : ' · sin fondo aún'}`
-                : `${p.campo}: ${p.valor.replace(' › ', ' › ')}${p.origenId ? '' : ' · sin caja aún'}`
+              const sub = `${p.recurrencia === 'unica' ? 'Un solo mes' : 'Mensual'}${mediosDeFondo(p.medios).length ? ` · ${mediosDeFondo(p.medios).join(', ')}` : ''}${p.origenId ? '' : ' · sin fondo aún'}`
               return (
                 <li key={p.id} {...dnd.item(p.id)} data-testid="pf-fila" data-estado={e} className={`${CLASE_ARRASTRE} border border-transparent ${on ? 'bg-primary-soft/40' : ''} ${p.activo ? '' : 'opacity-70'}`}>
                   <SwipeFila nombre={p.nombre} acciones={accionesFila(p)} activo={movil}>
@@ -380,9 +366,7 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
           </ul>
         )}
         <p className="text-[11px] text-muted">
-          {tipo === 'fondo'
-            ? 'Cambiar el importe aquí solo afecta al mes elegido: el importe predeterminado de la plantilla (y del fondo) se conserva para los demás meses. Nunca se crean ingresos ni gastos.'
-            : 'Una caja no crea dinero: solo reserva parte del presupuesto existente. Cambiar el importe aquí solo afecta al mes elegido; la plantilla conserva su valor para los demás.'}
+          Cambiar el importe aquí solo afecta al mes elegido: el importe predeterminado de la plantilla (y del fondo) se conserva para los demás meses. Nunca se crean ingresos ni gastos.
         </p>
       </div>
 
@@ -405,8 +389,8 @@ function ListaPlantillas({ store, tipo, items, hoyMes, onClose, ctx, onAplicado,
 
 /* ------------------------------------ Formulario ------------------------------------ */
 
-function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe, todas, onEditar, onDone }: {
-  store: AppStore; tipo: TipoPlantillaFin; plantilla: PlantillaFin | null; origenId?: string; existente?: boolean; clonDe?: PlantillaFin; todas: PlantillaFin[]
+function PlantillaFinForm({ store, plantilla, origenId, existente, clonDe, todas, onEditar, onDone }: {
+  store: AppStore; plantilla: PlantillaFin | null; origenId?: string; existente?: boolean; clonDe?: PlantillaFin; todas: PlantillaFin[]
   onEditar: (p: PlantillaFin) => void; onDone: () => void
 }) {
   const data = store.data!
@@ -422,33 +406,23 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
   const [moneda, setMoneda] = useState(base?.moneda || data.config.moneda || 'PEN')
   const [elegidos, setElegidos] = useState<string[]>(base ? mediosDeFondo(base.medios) : [])
   const [recurrencia, setRecurrencia] = useState<'mensual' | 'unica'>(base?.recurrencia ?? 'mensual')
-  const [campo, setCampo] = useState<Alcance>((base?.campo as Alcance) || 'Categoría')
-  const [valor, setValor] = useState(base?.valor ?? '')
   const [descripcion, setDescripcion] = useState(base?.descripcion ?? '')
   const [activo, setActivo] = useState(base ? base.activo : true)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Rellena desde un fondo/subcaja existente (editable antes de guardar).
+  // Rellena desde un fondo existente (editable antes de guardar).
   function cargarDesde(oid: string) {
     setOrigen(oid)
     setErrors({})
-    if (tipo === 'fondo') {
-      const f = fondos.find(x => x.id === oid)
-      if (!f) return
-      setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setElegidos(mediosDeFondo(f.medioPago)); setRecurrencia(f.recurrencia)
-    } else {
-      const c = data.cajas.find(x => x.id === oid)
-      if (!c) return
-      setNombre(c.nombre); setMonto(String(c.presupuesto)); setCampo(c.filtroCampo as Alcance); setValor(c.filtroValor); setDescripcion(c.descripcion ?? '')
-    }
+    const f = fondos.find(x => x.id === oid)
+    if (!f) return
+    setNombre(f.nombre); setMonto(String(f.monto)); setMoneda(f.moneda); setElegidos(mediosDeFondo(f.medioPago)); setRecurrencia(f.recurrencia)
   }
   useEffect(() => { if (origenId && !plantilla) cargarDesde(origenId) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const yaVinculada = origen ? todas.find(p => p.origenId === origen && p.id !== id) : undefined
-  const entidades = tipo === 'fondo' ? fondos.map(f => ({ id: f.id, nombre: f.nombre, look: fondoLook(f, fondos) })) : data.cajas.filter(c => c.filtroCampo !== 'Todos').map(c => ({ id: c.id, nombre: c.nombre, look: cajaLook(c, data.catalogo) }))
+  const entidades = fondos.map(f => ({ id: f.id, nombre: f.nombre, look: fondoLook(f, fondos) }))
   const opcionesExistente: Opcion[] = entidades.map(x => ({ value: x.id, label: x.nombre, Icon: x.look.Icon, color: x.look.color, hint: todas.some(p => p.origenId === x.id) ? 'Ya tiene plantilla' : undefined }))
-  const valores = useMemo(() => { const xs = opcionesValor(campo, data.catalogo, medios); return valor && !xs.includes(valor) ? [valor, ...xs] : xs }, [campo, data.catalogo, medios, valor])
-  const opcionesCombo = useMemo(() => opcionesAlcanceCombo(valores, campo, data.catalogo), [valores, campo, data.catalogo])
   const mediosOpc = useMemo(() => medios.filter(m => !elegidos.some(e => normName(e) === normName(m))).map(m => { const l = medioLook(m); return { value: m, label: m, Icon: l.Icon, color: l.color } as Opcion }), [medios, elegidos])
 
   function save() {
@@ -457,16 +431,14 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
     if (!nombre.trim()) errs.nombre = 'Escribe un nombre.'
     else if (todas.some(p => p.id !== id && normName(p.nombre) === normName(nombre))) errs.nombre = `Ya existe una plantilla llamada “${nombre.trim()}”.`
     if (!AMOUNT.test(monto.trim()) || !(n >= 0)) errs.monto = 'Ingresa un monto válido (puede ser 0).'
-    if (tipo === 'subcaja' && !valor) errs.valor = 'Elige el valor del alcance.'
     if (yaVinculada) errs.origen = `Ya existe la plantilla “${yaVinculada.nombre}” para este registro.`
     setErrors(errs)
     if (Object.keys(errs).length) return
     const input: PlantillaFinInput = {
-      id, tipo, nombre: nombre.trim(), monto: n, moneda: tipo === 'fondo' ? moneda : '', medios: tipo === 'fondo' ? unirMedios(elegidos) : '',
-      campo: tipo === 'subcaja' ? campo : '', valor: tipo === 'subcaja' ? valor : '', descripcion: formatearDescripcion(descripcion),
-      color: base?.color ?? (origen ? (tipo === 'fondo' ? fondos.find(f => f.id === origen)?.color : data.cajas.find(c => c.id === origen)?.color) : undefined) ?? '#1e3a8a',
-      icono: base?.icono ?? (origen ? (tipo === 'fondo' ? fondos.find(f => f.id === origen)?.icono : data.cajas.find(c => c.id === origen)?.icono) : undefined) ?? '',
-      recurrencia: tipo === 'fondo' ? recurrencia : 'mensual', activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
+      id, tipo, nombre: nombre.trim(), monto: n, moneda, medios: unirMedios(elegidos), descripcion: formatearDescripcion(descripcion),
+      color: base?.color ?? (origen ? fondos.find(f => f.id === origen)?.color : undefined) ?? '#1e3a8a',
+      icono: base?.icono ?? (origen ? fondos.find(f => f.id === origen)?.icono : undefined) ?? '',
+      recurrencia, activo, orden: plantilla?.orden ?? 0, origenId: clonDe ? '' : origen,
     }
     const ok = store.track(`pf:${id}`, { pending: 'Guardando la plantilla…', ok: `Plantilla ${input.nombre} guardada.`, error: 'No se pudo guardar la plantilla.' }, () => store.actions.savePlantillaFin(plantilla ? input : { ...input, orden: undefined }))
     if (ok) onDone()
@@ -477,10 +449,10 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
       {!plantilla && !clonDe && (
         <div className="space-y-2 rounded-xl bg-bg/70 p-3">
           <Segmented label="Origen de la plantilla" value={desdeExistente ? 'existente' : 'cero'} onChange={v => { setDesdeExistente(v === 'existente'); if (v === 'cero') setOrigen('') }}
-            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: `Desde ${tipo === 'fondo' ? 'un fondo' : 'una caja'} existente` }]} />
+            options={[{ value: 'cero', label: 'Desde cero' }, { value: 'existente', label: 'Desde un fondo existente' }]} />
           {desdeExistente && (
-            <Field label={`${tipo === 'fondo' ? 'Fondo' : 'Caja'} existente`} htmlFor="pf-origen" error={errors.origen}>
-              <Combobox id="pf-origen" label={`${tipo === 'fondo' ? 'Fondo' : 'Caja'} existente`} value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
+            <Field label="Fondo existente" htmlFor="pf-origen" error={errors.origen}>
+              <Combobox id="pf-origen" label="Fondo existente" value={origen} onChange={cargarDesde} searchable options={opcionesExistente} placeholder="Busca y elige…" vacio="No hay registros." />
             </Field>
           )}
           {yaVinculada && (
@@ -495,12 +467,11 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
         <Field label="Nombre" htmlFor="pf-nombre" error={errors.nombre}>
           <input id="pf-nombre" className={`${inputCls} ${errors.nombre ? 'border-danger' : ''}`} maxLength={40} value={nombre} onChange={e => setNombre(e.target.value)} autoComplete="off" />
         </Field>
-        <Field label={tipo === 'fondo' ? 'Monto predeterminado' : 'Presupuesto predeterminado'} htmlFor="pf-monto" error={errors.monto}>
+        <Field label="Monto predeterminado" htmlFor="pf-monto" error={errors.monto}>
           <input id="pf-monto" className={`${inputCls} tabular text-right ${errors.monto ? 'border-danger' : ''}`} inputMode="decimal" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} placeholder="0.00" autoComplete="off" />
         </Field>
       </div>
-      {tipo === 'fondo' ? (
-        <>
+      <>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Moneda" htmlFor="pf-moneda"><Combobox id="pf-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={[...new Set([...monedas, moneda])].map(m => ({ value: m, label: m }))} /></Field>
             <Field label="Recurrencia">
@@ -521,17 +492,6 @@ function PlantillaFinForm({ store, tipo, plantilla, origenId, existente, clonDe,
             </div>
           </Field>
         </>
-      ) : (
-        <>
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">Alcance</p>
-            <Segmented label="Alcance" value={campo} onChange={v => { setCampo(v); setValor('') }} options={ALCANCES_LISTA.map(a => ({ value: a, label: a }))} />
-          </div>
-          <Field label={`Valor (${campo.toLowerCase()})`} htmlFor="pf-valor" error={errors.valor}>
-            <Combobox id="pf-valor" label={`Valor (${campo.toLowerCase()})`} value={valor} onChange={setValor} invalid={!!errors.valor} placeholder="Elige…" descEnTrigger searchable={valores.length > 6} maxHeight={320} options={opcionesCombo} vacio="Sin opciones activas en el catálogo." />
-          </Field>
-        </>
-      )}
       <Field label="Descripción (opcional)" htmlFor="pf-desc">
         <input id="pf-desc" className={inputCls} maxLength={200} value={descripcion} onChange={e => setDescripcion(e.target.value)} onBlur={() => setDescripcion(formatearDescripcion(descripcion))} autoComplete="off" />
       </Field>

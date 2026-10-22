@@ -72,16 +72,16 @@ describe('respuesta perdida tras una escritura exitosa', () => {
     expect(filasDe(b, 'GASTOS').map(f => f[5])).toEqual(['G1', 'G2', 'G3'])
   })
 
-  it('fondo, ajuste mensual y caja con respuesta perdida: un solo registro de cada uno', async () => {
+  it('fondo, ajuste mensual y asignación manual con respuesta perdida: un solo registro de cada uno', async () => {
     const { api } = conRed(b, { perder: 1 })
     await api.saveFondo({ id: 'f-uno', nombre: 'Uno', monto: 100, moneda: 'PEN', orden: 1, recurrencia: 'mensual', mes: '2026-10', tipo: 'mensual', medioPago: '', color: '#B4693C', icono: '', activo: true } as never)
     const { api: a2 } = conRed(b, { perder: 1 })
     await a2.saveFondoMes({ fondoId: 'f-uno', mes: '2026-11', modo: 'solo', monto: 150 } as never)
     const { api: a3 } = conRed(b, { perder: 1 })
-    await a3.saveCaja({ id: 'c-uno', nombre: 'Caja uno', presupuesto: 50, filtroCampo: 'Categoría', filtroValor: 'Salud', color: '#16A085', orden: 9 } as never)
+    await a3.saveAsignacion('gasto-no-existe', [{ fondoId: 'f-uno', monto: 10 }]).catch(() => undefined)   // gasto inexistente: se rechaza, no escribe
     expect(filasDe(b, 'FONDOS_PRESUPUESTO').filter(f => f[0] === 'f-uno')).toHaveLength(1)
     expect(filasDe(b, 'FONDOS_PRESUPUESTO_MESES').filter(f => f[0] === 'f-uno' && f[1] === '2026-11')).toHaveLength(1)
-    expect(filasDe(b, 'CAJAS').filter(f => f[1] === 'Caja uno')).toHaveLength(1)
+    expect(filasDe(b, 'ASIGNACIONES_GASTOS')).toHaveLength(0)
   })
 })
 
