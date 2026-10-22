@@ -22,7 +22,7 @@ export function validarConexion(url: string, token: string): string | null {
 }
 
 export function saveConnection(c: Connection | null) {
-  try { c ? localStorage.setItem(STORAGE_KEY, JSON.stringify(c)) : localStorage.removeItem(STORAGE_KEY) } catch { /* modo privado */ }
+  try { if (c) localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); else localStorage.removeItem(STORAGE_KEY) } catch { /* modo privado */ }
 }
 
 export class ApiError extends Error {
@@ -54,16 +54,17 @@ export function calentar(conn: Connection, fetchImpl: typeof fetch = fetch): voi
   try { void fetchImpl(conn.url, { method: 'GET', mode: 'no-cors', cache: 'no-store' }).catch(() => undefined) } catch { /* sin red: no importa */ }
 }
 
-export type Transport = (action: string, payload: unknown) => Promise<unknown>
+/** `extra.adminToken`: credencial de las funciones de administración (S-04). Nunca se guarda: se pasa solo en esa llamada. */
+export type Transport = (action: string, payload: unknown, extra?: { adminToken?: string }) => Promise<unknown>
 
 export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch, sleep = (ms: number) => new Promise(r => setTimeout(r, ms))): Transport {
-  return async (action, payload) => {
+  return async (action, payload, extra) => {
     let lastError: ApiError | null = null
     // Todas las acciones son idempotentes (el alta lleva su UUID), así que reintentar es seguro. Máximo 4 intentos (1 s, 3 s, 7 s entre ellos).
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt) await sleep(retardoReintento(attempt))
       try {
-        return await once(conn, action, payload, fetchImpl)
+        return await once(conn, action, payload, fetchImpl, extra)
       } catch (e) {
         lastError = e instanceof ApiError ? e : new ApiError('NETWORK', 'Error de red.')
         if (!RETRYABLE.has(lastError.code) && !lastError.reintentable) throw lastError
@@ -73,7 +74,7 @@ export function httpTransport(conn: Connection, fetchImpl: typeof fetch = fetch,
   }
 }
 
-async function once(conn: Connection, action: string, payload: unknown, fetchImpl: typeof fetch): Promise<unknown> {
+async function once(conn: Connection, action: string, payload: unknown, fetchImpl: typeof fetch, extra?: { adminToken?: string }): Promise<unknown> {
   const ctrl = new AbortController()
   const t0 = performance.now()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
@@ -82,7 +83,7 @@ async function once(conn: Connection, action: string, payload: unknown, fetchImp
     res = await fetchImpl(conn.url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token: conn.token, action, payload }),
+      body: JSON.stringify({ token: conn.token, action, payload, ...(extra?.adminToken ? { adminToken: extra.adminToken } : {}) }),
       redirect: 'follow',
       signal: ctrl.signal,
     })
@@ -407,7 +408,7 @@ export function createApi(t: Transport) {
     },
     diagnose: () => t('diagnose', {}) as Promise<Record<string, unknown>>,
     /** Ejecuta por nombre una función del backend (Configuración → Funciones del backend) y devuelve su respuesta tal cual. */
-    ejecutar: (nombre: string, payload: Record<string, unknown> = {}) => t(nombre, payload) as Promise<unknown>,
+    ejecutar: (nombre: string, payload: Record<string, unknown> = {}, adminToken?: string) => t(nombre, payload, adminToken ? { adminToken } : undefined) as Promise<unknown>,
     /** Carpeta de Drive donde se guardan los respaldos. */
     carpetaRespaldo: () => t('carpetaRespaldo', {}) as Promise<CarpetaRespaldo>,
     /** Cambia la carpeta (enlace o ID de Drive); vacío = carpeta "Backup" junto a la hoja. */

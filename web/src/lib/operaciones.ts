@@ -245,5 +245,5 @@ export function leerCola(url: string | undefined): OpPersistida[] {
 
 export function guardarCola(url: string | undefined, ops: OpPersistida[]) {
   if (!url) return
-  try { ops.length ? localStorage.setItem(COLA_KEY, JSON.stringify({ url, ops })) : localStorage.removeItem(COLA_KEY) } catch { /* cuota llena o modo privado: la cola sigue en memoria */ }
+  try { if (ops.length) localStorage.setItem(COLA_KEY, JSON.stringify({ url, ops })); else localStorage.removeItem(COLA_KEY) } catch { /* cuota llena o modo privado: la cola sigue en memoria */ }
 }

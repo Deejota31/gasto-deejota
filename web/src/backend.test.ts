@@ -2,172 +2,14 @@
 // de SpreadsheetApp, CacheService, LockService y PropertiesService.
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import vm from 'node:vm'
-import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { gasto, legacyCheckboxes, load } from './testing/backendHarness'
 import { CATALOGO_INICIAL } from './lib/catalogo'
 import { configurarExcepciones, formatearDescripcion } from './lib/texto'
 import { createApi } from './lib/api'
 import { aggregate, aislaDesde, budgetCents, fondoMontoMes } from './lib/engine'
 import { ratesFromConfig } from './lib/money'
 import { calcularCompromisos, compararPeriodos, estadoCompromiso, evaluarCalidad } from './lib/salud'
-
-type Cell = unknown
-class FakeSheet {
-  rows: Cell[][] = []
-  frozen = 0
-  filter: object | null = null
-  writes = 0
-  /** Lecturas de una columna entera (varias filas, una columna): lo que el TextFinder evita. */
-  colReads = 0
-  constructor(public name: string) {}
-  // Como Sheets: la última fila con cualquier valor (un FALSE de casilla cuenta, una celda vacía no).
-  getLastRow() {
-    for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i]?.some(v => v !== '' && v !== undefined)) return i + 1
-    return 0
-  }
-  setName(n: string) { this.ss?.sheets.delete(this.name); this.name = n; this.ss?.sheets.set(n, this) }
-  ss?: FakeSpreadsheet
-  getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0) }
-  getMaxRows() { return Math.max(1000, this.rows.length) }
-  setFrozenRows(n: number) { this.frozen = n }
-  getFilter() { return this.filter }
-  appendRow(row: Cell[]) { this.rows.push([...row]); this.writes++ }
-  deleteRow(n: number) { this.rows.splice(n - 1, 1); this.writes++ }
-  deleteRows(n: number, k: number) { this.rows.splice(n - 1, k); this.writes++ }
-  getRange(a: number | string, c?: number, nr = 1, nc = 1): FakeRange {
-    if (typeof a === 'string') return new FakeRange(this, 1, 1, 0, 0)
-    return new FakeRange(this, a, c!, nr, nc)
-  }
-}
-class FakeRange {
-  constructor(private s: FakeSheet, private r: number, private c: number, private nr: number, private nc: number) {}
-  getValues() {
-    if (this.nr > 1 && this.nc === 1) this.s.colReads++
-    return Array.from({ length: this.nr }, (_, i) => Array.from({ length: this.nc }, (_, j) => this.s.rows[this.r - 1 + i]?.[this.c - 1 + j] ?? ''))
-  }
-  setValues(v: Cell[][]) {
-    this.s.writes++
-    v.forEach((row, i) => { const target = (this.s.rows[this.r - 1 + i] ??= []); row.forEach((x, j) => { target[this.c - 1 + j] = x }) })
-    return this
-  }
-  setValue(x: Cell) { return this.setValues([[x]]) }
-  clearDataValidations() { return this }
-  clearContent() {
-    for (let i = 0; i < this.nr; i++) { const row = this.s.rows[this.r - 1 + i]; if (row) for (let j = 0; j < this.nc; j++) row[this.c - 1 + j] = '' }
-    return this
-  }
-  setNumberFormat() { return this }
-  insertCheckboxes() { return this }
-  setFontWeight() { return this }
-  setBackground() { return this }
-  createFilter() { this.s.filter = {}; return this }
-  getRow() { return this.r }
-  /** Como el TextFinder de Sheets: sin distinguir mayúsculas salvo matchCase(true); matchEntireCell exige igualdad con la celda completa. */
-  createTextFinder(txt: string) {
-    const o = { entera: false, mayus: false }
-    const f = {
-      matchEntireCell: (b: boolean) => { o.entera = b; return f },
-      matchCase: (b: boolean) => { o.mayus = b; return f },
-      findNext: () => {
-        const norm = (v: unknown) => (o.mayus ? String(v) : String(v).toLowerCase())
-        for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) {
-          const v = this.s.rows[this.r - 1 + i]?.[this.c - 1 + j]
-          if (v === undefined || v === '') continue
-          if (o.entera ? norm(v) === norm(txt) : norm(v).includes(norm(txt))) return new FakeRange(this.s, this.r + i, this.c + j, 1, 1)
-        }
-        return null
-      },
-    }
-    return f
-  }
-}
-class FakeSpreadsheet {
-  sheets = new Map<string, FakeSheet>([['Sheet1', new FakeSheet('Sheet1')]])
-  getId() { return 'ss-1' }
-  getUrl() { return 'https://docs.google.com/spreadsheets/d/ss-1' }
-  getSheetByName(n: string) { return this.sheets.get(n) ?? null }
-  insertSheet(n: string) { const s = new FakeSheet(n); s.ss = this; this.sheets.set(n, s); return s }
-  getSheets() { return [...this.sheets.values()] }
-  deleteSheet(s: FakeSheet) { this.sheets.delete(s.name) }
-  setSpreadsheetTimeZone() {}
-  copies: string[] = []
-  copy(name: string) { this.copies.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } }
-}
-
-class FakeFolder {
-  files: string[] = []
-  children: FakeFolder[] = []
-  constructor(public id: string, public name: string) {}
-  getId() { return this.id }
-  getName() { return this.name }
-  getUrl() { return `https://drive.google.com/drive/folders/${this.id}` }
-  getFoldersByName(n: string) { const xs = this.children.filter(c => c.name === n); return { hasNext: () => xs.length > 0, next: () => xs.shift()! } }
-  createFolder(n: string) { const f = new FakeFolder(`folder-${n}-${this.children.length + 1}xxxxxx`, n); this.children.push(f); allFolders.set(f.id, f); return f }
-}
-const allFolders = new Map<string, FakeFolder>()
-
-function load() {
-  const ss = new FakeSpreadsheet()
-  allFolders.clear()
-  const microApps = new FakeFolder('folder-microapps-0001', 'MicroApps')
-  const root = new FakeFolder('folder-root-000001', 'Mi unidad')
-  const otra = new FakeFolder('folder-otra-0000001', 'Respaldos personales')
-  for (const f of [microApps, root, otra]) allFolders.set(f.id, f)
-  const props = new Map<string, string>()
-  const cache = new Map<string, string>()
-  let created = 0
-  let lockFree = true
-  let uuid = 0
-  const ctx = {
-    SpreadsheetApp: { create: () => { created++; return ss }, openById: () => ss },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => props.get(k) ?? null, setProperty: (k: string, v: string) => props.set(k, v), deleteProperty: (k: string) => props.delete(k) }) },
-    CacheService: { getScriptCache: () => ({
-      get: (k: string) => cache.get(k) ?? null,
-      getAll: (ks: string[]) => Object.fromEntries(ks.filter(k => cache.has(k)).map(k => [k, cache.get(k)])),
-      put: (k: string, v: string) => cache.set(k, v),
-      putAll: (o: Record<string, string>) => Object.entries(o).forEach(([k, v]) => cache.set(k, v)),
-      remove: (k: string) => cache.delete(k),
-    }) },
-    LockService: { getScriptLock: () => ({ tryLock: () => lockFree, releaseLock: () => {} }) },
-    Utilities: {
-      getUuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, '0')}`,
-      formatDate: (d: Date, _tz?: string, fmt?: string) => d.toISOString().slice(0, fmt === 'yyyy-MM' ? 7 : 10),
-      DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
-      computeDigest: (alg: string, s: string) => [...createHash(alg).update(s, 'utf8').digest()].map(b => (b > 127 ? b - 256 : b)),
-    },
-    DriveApp: {
-      getFileById: () => ({
-        makeCopy: (name: string, folder: FakeFolder) => { ss.copies.push(name); folder.files.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } },
-        getParents: () => { let done = false; return { hasNext: () => !done, next: () => { done = true; return microApps } } },
-      }),
-      getRootFolder: () => root,
-      getFolderById: (id: string) => { const f = allFolders.get(id); if (!f) throw new Error('No item with the given ID could be found'); return f },
-    },
-    ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s: string) => ({ setMimeType: () => ({ body: s }) }) },
-    Logger: { log: () => {} },
-    console: { error: () => {}, warn: () => {}, log: () => {} },
-    Date, JSON, Math, Number, String, Object, Array, isFinite, isNaN, Error,
-  }
-  vm.createContext(ctx)
-  vm.runInContext(readFileSync(resolve(__dirname, '../../apps-script/Code.gs'), 'utf8'), ctx)
-  const g = ctx as unknown as Record<string, (...a: unknown[]) => { body: string }> & { setup: () => void }
-  const token = () => props.get('API_TOKEN')!
-  const post = (action: string, payload: unknown = {}, tk = token()) =>
-    JSON.parse(g.doPost({ postData: { contents: JSON.stringify({ token: tk, action, payload }) } }).body)
-  return { ss, props, cache, g, post, created: () => created, setLock: (v: boolean) => { lockFree = v }, folders: { microApps, root, otra } }
-}
-
-const gasto = (over: Record<string, unknown> = {}) => ({
-  id: '11111111-2222-4333-8444-555555555555', fecha: '2026-10-05', monto: 25.5, moneda: 'PEN', categoria: 'Comida',
-  subcategoria: 'Almuerzo', descripcion: 'Menú', medioPago: 'Yape', tipoGasto: 'Variable', ambito: 'Personal',
-  esRecurrente: false, comprobanteUrl: '', mode: 'create', ...over,
-})
-
-// Simula una hoja creada con la versión anterior: casillas en toda la columna (FALSE hasta la fila 1000).
-function legacyCheckboxes(sheet: FakeSheet, col: number) {
-  for (let r = 1; r < 1000; r++) { const row = (sheet.rows[r] ??= []); if (row[col] === undefined || row[col] === '') row[col] = false }
-}
 
 describe('backend Apps Script', () => {
   let b: ReturnType<typeof load>
@@ -303,51 +145,6 @@ describe('backend Apps Script', () => {
     expect(sub[6]).toBe(11101)
   })
 
-  it('actualizarCatalogo: respalda, agrega lo nuevo, desactiva lo obsoleto sin borrarlo y no toca GASTOS', () => {
-    const cat = b.ss.getSheetByName('CATALOGO')!
-    // Hoja de la versión anterior: 6 columnas, sin Orden, con valores viejos y un "Otros" repetido.
-    cat.rows = [['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color'],
-      ['Personal', '', '', true, '', ''],
-      ['Personal', 'Alimentación', 'Antojos', true, '', ''],
-      ['Personal', 'Alimentación', 'Desayuno', false, '', ''],
-      ['Familia', 'Bebé', 'Cuidado Darielita', true, '', ''],
-      ['Pareja', 'Salidas', '', true, 'users', '#8B7CF6'],
-      ['Personal', 'Alimentación', 'Otros', true, '', ''],
-      ['Personal', 'Alimentación', ' otros', true, '', '']]
-    const gs = b.ss.getSheetByName('GASTOS')!
-    b.post('saveGasto', gasto({ ambito: 'Familia', categoria: 'Bebé', subcategoria: 'Cuidado Darielita' }))
-    const gastosAntes = JSON.stringify(gs.rows)
-    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
-    expect(b.ss.copies).toHaveLength(1)
-    expect(JSON.stringify(gs.rows)).toBe(gastosAntes)
-    expect(cat.rows[0]).toEqual(['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'])
-    const byKey = (a: string, c: string, s: string) => cat.rows.filter(x => x[0] === a && x[1] === c && String(x[2]).trim() === s)
-    expect(byKey('Personal', 'Alimentación', 'Antojos')[0][3]).toBe(false)       // obsoleto: inactivo, no borrado
-    expect(byKey('Familia', 'Bebé', 'Cuidado Darielita')[0][3]).toBe(false)
-    expect(byKey('Personal', 'Alimentación', 'Desayuno')[0][3]).toBe(true)        // vigente: reactivado
-    expect(byKey('Pareja', 'Salidas', '')[0].slice(3, 6)).toEqual([true, 'users', '#8B7CF6']) // conserva icono/color
-    const otros = cat.rows.filter(x => x[0] === 'Personal' && x[1] === 'Alimentación' && String(x[2]).trim().toLowerCase() === 'otros')
-    expect(otros.map(x => x[3])).toEqual([true, false])                           // el duplicado lógico queda inactivo
-    expect(byKey('Familia', 'Bebé', 'Cuidado Infantil')[0][3]).toBe(true)        // nuevo agregado
-    expect(r.agregadas).toBeGreaterThan(200)
-    const d = b.post('data', { fresh: true }).data
-    expect(d.gastos[0][4]).toBe('Cuidado Darielita')                             // el histórico se sigue leyendo igual
-    expect((b.g.actualizarCatalogo() as unknown as Record<string, number>).agregadas).toBe(0) // idempotente
-  })
-
-  it('actualizarCatalogo respeta los cambios manuales hechos después (activo, orden y opciones propias)', () => {
-    b.g.actualizarCatalogo()
-    const cat = b.ss.getSheetByName('CATALOGO')!
-    const row = (a: string, c: string, s: string) => cat.rows.find(x => x[0] === a && x[1] === c && x[2] === s)!
-    row('Personal', 'Auto', 'SOAT')[3] = false            // la desactivé a mano
-    row('Personal', 'Auto', 'Gas')[6] = 10200.5            // la reordené a mano
-    b.post('saveCatalogo', { ambito: 'Personal', categoria: 'Auto', subcategoria: 'Peajes', activo: true }) // creada desde la app
-    const antes = JSON.stringify(cat.rows)
-    const r = b.g.actualizarCatalogo() as unknown as Record<string, number>
-    expect(r).toMatchObject({ agregadas: 0, reactivadas: 0, desactivadas: 0 })
-    expect(JSON.stringify(cat.rows)).toBe(antes)
-  })
-
   it('reintento de un alta: no duplica y aplica la corrección solo si el gasto no se editó después', () => {
     b.post('saveGasto', gasto())
     const corregido = b.post('saveGasto', gasto({ monto: 30 })).data
@@ -464,116 +261,13 @@ describe('backend Apps Script', () => {
     expect(b.post('plantillas').data[1].slice(7)).toEqual([130, 'PEN', 'Yape', 2, false, 'Variable', false])
   })
 
-  describe('plantillas de gastos mensuales en PLANTILLAS_FINANCIERAS (v1.19.2): migración desde la hoja anterior PLANTILLAS_MENSUALES', () => {
-    const H7 = ['ID', 'Ámbito', 'Categoría', 'Subcategoría', 'Descripción', 'Creado en', 'Actualizado en']
-    const H14 = [...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso', 'Tipo de gasto', 'Es recurrente']
+  describe('plantillas de gastos mensuales en PLANTILLAS_FINANCIERAS (v1.19.2)', () => {
     const id = (n: number) => `pl-11111111-2222-4333-8444-${String(n).padStart(12, '0')}`
-    const nombres = ['Luz', 'Agua', 'Gas', 'Internet', 'Línea Celular', 'ChatGPT', 'Claude', 'Spotify', 'Seguro Padre', 'Propina Madre', 'Cuidado Darielita']
-    const orden = [4, 5, 6, 7, 8, 9, 10, 11, 1, 2, 3]
     const nuevaHoja = () => b.ss.getSheetByName('PLANTILLAS_FINANCIERAS')!
-    const gastoRows = () => nuevaHoja().rows.slice(1).filter(r => r[1] === 'gasto')
     const lista = () => b.post('plantillas').data as unknown[][]
-    // Caso real de una versión antigua: 7 encabezados y la columna K (Orden) con números pero sin encabezado.
-    const hojaAntigua = () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H7], ...nombres.map((n, i) => [id(i + 1), 'Familia', 'Servicios', n, n, `2026-10-0${(i % 9) + 1}T00:00:00.000Z`, 't', '', '', '', orden[i]])]
-      return sh
-    }
-    // Hoja actual (14 columnas, como la tiene el usuario).
-    const hojaActual = () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H14],
-        [id(1), 'Familia', 'Servicios', 'Luz', 'Luz', '2026-10-14T20:05:17.406Z', '2026-10-14T20:05:17.406Z', '', 'PEN', 'Plin', 1, true, 'Variable', false],
-        [id(2), 'Familia', 'Servicios', 'Agua', 'Agua', '2026-10-14T20:05:34.644Z', '2026-10-14T20:05:34.644Z', 80, 'PEN', 'Plin', 2, true, 'Fijo', true]]
-      return sh
-    }
-
-    it('la hoja actual de 14 columnas se copia una sola vez: mismos IDs, fechas, orden y marcas; la hoja anterior queda intacta', () => {
-      const old = hojaActual()
-      const antes = JSON.stringify(old.rows)
-      const v0 = b.ss.copies.length
-      const l = lista()
-      expect(l.map(x => x[0])).toEqual([id(1), id(2)])
-      expect(l[1].slice(5, 14)).toEqual(['2026-10-14T20:05:34.644Z', '2026-10-14T20:05:34.644Z', 80, 'PEN', 'Plin', 2, true, 'Fijo', true])
-      expect(l[0][7]).toBe('')                                             // monto vacío se conserva vacío
-      expect(gastoRows().map(r => [r[0], r[1], r[2]])).toEqual([[id(1), 'gasto', 'Luz'], [id(2), 'gasto', 'Agua']])
-      expect(JSON.parse(String(gastoRows()[1][18]))).toEqual({ ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua', tipoGasto: 'Fijo', esCompromiso: true, esRecurrente: true })
-      expect(b.ss.copies.length - v0).toBe(1)                              // respaldo antes de migrar
-      lista(); lista(); b.post('data', { fresh: true })
-      expect(gastoRows()).toHaveLength(2)                                  // no se vuelve a copiar
-      expect(JSON.stringify(old.rows)).toBe(antes)                         // la hoja anterior no se toca (puedes borrarla)
-      // borrar una plantilla migrada no la "resucita" desde la hoja anterior
-      expect(b.post('deletePlantilla', { id: id(1) }).data.eliminada).toBe(true)
-      expect(lista().map(x => x[0])).toEqual([id(2)])
-    })
-
-    it('caso real antiguo (7 encabezados + Orden sin encabezado): se normaliza con respaldo y conserva las 11 plantillas, IDs, fechas y orden', () => {
-      const old = hojaAntigua()
-      const antes = old.rows.slice(1).map(r => r.slice(0, 7))
-      const v0 = b.ss.copies.length
-      expect(lista().map(x => x[4])).toEqual([...nombres.slice(8), ...nombres.slice(0, 8)])
-      expect(b.ss.copies.length - v0).toBe(1)
-      expect(gastoRows().map(r => [r[0], r[16]])).toEqual(antes.map(r => [r[0], r[5]]))   // IDs y fechas de creación intactos
-      const r = b.post('savePlantilla', { id: id(20), mode: 'create', ambito: 'Personal', categoria: 'Compras', subcategoria: 'Ropa', descripcion: 'Ropa', monto: 55, moneda: 'PEN', medioPago: 'Plin' })
-      expect(r.ok).toBe(true)
-      expect(gastoRows()).toHaveLength(12)
-      expect(lista().at(-1)![4]).toBe('Ropa')
-      // editar conserva creación y orden
-      b.post('savePlantilla', { id: id(1), mode: 'update', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: 94.9, moneda: 'USD', medioPago: 'Sodexo' })
-      const luz = lista().find(x => x[0] === id(1))!
-      expect(luz.slice(5, 11)).toEqual([antes[0][5], luz[6], 94.9, 'USD', 'Sodexo', 4])
-      // clonar después de la original, reordenar y eliminar
-      expect(b.post('savePlantilla', { id: id(21), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: 94.9, moneda: 'PEN', medioPago: 'Yape', afterId: id(1) }).ok).toBe(true)
-      const ids = () => lista().map(x => x[0])
-      expect(ids().indexOf(id(21))).toBe(ids().indexOf(id(1)) + 1)
-      expect(b.post('reorderPlantillas', { ids: [...ids()].reverse() }).ok).toBe(true)
-      expect(b.post('deletePlantilla', { id: id(21) }).data.eliminada).toBe(true)
-      expect(lista()).toHaveLength(12)
-      expect(b.ss.getSheetByName('GASTOS')!.getLastRow()).toBe(1)
-    })
-
-    it('hoja anterior de solo 7 columnas: se lee sin perder datos', () => {
-      const sh = b.ss.insertSheet('PLANTILLAS_MENSUALES')
-      sh.rows = [[...H7], [id(1), 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't']]
-      expect(lista()[0]).toEqual([id(1), 'Personal', 'Suscripciones', 'ChatGPT', 'ChatGPT', 't', 't', '', 'PEN', '', 1, false, 'Variable', false].map((v, i) => i === 10 ? lista()[0][10] : v))
-      b.post('savePlantilla', { id: id(2), mode: 'create', ambito: 'Personal', categoria: 'Suscripciones', subcategoria: 'Spotify', descripcion: 'Spotify', monto: 25, moneda: 'PEN', medioPago: 'Yape' })
-      expect(lista().map(r => r[4])).toEqual(['ChatGPT', 'Spotify'])
-    })
-
-    it('variantes de nombre se reconocen; encabezado desconocido, repetido o datos de otro tipo detienen la copia sin escribir nada', () => {
-      const old = hojaAntigua()
-      old.rows[0] = [...H7, 'Monto predeterminado', 'Moneda predeterminada', 'Medio de pago predeterminado', 'Orden']
-      expect(lista()).toHaveLength(11)                                     // alias reconocidos
-      for (const romper of [
-        (s: typeof old) => { s.rows[0][7] = 'Notas' },                       // desconocido
-        (s: typeof old) => { s.rows[0][11] = 'Monto' },                      // repetido
-        (s: typeof old) => { s.rows[0][7] = ''; s.rows[1][7] = 'abc' },      // sin encabezado y datos de otro tipo
-        (s: typeof old) => { s.rows[0][10] = ''; s.rows[1][10] = true },     // Orden sin encabezado con casillas
-      ]) {
-        b = load(); b.g.setup()
-        const s = hojaAntigua(); s.rows[0] = [...H7, 'Monto', 'Moneda', 'Medio de pago', 'Orden', 'Es compromiso']
-        romper(s)
-        const snap = JSON.stringify(s.rows), nuevaAntes = JSON.stringify(nuevaHoja().rows)
-        const e = b.post('plantillas')
-        expect(e.error.code).toBe('SCHEMA')
-        expect(e.error.message).toMatch(/No se modificó nada/)
-        expect(JSON.stringify(s.rows)).toBe(snap)
-        expect(JSON.stringify(nuevaHoja().rows)).toBe(nuevaAntes)         // nada se copió
-        expect(b.props.get('PL_MIGRADO')).toBeFalsy()
-        // las plantillas de fondos y subcajas siguen funcionando aunque la hoja anterior necesite revisión
-        expect(b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'General', monto: 100, moneda: 'PEN', medios: '', recurrencia: 'mensual' }).ok).toBe(true)
-      }
-    })
-
-    it('IDs repetidos en la hoja anterior: se copia uno solo por ID', () => {
-      const old = hojaActual()
-      old.rows.push([...old.rows[1]])
-      expect(lista().map(x => x[0])).toEqual([id(1), id(2)])
-      expect(gastoRows()).toHaveLength(2)
-    })
-
     it('las tres clases conviven en una hoja sin pisarse: reordenar, eliminar y listar actúan solo sobre su Tipo', () => {
-      hojaActual(); lista()
+      b.post('savePlantilla', { id: id(1), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Luz', descripcion: 'Luz', monto: '', moneda: 'PEN', medioPago: 'Plin' })
+      b.post('savePlantilla', { id: id(2), mode: 'create', ambito: 'Familia', categoria: 'Servicios', subcategoria: 'Agua', descripcion: 'Agua', monto: 80, moneda: 'PEN', medioPago: 'Plin' })
       const f1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000001', tipo: 'fondo', nombre: 'General', monto: 3000, moneda: 'PEN', medios: '', recurrencia: 'unica' }).data[0]
       const f2 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000002', tipo: 'fondo', nombre: 'Sodexo', monto: 280, moneda: 'PEN', medios: 'Sodexo', recurrencia: 'unica' }).data[0]
       const s1 = b.post('savePlantillaFin', { id: 'pf-aaaaaaaa-0000-4000-8000-000000000003', tipo: 'subcaja', nombre: 'Mascotas', monto: 700, campo: 'Categoría', valor: 'Mascotas' }).data[0]
@@ -884,7 +578,7 @@ describe('backend Apps Script', () => {
 
   describe('v1.8 fondos del presupuesto', () => {
     // Instalación anterior a v1.8: todavía no existen las hojas de fondos.
-    beforeEach(() => { b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES') })
+    beforeEach(() => { b.admin(); b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES') })
     const fondo = (o: Record<string, unknown>) => b.post('saveFondo', { nombre: 'X', monto: 0, moneda: 'PEN', color: '#16A085', orden: 1, recurrencia: 'mensual', mes: '', ...o })
 
     it('la primera fondo crea las hojas con respaldo previo (una sola vez) sin tocar GASTOS, CAJAS ni PRESUPUESTOS', () => {
@@ -1058,10 +752,12 @@ describe('backend Apps Script', () => {
       expect(atajo('atajoGasto', { ...ok, monto: '12,40', fecha: '' }).data.mensaje).toContain('S/ 12.40')
     })
 
-    it('token inválido repetido bloquea; revocar deshabilita', () => {
+    it('token inválido repetido bloquea SOLO a los inválidos: el atajo legítimo sigue entrando (S-03); revocar deshabilita', () => {
       ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
       for (let i = 0; i < 10; i++) expect(atajo('atajoCatalogo', {}, 'atj_malo').error.code).toBe('UNAUTHORIZED')
-      expect(atajo('atajoCatalogo', {}).error.code).toBe('LOCKED')
+      expect(atajo('atajoCatalogo', {}, 'atj_malo').error.code).toBe('LOCKED')   // el undécimo inválido ya no se procesa
+      expect(atajo('atajoCatalogo', {}).ok).toBe(true)                            // el token correcto NO queda bloqueado
+      expect(atajo('atajoGasto', ok).ok).toBe(true)
       b.cache.delete('atajo:fallos')
       expect(atajo('atajoCatalogo', {}).ok).toBe(true)
       ;(b.g as unknown as { revocarTokenAtajo: () => void }).revocarTokenAtajo()
@@ -1359,12 +1055,14 @@ describe('backend Apps Script', () => {
   })
 
   describe('v1.12 funciones de mantenimiento desde la web', () => {
+    beforeEach(() => { b.admin() })
     it('crearTokenAtajo / revocarTokenAtajo devuelven su respuesta y exigen el token de la web', () => {
       const r = b.post('crearTokenAtajo').data
       expect(r.token).toMatch(/^atj_[0-9a-f]{48}$/)
       expect(b.post('revocarTokenAtajo').data).toEqual({ revocado: true })
       expect(b.post('crearTokenAtajo', {}, 'malo').error.code).toBe('UNAUTHORIZED')
     })
+
 
     it('setup devuelve la URL de la hoja y el token; repararIds y generar/borrar datos de prueba responden sin BUSY', () => {
       const s = b.post('setup').data
@@ -1484,7 +1182,6 @@ describe('backend Apps Script', () => {
       for (const r of cat()) if (r[0] === a && r[1]) min.set(r[1] as string, Math.min(min.get(r[1] as string) ?? Infinity, Number(r[6])))
       return [...min.entries()].sort((x, y) => x[1] - y[1]).map(x => x[0])
     }
-    const nuevas = ['Servicios', 'Bebé', 'Hogar']
 
     it('reorderCategorias reescribe solo la columna Orden del ámbito: IDs, activos, íconos y otros ámbitos no cambian', () => {
       const antes = cat()
@@ -2105,7 +1802,7 @@ describe('v1.26 revisión del presupuesto (backend)', () => {
 /* Contrato vigente: solo fondos y revisiones del presupuesto. */
 describe('backend: contrato actual de fondos', () => {
   let b: ReturnType<typeof load>
-  beforeEach(() => { b = load(); b.g.setup() })
+  beforeEach(() => { b = load(); b.g.setup(); b.admin() })
 
   it('entrega las colecciones actuales sin estado de migración', () => {
     const r = b.post('data', { fresh: true })
@@ -2238,7 +1935,7 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
 
 describe('backend: generarDatosPrueba con cantidad y período', () => {
   let b: ReturnType<typeof load>
-  beforeEach(() => { b = load(); b.g.setup() })
+  beforeEach(() => { b = load(); b.g.setup(); b.admin() })
   const filas = (n: string) => b.ss.sheets.get(n)!.rows.slice(1).filter(r => r.some(v => v !== '' && v !== undefined))
   const prueba = () => filas('GASTOS').filter(r => r[11] === 'prueba')
 
@@ -2332,5 +2029,152 @@ describe('backend: generarDatosPrueba con cantidad y período', () => {
     expect(r.ok).toBe(false)
     expect(r.error.message).toMatch(/catálogo no tiene subcategorías activas/)
     expect(prueba()).toHaveLength(0)
+  })
+})
+
+/* ============ Seguridad (auditoría 2026-10-22): S-03 atajo, S-04 administración, S-05 fórmulas ============ */
+describe('seguridad del backend', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const ADMIN = ['setup', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba',
+    'repararIds', 'repararHojas', 'migrarGeneralAFondo']
+  // Acciones de uso diario (no administrativas), clasificadas a propósito: una acción nueva sin clasificar rompe esta prueba.
+  const DIARIAS = ['data', 'saveGasto', 'setEstado', 'setEstadoLote', 'saveCatalogo', 'renameCatalogo', 'reorderCategorias', 'deleteCategoria',
+    'saveMedio', 'saveCaja', 'deleteCaja', 'reorderCajas', 'savePresupuesto', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',
+    'deletePlantilla', 'reorderPlantillas', 'saveGastosBatch', 'reorderGastos', 'vincularGasto', 'saveRevision', 'saveRevisionPresupuesto',
+    'saveFondo', 'saveFondoMes', 'reorderFondos', 'savePlantillaFin', 'deletePlantillaFin', 'reorderPlantillasFin', 'aplicarPlantillasFin',
+    'aplicarEntidadesMes', 'deleteFondo', 'completarVacios', 'carpetaRespaldo', 'saveCarpetaRespaldo', 'misArchivos', 'autorizarRespaldos']
+  const instantanea = () => JSON.stringify([...b.ss.sheets.entries()].map(([n, s]) => [n, s.rows]))
+
+  it('toda acción de ACTIONS está clasificada como administrativa o de uso diario', () => {
+    const src = readFileSync(resolve(__dirname, '../../apps-script/Code.gs'), 'utf8')
+    const bloque = src.slice(src.indexOf('var ACTIONS = {'), src.indexOf('\n};', src.indexOf('var ACTIONS = {')))
+    const acciones = [...bloque.matchAll(/^  (\w+):/gm)].map(m => m[1])
+    expect(acciones.length).toBeGreaterThan(40)
+    expect(acciones.filter(a => !ADMIN.includes(a) && !DIARIAS.includes(a))).toEqual([])
+    expect([...ADMIN, ...DIARIAS].filter(a => !acciones.includes(a))).toEqual([])
+  })
+
+  describe('S-04: separación de privilegios', () => {
+    it('sin token de administración creado, las acciones administrativas responden NOT_ENABLED y no tocan nada', () => {
+      const antes = instantanea()
+      for (const a of ADMIN) expect(b.post(a, {}).error?.code, a).toBe('NOT_ENABLED')
+      expect(instantanea()).toBe(antes)
+      expect(b.props.get('ATAJO_TOKEN')).toBeUndefined()
+    })
+
+    it('el token diario (solo o repetido como administrador) no basta; el atajo ni el administrador solo sirven', () => {
+      b.admin()
+      const antes = instantanea()
+      const api = b.props.get('API_TOKEN')!
+      for (const a of ADMIN) {
+        expect(b.post(a, {}, api, null).error?.code, `${a} sin adminToken`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, api, 'adm_incorrecto').error?.code, `${a} adminToken falso`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, api, api).error?.code, `${a} token diario como administrador`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, 'malo', b.props.get('ADMIN_TOKEN')!).error?.code, `${a} sin token diario`).toBe('UNAUTHORIZED')
+      }
+      expect(instantanea()).toBe(antes)
+      expect(b.props.get('ATAJO_TOKEN')).toBeUndefined()
+    })
+
+    it('con ambos tokens funcionan, y las acciones de uso diario no piden el de administración', () => {
+      const adm = b.admin()
+      expect(b.post('crearTokenAtajo', {}, b.props.get('API_TOKEN')!, adm).data.token).toMatch(/^atj_/)
+      expect(b.post('revocarTokenAtajo', {}, b.props.get('API_TOKEN')!, adm).data).toEqual({ revocado: true })
+      b.props.delete('ADMIN_TOKEN')
+      expect(b.post('data', {}).ok).toBe(true)
+      expect(b.post('saveGasto', gasto()).ok).toBe(true)
+      expect(b.post('completarVacios', {}).ok).toBe(true)
+    })
+
+    it('revocarTokenAdmin las vuelve a deshabilitar y crearTokenAdmin reemplaza al anterior', () => {
+      const t1 = b.admin(), t2 = b.admin()
+      expect(t1).not.toBe(t2)
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t1).error.code).toBe('ADMIN_UNAUTHORIZED')
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).ok).toBe(true)
+      ;(b.g as unknown as { revocarTokenAdmin: () => void }).revocarTokenAdmin()
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).error.code).toBe('NOT_ENABLED')
+    })
+
+    it('S-02: rotarTokenApi invalida el token anterior al instante y el nuevo funciona; no es accesible por la API', () => {
+      const viejo = b.props.get('API_TOKEN')!
+      expect(b.post('data', {}, viejo).ok).toBe(true)
+      expect(b.post('rotarTokenApi', {}, viejo).error.code).toBe('BAD_ACTION')
+      const nuevo = (b.g as unknown as { rotarTokenApi: () => string }).rotarTokenApi()
+      expect(nuevo).not.toBe(viejo)
+      expect(nuevo.length).toBeGreaterThanOrEqual(32)
+      expect(b.post('data', {}, viejo).error.code).toBe('UNAUTHORIZED')
+      expect(b.post('data', {}, nuevo).ok).toBe(true)
+    })
+
+    it('el token de administración no aparece en ninguna respuesta de uso diario ni en la de setup', () => {
+      const adm = b.admin()
+      const respuestas = JSON.stringify([b.post('data', {}), b.post('diagnose', {}), b.post('misArchivos', {}), b.post('setup', {}, b.props.get('API_TOKEN')!, adm)])
+      expect(respuestas).not.toContain(adm)
+    })
+  })
+
+  describe('S-03: el atajo legítimo no se bloquea desde fuera pero conserva su límite por minuto', () => {
+    const atajo = (action: string, payload: unknown, token: string) =>
+      JSON.parse(b.g.doPost({ postData: { contents: JSON.stringify({ token, action, payload }) } }).body)
+    const nuevo = (n: number) => ({ clave: `atajo-20261010-${1000 + n}`, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', monto: '10', moneda: 'PEN', medioPago: 'Yape', fecha: '2026-10-10' })
+
+    it('tras un ataque de tokens inválidos, el atajo sigue registrando; el límite de 20 por minuto sigue vigente', () => {
+      const tk = (b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      for (let i = 0; i < 15; i++) atajo('atajoCatalogo', {}, 'atj_adivinando_' + i)
+      expect(atajo('atajoCatalogo', {}, 'atj_otro').error.code).toBe('LOCKED')
+      for (let i = 0; i < 20; i++) expect(atajo('atajoGasto', nuevo(i), tk).ok, `registro ${i}`).toBe(true)
+      expect(atajo('atajoGasto', nuevo(99), tk).error.code).toBe('RATE_LIMIT')       // el token válido no se salta el límite
+      expect(atajo('atajoCatalogo', {}, tk).ok).toBe(true)                            // el catálogo (solo lectura) sigue disponible
+    })
+
+    it('un token inválido nunca llega a escribir', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const antes = b.ss.sheets.get('GASTOS')!.rows.length
+      expect(atajo('atajoGasto', nuevo(1), 'atj_falso').error.code).toBe('UNAUTHORIZED')
+      expect(b.ss.sheets.get('GASTOS')!.rows.length).toBe(antes)
+    })
+  })
+
+  describe('S-05: ningún texto del usuario queda interpretable como fórmula', () => {
+    const HOSTILES = ['=HYPERLINK("http://malo.example","clic")', '+1+1', '-2+3', '@SUM(1)', '\t=1+1', '\r=1+1', '\n=1+1']
+    const peligrosas = () => {
+      const out: string[] = []
+      for (const [nombre, sh] of b.ss.sheets) sh.rows.forEach((r, i) => { if (i > 0) r.forEach((c, j) => { if (typeof c === 'string' && /^[=+\-@\t\r\n]/.test(c)) out.push(`${nombre}!${i + 1}:${j + 1} ${JSON.stringify(c)}`) }) })
+      return out
+    }
+
+    it('línea base: una base recién instalada no tiene celdas con aspecto de fórmula', () => {
+      expect(peligrosas()).toEqual([])
+    })
+
+    it('cada acción de escritura neutraliza los valores hostiles en todos sus campos de texto', () => {
+      const api = b.props.get('API_TOKEN')!
+      const atajoTk = (b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const hex = (n: number) => String(n).padStart(12, '0')
+      let n = 0
+      for (const h of HOSTILES) {
+        n++
+        b.post('saveGasto', gasto({ id: `aaaaaaaa-0000-4000-8000-${hex(n)}`, descripcion: h, subcategoria: h, medioPago: h, ambito: h, categoria: h }))
+        b.post('saveGastosBatch', { loteId: `lote-00000000-0000-4000-8000-${hex(n)}`, gastos: [{ ...gasto({ id: `bbbbbbbb-0000-4000-8000-${hex(n)}`, descripcion: h }), mode: undefined }] })
+        b.post('saveCatalogo', { ambito: h, categoria: h, subcategoria: h, activo: true })
+        b.post('saveMedio', { nombre: h })
+        b.post('saveCaja', { nombre: h, presupuesto: 100, filtroCampo: 'Categoría', filtroValor: h, color: '#16A085', orden: 9 })
+        b.post('saveConfig', { clave: 'nota_' + n, valor: h })
+        b.post('savePlantilla', { id: `pl-aaaaaaaa-0000-4000-8000-${hex(n)}`, mode: 'create', ambito: h, categoria: h, subcategoria: h, descripcion: h, monto: '', medioPago: h })
+        b.post('savePlantillaFin', { id: `pf-aaaaaaaa-0000-4000-8000-${hex(n)}`, tipo: 'fondo', nombre: h, monto: 10, moneda: 'PEN', medios: h, recurrencia: 'mensual' })
+        b.post('saveFondo', { id: `f-${n}`, nombre: h, monto: 10, moneda: 'PEN', orden: 1, recurrencia: 'unica', mes: '2026-10', medioPago: h })
+        b.post('saveRevision', { id: `rev-00000000-0000-4000-8000-${hex(n)}`, tipo: 'duplicado', ids: [], estado: 'legitimo', firma: h })
+        b.post('saveRevisionPresupuesto', { id: `rev-00000000-0000-4000-8000-${hex(100 + n)}`, periodo: '2026-10', estado: 'completo', pendientes: h, observacion: h })
+        b.post('saveCarpetaRespaldo', { carpeta: h })
+        JSON.parse(b.g.doPost({ postData: { contents: JSON.stringify({ token: atajoTk, action: 'atajoGasto', payload: { clave: `atajo-20261010-${2000 + n}`, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', monto: '1', moneda: 'PEN', medioPago: 'Yape', fecha: '2026-10-10', descripcion: h } }) } }).body)
+      }
+      void api
+      expect(peligrosas()).toEqual([])
+      // La prueba tiene que haber llegado a escribir algo (si todo se rechazara, pasaría en vacío).
+      const guardado = JSON.stringify([...b.ss.sheets.values()].map(s => s.rows))
+      expect(guardado).toContain('HYPERLINK')
+      expect(guardado).toContain("'=HYPERLINK")
+    })
   })
 })

@@ -615,8 +615,6 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, extraCaja
       db.fondosMeses = db.fondosMeses.filter(m => m[0] !== 'f-prueba-presupuesto')
       return { gastos: antes - db.gastos.length, vinculos: 0, compromisos: 0, catalogo: 0, medios: 0, fondos: antesF - db.fondos.length, respaldo: 'https://docs.google.com/spreadsheets/', demo: true }
     },
-    migrarPlantillas: () => ({ cambios: 0, detalle: [] }),
-    actualizarCatalogo: () => ({ sinCambios: db.catalogo.length }),
     repararIds: () => [],
     repararHojas: () => ({ url: 'https://docs.google.com/spreadsheets/', demo: true }),
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),

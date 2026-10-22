@@ -18,6 +18,16 @@ describe('cliente HTTP de Apps Script', () => {
     expect(JSON.parse(init.body).token).toBe(conn.token)
   })
 
+  it('S-04: el token de administración viaja solo cuando se pasa, en el cuerpo, y nunca se guarda', async () => {
+    const f = vi.fn().mockImplementation(async () => ok({ ok: true }))
+    const api = createApi(httpTransport(conn, f, noSleep))
+    await api.ejecutar('repararIds', {}, 'adm_secreto')
+    await api.ejecutar('misArchivos')
+    expect(JSON.parse(f.mock.calls[0][1].body)).toMatchObject({ action: 'repararIds', adminToken: 'adm_secreto' })
+    expect(JSON.parse(f.mock.calls[1][1].body)).not.toHaveProperty('adminToken')
+    expect(f.mock.calls[0][0]).not.toContain('adm_secreto')
+  })
+
   it('reintenta errores de red y BUSY', async () => {
     const f = vi.fn().mockRejectedValueOnce(new TypeError('fetch failed')).mockResolvedValueOnce(fail('BUSY')).mockResolvedValueOnce(ok(1))
     await expect(httpTransport(conn, f, noSleep)('data', {})).resolves.toBe(1)
