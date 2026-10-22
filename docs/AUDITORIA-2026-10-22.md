@@ -41,7 +41,7 @@ Rama de trabajo: `fix/auditoria-20261022` (versión **1.27.0**). Sin despliegues
 
 | Suite | Resultado |
 |---|---|
-| Vitest | ver sección final de `git log`; última corrida completa: 36 archivos, 484 pruebas OK, más 13 de `regresionMeses` = 497 |
+| Vitest | 37 archivos, **497/497** OK |
 | Playwright e2e | 250/250 en la última corrida completa (incluye 3 de CSP) |
 | `tsc -b` | sin errores |
 | Lint | 0 errores, 76 advertencias |
