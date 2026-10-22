@@ -73,6 +73,7 @@ test.describe('Restricción de medios y asignación', () => {
     await d.getByRole('button', { name: 'Crear fondo' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Solo comida con Plin creado' })).toBeVisible({ timeout: 15_000 })
 
+    await go(page, 'Gastos')
     await page.getByRole('button', { name: 'Nuevo gasto' }).first().click()
     const g = dialog(page)
     await g.getByRole('radiogroup', { name: 'Ámbito' }).getByRole('radio', { name: 'Personal', exact: true }).click()
@@ -91,7 +92,11 @@ test.describe('Restricción de medios y asignación', () => {
     await expect(chip).toBeVisible()
     await chip.click()
     const d = dialog(page)
-    await expect(d.getByRole('button', { name: /Restaurar asignación automática/ })).toBeVisible()
+    await expect(d.getByRole('heading', { name: 'Asignación a fondos' })).toBeVisible()
+    await d.getByRole('button', { name: 'Cambiar asignación' }).click()
+    await expect(d.getByRole('button', { name: 'Guardar asignación' })).toBeVisible()
+    await d.getByRole('button', { name: 'Cancelar' }).click()
+    await expect(d.getByRole('button', { name: 'Cambiar asignación' })).toBeVisible()           // sin guardar: no hay asignación manual que restaurar
   })
 })
 

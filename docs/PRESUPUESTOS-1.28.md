@@ -30,7 +30,13 @@ Prioridad: asignación manual → exclusividad de medio → especificidad (subca
 Perfil producción: General 3000 + Aporte Pareja 200 + Sodexo 280 + Carpeta Tésis 1900 + Viaje a Ica 1414 = 6794. Demo octubre: General 3500 + Sodexo 280 + Extra 1 1000 = 4780. Regla nueva desde noviembre no altera octubre (`regresionFinanciera`).
 
 ## G. Pruebas
-Ver la matriz y la sección de resultados al final (cifras reales de la última ejecución).
+| Tipo | Ejecutadas | Aprobadas | Fallidas | Omitidas | Bloqueadas | No verificables |
+|---|---|---|---|---|---|---|
+| Unitarias/integración (vitest, 39 archivos) | 544 | 544 | 0 | 0 | 0 | 0 |
+| e2e (Playwright, Chromium) | 233 | 233 | 0 | 0 | 0 | 0 |
+
+e2e: 224 de la suite adaptada + 9 nuevas de `presupuestos.spec.ts` (navegación y alias `#cajas`, formulario A–D con vista previa, bloqueo de medio restringido, asignación, responsive 360/390/768/1366). Base previa: 250; se retiraron ≈25 specs que probaban Cajas/Subcajas/Reservas (funciones eliminadas) y se reescribieron los de fondos/consolidado al modelo nuevo. Ningún test se desactivó para obtener verde. `tsc -b`, lint (solo warnings previos) y build: OK.
+No verificable aquí: ejecución real contra Google Sheets/Apps Script de producción (ver matriz R12).
 
 ## H. Comparación
 71 archivos tocados: +2390 / −3258 líneas netas respecto de f4170a3 (reducción neta). `Code.gs` 2972 → 3031 líneas (reglas, asignaciones y migración). Sin dependencias nuevas.
@@ -60,5 +66,5 @@ Ver `DESPLIEGUE-1.28.0.md` (respaldo → esquema → backend → retirar cajas �
 | R11 | KPIs Dashboard y excedente en tabla de gastos | Implementado y verificado | `PresupuestoConsolidado.test`, `Dashboard.test` |
 | R12 | Migración segura de Sheets | Implementado, pendiente de verificación real | `retirarCajas` simulada en tests; no ejecutada en producción |
 | R13 | Aporte Pareja se mantiene en 200 | Implementado y verificado | no hay conversión automática |
-| R14 | e2e navegación, fondos, gastos, dashboard, salud, responsive | Ver sección de resultados e2e | `web/e2e` |
+| R14 | e2e navegación, fondos, gastos, dashboard, salud, responsive | Implementado y verificado | 233/233 en `web/e2e` |
 | R15 | Despliegue / publicación / merge a main | No aplica, justificado | prohibido por el encargo |
