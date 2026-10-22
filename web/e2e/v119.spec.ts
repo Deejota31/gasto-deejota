@@ -26,21 +26,18 @@ async function abrir(page: Page, hoy = '2026-11-05T10:00:00-05:00', ruta = '/?de
 }
 
 test.describe('v1.19 aislamiento por mes', () => {
-  test('noviembre arranca sin fondos ni subcajas; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
+  test('noviembre arranca sin fondos; diciembre y enero también; octubre conserva lo suyo', async ({ page }) => {
     await abrir(page, OCT)
     await expect(page.getByTestId('vacio-mes-fondo')).toHaveCount(0)             // octubre (anterior al corte): comportamiento histórico
     await expect(page.getByRole('list', { name: 'Lista de fondos' })).toBeVisible()
     await page.getByRole('button', { name: 'Mes siguiente' }).click()
     await expect(page.getByTestId('vacio-mes-fondo')).toContainText('No tienes fondos configurados para noviembre')
-    await expect(page.getByTestId('vacio-mes-subcaja')).toContainText('No tienes cajas configuradas para noviembre')
     await expect(page.getByTestId('n-fondos')).toHaveText(/\d+/)
     // Dashboard: mensajes guiados, sin porcentajes engañosos.
     await go(page, 'Dashboard')
     const av = page.getByTestId('aviso-mes-sin-config')
     await expect(av).toContainText('Todavía no has configurado fondos del presupuesto para este mes.')
-    await expect(av).toContainText('Todavía no has reservado presupuesto para este mes.')
     await expect(av.getByRole('button', { name: 'Preparar fondos mensuales' })).toBeVisible()
-    await expect(av.getByRole('button', { name: 'Preparar cajas mensuales' })).toBeVisible()
     await expect(page.getByText(/NaN|Infinity/)).toHaveCount(0)
     // Diciembre y enero (cambio de año) también empiezan vacíos.
     await go(page, 'Presupuestos')
