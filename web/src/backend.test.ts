@@ -153,9 +153,11 @@ function load() {
   vm.runInContext(readFileSync(resolve(__dirname, '../../apps-script/Code.gs'), 'utf8'), ctx)
   const g = ctx as unknown as Record<string, (...a: unknown[]) => { body: string }> & { setup: () => void }
   const token = () => props.get('API_TOKEN')!
-  const post = (action: string, payload: unknown = {}, tk = token()) =>
-    JSON.parse(g.doPost({ postData: { contents: JSON.stringify({ token: tk, action, payload }) } }).body)
-  return { ss, props, cache, g, post, created: () => created, setLock: (v: boolean) => { lockFree = v }, folders: { microApps, root, otra } }
+  // El token de administración (S-04) se adjunta solo si existe: las pruebas que lo necesitan llaman antes a b.admin().
+  const post = (action: string, payload: unknown = {}, tk = token(), adminToken: string | null = props.get('ADMIN_TOKEN') ?? null) =>
+    JSON.parse(g.doPost({ postData: { contents: JSON.stringify({ token: tk, action, payload, adminToken }) } }).body)
+  const admin = () => (g as unknown as { crearTokenAdmin: () => string }).crearTokenAdmin()
+  return { ss, props, cache, g, post, admin, created: () => created, setLock: (v: boolean) => { lockFree = v }, folders: { microApps, root, otra } }
 }
 
 const gasto = (over: Record<string, unknown> = {}) => ({
@@ -884,7 +886,7 @@ describe('backend Apps Script', () => {
 
   describe('v1.8 fondos del presupuesto', () => {
     // Instalación anterior a v1.8: todavía no existen las hojas de fondos.
-    beforeEach(() => { b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES') })
+    beforeEach(() => { b.admin(); b.ss.sheets.delete('FONDOS_PRESUPUESTO'); b.ss.sheets.delete('FONDOS_PRESUPUESTO_MESES') })
     const fondo = (o: Record<string, unknown>) => b.post('saveFondo', { nombre: 'X', monto: 0, moneda: 'PEN', color: '#16A085', orden: 1, recurrencia: 'mensual', mes: '', ...o })
 
     it('la primera fondo crea las hojas con respaldo previo (una sola vez) sin tocar GASTOS, CAJAS ni PRESUPUESTOS', () => {
@@ -1058,10 +1060,12 @@ describe('backend Apps Script', () => {
       expect(atajo('atajoGasto', { ...ok, monto: '12,40', fecha: '' }).data.mensaje).toContain('S/ 12.40')
     })
 
-    it('token inválido repetido bloquea; revocar deshabilita', () => {
+    it('token inválido repetido bloquea SOLO a los inválidos: el atajo legítimo sigue entrando (S-03); revocar deshabilita', () => {
       ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
       for (let i = 0; i < 10; i++) expect(atajo('atajoCatalogo', {}, 'atj_malo').error.code).toBe('UNAUTHORIZED')
-      expect(atajo('atajoCatalogo', {}).error.code).toBe('LOCKED')
+      expect(atajo('atajoCatalogo', {}, 'atj_malo').error.code).toBe('LOCKED')   // el undécimo inválido ya no se procesa
+      expect(atajo('atajoCatalogo', {}).ok).toBe(true)                            // el token correcto NO queda bloqueado
+      expect(atajo('atajoGasto', ok).ok).toBe(true)
       b.cache.delete('atajo:fallos')
       expect(atajo('atajoCatalogo', {}).ok).toBe(true)
       ;(b.g as unknown as { revocarTokenAtajo: () => void }).revocarTokenAtajo()
@@ -1359,12 +1363,14 @@ describe('backend Apps Script', () => {
   })
 
   describe('v1.12 funciones de mantenimiento desde la web', () => {
+    beforeEach(() => { b.admin() })
     it('crearTokenAtajo / revocarTokenAtajo devuelven su respuesta y exigen el token de la web', () => {
       const r = b.post('crearTokenAtajo').data
       expect(r.token).toMatch(/^atj_[0-9a-f]{48}$/)
       expect(b.post('revocarTokenAtajo').data).toEqual({ revocado: true })
       expect(b.post('crearTokenAtajo', {}, 'malo').error.code).toBe('UNAUTHORIZED')
     })
+
 
     it('setup devuelve la URL de la hoja y el token; repararIds y generar/borrar datos de prueba responden sin BUSY', () => {
       const s = b.post('setup').data
@@ -2105,7 +2111,7 @@ describe('v1.26 revisión del presupuesto (backend)', () => {
 /* Contrato vigente: solo fondos y revisiones del presupuesto. */
 describe('backend: contrato actual de fondos', () => {
   let b: ReturnType<typeof load>
-  beforeEach(() => { b = load(); b.g.setup() })
+  beforeEach(() => { b = load(); b.g.setup(); b.admin() })
 
   it('entrega las colecciones actuales sin estado de migración', () => {
     const r = b.post('data', { fresh: true })
@@ -2238,7 +2244,7 @@ describe('integración web ↔ Code.gs ↔ Sheets con el perfil de producción',
 
 describe('backend: generarDatosPrueba con cantidad y período', () => {
   let b: ReturnType<typeof load>
-  beforeEach(() => { b = load(); b.g.setup() })
+  beforeEach(() => { b = load(); b.g.setup(); b.admin() })
   const filas = (n: string) => b.ss.sheets.get(n)!.rows.slice(1).filter(r => r.some(v => v !== '' && v !== undefined))
   const prueba = () => filas('GASTOS').filter(r => r[11] === 'prueba')
 
@@ -2332,5 +2338,141 @@ describe('backend: generarDatosPrueba con cantidad y período', () => {
     expect(r.ok).toBe(false)
     expect(r.error.message).toMatch(/catálogo no tiene subcategorías activas/)
     expect(prueba()).toHaveLength(0)
+  })
+})
+
+/* ============ Seguridad (auditoría 2026-10-22): S-03 atajo, S-04 administración, S-05 fórmulas ============ */
+describe('seguridad del backend', () => {
+  let b: ReturnType<typeof load>
+  beforeEach(() => { b = load(); b.g.setup() })
+  const ADMIN = ['setup', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba',
+    'migrarPlantillas', 'actualizarCatalogo', 'repararIds', 'repararHojas', 'migrarGeneralAFondo']
+  // Acciones de uso diario (no administrativas), clasificadas a propósito: una acción nueva sin clasificar rompe esta prueba.
+  const DIARIAS = ['data', 'saveGasto', 'setEstado', 'setEstadoLote', 'saveCatalogo', 'renameCatalogo', 'reorderCategorias', 'deleteCategoria',
+    'saveMedio', 'saveCaja', 'deleteCaja', 'reorderCajas', 'savePresupuesto', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',
+    'deletePlantilla', 'reorderPlantillas', 'saveGastosBatch', 'reorderGastos', 'vincularGasto', 'saveRevision', 'saveRevisionPresupuesto',
+    'saveFondo', 'saveFondoMes', 'reorderFondos', 'savePlantillaFin', 'deletePlantillaFin', 'reorderPlantillasFin', 'aplicarPlantillasFin',
+    'aplicarEntidadesMes', 'deleteFondo', 'completarVacios', 'carpetaRespaldo', 'saveCarpetaRespaldo', 'misArchivos', 'autorizarRespaldos']
+  const instantanea = () => JSON.stringify([...b.ss.sheets.entries()].map(([n, s]) => [n, s.rows]))
+
+  it('toda acción de ACTIONS está clasificada como administrativa o de uso diario', () => {
+    const src = readFileSync(resolve(__dirname, '../../apps-script/Code.gs'), 'utf8')
+    const bloque = src.slice(src.indexOf('var ACTIONS = {'), src.indexOf('\n};', src.indexOf('var ACTIONS = {')))
+    const acciones = [...bloque.matchAll(/^  (\w+):/gm)].map(m => m[1])
+    expect(acciones.length).toBeGreaterThan(40)
+    expect(acciones.filter(a => !ADMIN.includes(a) && !DIARIAS.includes(a))).toEqual([])
+    expect([...ADMIN, ...DIARIAS].filter(a => !acciones.includes(a))).toEqual([])
+  })
+
+  describe('S-04: separación de privilegios', () => {
+    it('sin token de administración creado, las acciones administrativas responden NOT_ENABLED y no tocan nada', () => {
+      const antes = instantanea()
+      for (const a of ADMIN) expect(b.post(a, {}).error?.code, a).toBe('NOT_ENABLED')
+      expect(instantanea()).toBe(antes)
+      expect(b.props.get('ATAJO_TOKEN')).toBeUndefined()
+    })
+
+    it('el token diario (solo o repetido como administrador) no basta; el atajo ni el administrador solo sirven', () => {
+      b.admin()
+      const antes = instantanea()
+      const api = b.props.get('API_TOKEN')!
+      for (const a of ADMIN) {
+        expect(b.post(a, {}, api, null).error?.code, `${a} sin adminToken`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, api, 'adm_incorrecto').error?.code, `${a} adminToken falso`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, api, api).error?.code, `${a} token diario como administrador`).toBe('ADMIN_UNAUTHORIZED')
+        expect(b.post(a, {}, 'malo', b.props.get('ADMIN_TOKEN')!).error?.code, `${a} sin token diario`).toBe('UNAUTHORIZED')
+      }
+      expect(instantanea()).toBe(antes)
+      expect(b.props.get('ATAJO_TOKEN')).toBeUndefined()
+    })
+
+    it('con ambos tokens funcionan, y las acciones de uso diario no piden el de administración', () => {
+      const adm = b.admin()
+      expect(b.post('crearTokenAtajo', {}, b.props.get('API_TOKEN')!, adm).data.token).toMatch(/^atj_/)
+      expect(b.post('revocarTokenAtajo', {}, b.props.get('API_TOKEN')!, adm).data).toEqual({ revocado: true })
+      b.props.delete('ADMIN_TOKEN')
+      expect(b.post('data', {}).ok).toBe(true)
+      expect(b.post('saveGasto', gasto()).ok).toBe(true)
+      expect(b.post('completarVacios', {}).ok).toBe(true)
+    })
+
+    it('revocarTokenAdmin las vuelve a deshabilitar y crearTokenAdmin reemplaza al anterior', () => {
+      const t1 = b.admin(), t2 = b.admin()
+      expect(t1).not.toBe(t2)
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t1).error.code).toBe('ADMIN_UNAUTHORIZED')
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).ok).toBe(true)
+      ;(b.g as unknown as { revocarTokenAdmin: () => void }).revocarTokenAdmin()
+      expect(b.post('repararIds', {}, b.props.get('API_TOKEN')!, t2).error.code).toBe('NOT_ENABLED')
+    })
+
+    it('el token de administración no aparece en ninguna respuesta de uso diario ni en la de setup', () => {
+      const adm = b.admin()
+      const respuestas = JSON.stringify([b.post('data', {}), b.post('diagnose', {}), b.post('misArchivos', {}), b.post('setup', {}, b.props.get('API_TOKEN')!, adm)])
+      expect(respuestas).not.toContain(adm)
+    })
+  })
+
+  describe('S-03: el atajo legítimo no se bloquea desde fuera pero conserva su límite por minuto', () => {
+    const atajo = (action: string, payload: unknown, token: string) =>
+      JSON.parse(b.g.doPost({ postData: { contents: JSON.stringify({ token, action, payload }) } }).body)
+    const nuevo = (n: number) => ({ clave: `atajo-20261010-${1000 + n}`, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', monto: '10', moneda: 'PEN', medioPago: 'Yape', fecha: '2026-10-10' })
+
+    it('tras un ataque de tokens inválidos, el atajo sigue registrando; el límite de 20 por minuto sigue vigente', () => {
+      const tk = (b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      for (let i = 0; i < 15; i++) atajo('atajoCatalogo', {}, 'atj_adivinando_' + i)
+      expect(atajo('atajoCatalogo', {}, 'atj_otro').error.code).toBe('LOCKED')
+      for (let i = 0; i < 20; i++) expect(atajo('atajoGasto', nuevo(i), tk).ok, `registro ${i}`).toBe(true)
+      expect(atajo('atajoGasto', nuevo(99), tk).error.code).toBe('RATE_LIMIT')       // el token válido no se salta el límite
+      expect(atajo('atajoCatalogo', {}, tk).ok).toBe(true)                            // el catálogo (solo lectura) sigue disponible
+    })
+
+    it('un token inválido nunca llega a escribir', () => {
+      ;(b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const antes = b.ss.sheets.get('GASTOS')!.rows.length
+      expect(atajo('atajoGasto', nuevo(1), 'atj_falso').error.code).toBe('UNAUTHORIZED')
+      expect(b.ss.sheets.get('GASTOS')!.rows.length).toBe(antes)
+    })
+  })
+
+  describe('S-05: ningún texto del usuario queda interpretable como fórmula', () => {
+    const HOSTILES = ['=HYPERLINK("http://malo.example","clic")', '+1+1', '-2+3', '@SUM(1)', '\t=1+1', '\r=1+1', '\n=1+1']
+    const peligrosas = () => {
+      const out: string[] = []
+      for (const [nombre, sh] of b.ss.sheets) sh.rows.forEach((r, i) => { if (i > 0) r.forEach((c, j) => { if (typeof c === 'string' && /^[=+\-@\t\r\n]/.test(c)) out.push(`${nombre}!${i + 1}:${j + 1} ${JSON.stringify(c)}`) }) })
+      return out
+    }
+
+    it('línea base: una base recién instalada no tiene celdas con aspecto de fórmula', () => {
+      expect(peligrosas()).toEqual([])
+    })
+
+    it('cada acción de escritura neutraliza los valores hostiles en todos sus campos de texto', () => {
+      const api = b.props.get('API_TOKEN')!
+      const atajoTk = (b.g as unknown as { crearTokenAtajo: () => string }).crearTokenAtajo()
+      const hex = (n: number) => String(n).padStart(12, '0')
+      let n = 0
+      for (const h of HOSTILES) {
+        n++
+        b.post('saveGasto', gasto({ id: `aaaaaaaa-0000-4000-8000-${hex(n)}`, descripcion: h, subcategoria: h, medioPago: h, ambito: h, categoria: h }))
+        b.post('saveGastosBatch', { loteId: `lote-00000000-0000-4000-8000-${hex(n)}`, gastos: [{ ...gasto({ id: `bbbbbbbb-0000-4000-8000-${hex(n)}`, descripcion: h }), mode: undefined }] })
+        b.post('saveCatalogo', { ambito: h, categoria: h, subcategoria: h, activo: true })
+        b.post('saveMedio', { nombre: h })
+        b.post('saveCaja', { nombre: h, presupuesto: 100, filtroCampo: 'Categoría', filtroValor: h, color: '#16A085', orden: 9 })
+        b.post('saveConfig', { clave: 'nota_' + n, valor: h })
+        b.post('savePlantilla', { id: `pl-aaaaaaaa-0000-4000-8000-${hex(n)}`, mode: 'create', ambito: h, categoria: h, subcategoria: h, descripcion: h, monto: '', medioPago: h })
+        b.post('savePlantillaFin', { id: `pf-aaaaaaaa-0000-4000-8000-${hex(n)}`, tipo: 'fondo', nombre: h, monto: 10, moneda: 'PEN', medios: h, recurrencia: 'mensual' })
+        b.post('saveFondo', { id: `f-${n}`, nombre: h, monto: 10, moneda: 'PEN', orden: 1, recurrencia: 'unica', mes: '2026-10', medioPago: h })
+        b.post('saveRevision', { id: `rev-00000000-0000-4000-8000-${hex(n)}`, tipo: 'duplicado', ids: [], estado: 'legitimo', firma: h })
+        b.post('saveRevisionPresupuesto', { id: `rev-00000000-0000-4000-8000-${hex(100 + n)}`, periodo: '2026-10', estado: 'completo', pendientes: h, observacion: h })
+        b.post('saveCarpetaRespaldo', { carpeta: h })
+        JSON.parse(b.g.doPost({ postData: { contents: JSON.stringify({ token: atajoTk, action: 'atajoGasto', payload: { clave: `atajo-20261010-${2000 + n}`, ambito: 'Personal', categoria: 'Alimentación', subcategoria: 'Almuerzo', monto: '1', moneda: 'PEN', medioPago: 'Yape', fecha: '2026-10-10', descripcion: h } }) } }).body)
+      }
+      void api
+      expect(peligrosas()).toEqual([])
+      // La prueba tiene que haber llegado a escribir algo (si todo se rechazara, pasaría en vacío).
+      const guardado = JSON.stringify([...b.ss.sheets.values()].map(s => s.rows))
+      expect(guardado).toContain('HYPERLINK')
+      expect(guardado).toContain("'=HYPERLINK")
+    })
   })
 })

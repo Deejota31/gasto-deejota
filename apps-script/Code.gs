@@ -606,6 +606,7 @@ function doPost(e) {
     checkToken_(body.token);
     var fn = ACTIONS[body.action];
     if (!fn) throw appError_('BAD_ACTION', 'Acción no válida: ' + body.action);
+    if (ADMIN_ACTIONS[body.action]) checkAdmin_(body.adminToken);
     if (READ_ONLY[body.action]) return fn(body.payload || {});
     if (SELF_LOCK[body.action]) { var r = fn(body.payload || {}); invalidateCache_(); return r; }
     return withLock_(function () {
@@ -642,6 +643,33 @@ function checkToken_(token) {
   var expected = PropertiesService.getScriptProperties().getProperty('API_TOKEN');
   if (!expected) throw appError_('NOT_INSTALLED', 'Ejecuta setup() en Apps Script antes de usar la app.');
   if (!igualSeguro_(token, expected)) throw appError_('UNAUTHORIZED', 'Token inválido.');
+}
+
+// Credencial de administración (S-04): las acciones de ADMIN_ACTIONS exigen, además del token de uso diario, un segundo token
+// que NO se guarda en la web (se teclea al usarlo) y que solo se crea o revoca desde el editor de Apps Script. Así, un token
+// diario filtrado no sirve para generar/borrar datos, reparar hojas ni emitir o revocar el token del atajo.
+function checkAdmin_(adminToken) {
+  var props = PropertiesService.getScriptProperties();
+  var expected = props.getProperty('ADMIN_TOKEN');
+  if (!expected) throw appError_('NOT_ENABLED', 'Las funciones de administración están deshabilitadas: ejecuta crearTokenAdmin() en el editor de Apps Script.');
+  if (!igualSeguro_(adminToken, expected) || igualSeguro_(adminToken, props.getProperty('API_TOKEN'))) {
+    throw appError_('ADMIN_UNAUTHORIZED', 'Token de administración inválido.');
+  }
+}
+
+/** Ejecútala desde el editor: crea (o reemplaza) el token de administración y lo muestra una sola vez en el registro. */
+function crearTokenAdmin() {
+  var t = 'adm_' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty('ADMIN_TOKEN', t);
+  Logger.log('Token de administración (no se guarda en la web; úsalo solo al ejecutar funciones de mantenimiento): ' + t);
+  return t;
+}
+
+/** Ejecútala desde el editor: las funciones de administración dejan de estar disponibles por la API. */
+function revocarTokenAdmin() {
+  PropertiesService.getScriptProperties().deleteProperty('ADMIN_TOKEN');
+  Logger.log('Token de administración revocado: las funciones de mantenimiento quedan deshabilitadas en la API.');
+  return { revocado: true };
 }
 
 // Zona horaria de la app: la de CONFIG (zona_horaria); si falta o no es válida, America/Lima. Se lee una vez por ejecución.
@@ -739,6 +767,10 @@ function periodo_(v, tz) {
 
 function autoVacio_(v) { v = str_(v).replace(/^'/, ''); return norm_(v) === 'auto' ? '' : v; }  // Icono 'auto' = el automático
 // Medios de un fondo: 0, 1 o varios separados por "|". 'Libre' o vacío = ninguno (fondo libre). Sin repetidos.
+// Medios de pago de un fondo o plantilla, listos para guardar. libreVacio_ quita el apóstrofo anti-fórmulas que puso text_,
+// así que el escape se vuelve a aplicar sobre el resultado (S-05).
+function mediosTexto_(v) { return safeCell_(libreVacio_(text_(v, 'Medios de pago', 400, false))); }
+
 function libreVacio_(v) {
   var vistos = {}, out = [];
   String(str_(v).replace(/^'/, '')).split('|').forEach(function (x) {
@@ -855,6 +887,10 @@ var ACTIONS = {
   repararHojas: function () { return repararHojas(); }
 };
 // Estas ya toman su propio candado (withLock_ no es reentrante): doPost no las envuelve.
+// Requieren además el token de administración (checkAdmin_). completarVacios y autorizarRespaldos no: la web llama a la primera
+// sola, una vez, y solo rellena celdas vacías; la segunda solo concede permisos de lectura de Drive.
+var ADMIN_ACTIONS = { setup: true, crearTokenAtajo: true, revocarTokenAtajo: true, generarDatosPrueba: true, generarCasosEspecialesPrueba: true,
+  borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true, migrarGeneralAFondo: true };
 var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, migrarPlantillas: true, actualizarCatalogo: true, repararIds: true, repararHojas: true };
 
 function saveGasto_(p, origen) {
@@ -1262,7 +1298,7 @@ function savePlantillaFin_(p) {
   var moneda = '', medios = '', campo = '', valor = '', recurrencia = 'mensual';
   if (tipo === 'fondo') {
     moneda = monedaPermitida_(ss, p.moneda);
-    medios = libreVacio_(text_(p.medios, 'Medios de pago', 400, false));
+    medios = mediosTexto_(p.medios);
     recurrencia = p.recurrencia === 'unica' ? 'unica' : 'mensual';
     if (origen && !(ss.getSheetByName('FONDOS_PRESUPUESTO') && findRowByValue_(ss.getSheetByName('FONDOS_PRESUPUESTO'), 1, origen))) throw appError_('NOT_FOUND', 'El fondo original ya no existe.');
   } else {
@@ -1819,11 +1855,14 @@ function igualSeguro_(a, b) {
 
 function atajo_(body) {
   var cache = CacheService.getScriptCache();
-  var fallos = Number(cache.get('atajo:fallos') || 0);
-  if (fallos >= ATAJO_MAX_FALLOS) throw appError_('LOCKED', 'Demasiados intentos con un token inválido. Espera 10 minutos.');
   var expected = PropertiesService.getScriptProperties().getProperty('ATAJO_TOKEN');
   if (!expected) throw appError_('NOT_ENABLED', 'El atajo no está habilitado: ejecuta crearTokenAtajo() en Apps Script.');
+  // El token se comprueba ANTES del bloqueo: quien manda un token inválido no puede dejar fuera al atajo legítimo (S-03).
+  // El contador solo frena a los intentos inválidos (responden LOCKED sin más trabajo); el token correcto sigue sujeto
+  // al límite por minuto de más abajo. El token tiene más de 120 bits de azar, así que adivinarlo durante un bloqueo no es viable.
   if (!igualSeguro_(body.token, expected)) {
+    var fallos = Number(cache.get('atajo:fallos') || 0);
+    if (fallos >= ATAJO_MAX_FALLOS) throw appError_('LOCKED', 'Demasiados intentos con un token inválido. Espera 10 minutos.');
     cache.put('atajo:fallos', String(fallos + 1), 600);
     throw appError_('UNAUTHORIZED', 'Token del atajo inválido.');
   }
@@ -1984,7 +2023,7 @@ function saveFondo_(p) {
   if (mes && !MES_RE.test(mes)) throw appError_('VALIDATION', 'Mes de aplicación inválido (AAAA-MM).');
   if (recurrencia === 'unica' && !mes) throw appError_('VALIDATION', 'Un fondo de un solo mes necesita su mes de aplicación.');
   var activo = p.activo === undefined ? true : p.activo === true;
-  var medio = libreVacio_(text_(p.medioPago, 'Medios de pago', 400, false)); // varios medios permitidos; el importe no se divide
+  var medio = mediosTexto_(p.medioPago); // varios medios permitidos; el importe no se divide
   if (p.tipo !== undefined && p.tipo !== '' && TIPOS_FONDO_.indexOf(str_(p.tipo)) < 0) throw appError_('VALIDATION', 'Tipo de fondo inválido (mensual, extra o ahorro asignado).');
   var h = fondosSheets_();
   var moneda = monedaPermitida_(h.ss, p.moneda);
@@ -2810,7 +2849,7 @@ function saveRevisionPresupuesto_(p) {
   var rows = revLeer_(ss);
   var previo = rows.filter(function (r) { return r[0] === id; })[0];
   if (previo) return previo;
-  var row = [id, periodo, estado, pend.replace(/^[=+\-@]/, "'$&"), obs.replace(/^[=+\-@]/, "'$&"), '', new Date().toISOString()];
+  var row = [id, periodo, estado, safeCell_(pend), safeCell_(obs), '', new Date().toISOString()];
   appendRows_(sh, [row]);
   return revLeer_(ss).filter(function (r) { return r[0] === id; })[0];
 }
@@ -3100,8 +3139,9 @@ function normalizarDescripcion_(texto) {
 // Descripción lista para guardar: normalizada y validada como cualquier texto.
 function descText_(v, required) { return text_(normalizarDescripcion_(str_(v)), 'Descripción', 200, required); }
 
-// Evita que un texto se interprete como fórmula en Sheets (inyección de fórmulas).
-function safeCell_(s) { return /^[=+\-@]/.test(s) ? "'" + s : s; }
+// ÚNICA defensa contra la inyección de fórmulas en Sheets: un texto que empieza por = + - @ (o por tabulador, salto de línea o
+// retorno de carro) se guarda con un apóstrofo delante. Solo se aplica a TEXTO que escribe el usuario; montos y fechas ya se validan.
+function safeCell_(s) { return /^[=+\-@\t\r\n]/.test(s) ? "'" + s : s; }
 
 function gastoToRow_(g, estado, origen, creado, actualizado) {
   return [g.fecha, g.monto, g.moneda, g.categoria, g.subcategoria, g.descripcion, g.medio, g.tipo,
