@@ -1,14 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CalendarDays, CalendarRange, CircleDollarSign, Copy, CreditCard, Eye, FilePlus2, Layers, LayoutGrid,
-  List, Lock, Pencil, Plus, Search, Shapes, Tag, Trash2, X,
+  AlertTriangle, ArrowDown, ArrowRight, ArrowUp, CalendarDays, CalendarRange, CircleDollarSign, Copy, CreditCard, Eye, FilePlus2, LayoutGrid,
+  Layers, List, Lock, Pencil, Search, Shapes, Trash2,
 } from 'lucide-react'
 import { aislaDesde, fondoMontoMes, type FondoResumen, type PresupuestoResumen } from '../lib/engine'
 import { monthLabel, monthsInRange, todayIn } from '../lib/dates'
 import { normName, otrosAlFinal } from '../lib/orden'
-import { fondoLook, medioLook, sortMedios } from '../lib/visual'
+import { ambitoLook, categoriaLook, fondoLook, medioLook, sortMedios } from '../lib/visual'
 import type { AppStore } from '../lib/store'
-import { TIPOS_FONDO, TIPO_FONDO_TXT, type AppData, type CatalogoItem, type Filters, type Fondo, type FondoMes, type ModoMedios, type Recurrencia, type ReglaFondo, type Ruta, type TipoCobertura, type TipoFondo } from '../lib/types'
+import { TIPOS_FONDO, TIPO_FONDO_TXT, type AppData, type Filters, type Fondo, type FondoMes, type ModoMedios, type Recurrencia, type ReglaFondo, type Ruta, type TipoCobertura, type TipoFondo } from '../lib/types'
 import { dependenciasFondo } from '../lib/dependencias'
 import {
   describirCobertura, describirMedios, explicarImputacion, imputacionesDe, reglaActual, TIPO_PARTE_TXT, validarMedioGasto, validarRegla, versionarReglas,
@@ -16,8 +16,10 @@ import {
 import { ctxReparto } from '../lib/useAgregado'
 import { unirMedios } from '../lib/fondoMedios'
 import { MenuAcciones, type AccionMenu } from './MenuAcciones'
-import { BotonEditar, Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, SelectField, Switch } from './ui'
-import { Combobox } from './Combobox'
+import { BotonEditar, Button, ErrorBox, Field, InfoTooltip, inputCls, Modal, Segmented, Switch } from './ui'
+import { Combobox, type Opcion } from './Combobox'
+import { MultiSelect } from './shared'
+import { COBERTURAS, EditorCobertura, MediosCampos } from './fondoCampos'
 import { VacioMes, type PlanificacionApi } from './Planificacion'
 import { MonthPicker } from './DatePicker'
 import { AsaOrden, AvisoOrden, CLASE_ARRASTRE, useReorden } from './reorden'
@@ -63,10 +65,10 @@ export function FondosSeccion({ store, p, filters, mes, money, periodo, hoyMes, 
   const todas = useMemo(() => todosLosFondos.map(r => r.fondo), [todosLosFondos])
   const [q, setQ] = useState('')
   const [estado, setEstado] = useState<FiltroEstado>('todas')
-  const [tipo, setTipo] = useState<'todos' | TipoFondo>('todos')
-  const [ambito, setAmbito] = useState('')
-  const [categoria, setCategoria] = useState('')
-  const [medio, setMedio] = useState('')
+  const [tipo, setTipo] = useState<string[]>([])
+  const [ambito, setAmbito] = useState<string[]>([])
+  const [categoria, setCategoria] = useState<string[]>([])
+  const [medio, setMedio] = useState<string[]>([])
   const [vista, setVistaState] = useState<Vista>(() => leerPref('deejota.vista.fondos', ['grid', 'lista'] as const, 'lista'))
   const setVista = (v: Vista) => { setVistaState(v); guardarPref('deejota.vista.fondos', v) }
   const [form, setForm] = useState<{ fondo: Fondo | null; clonDe?: Fondo | null; key: number } | null>(null)
@@ -74,17 +76,17 @@ export function FondosSeccion({ store, p, filters, mes, money, periodo, hoyMes, 
   const [desactivar, setDesactivar] = useState<FondoResumen | null>(null)
   const [detalle, setDetalle] = useState<string | null>(null)
   const term = normName(q)
-  const cubre = (r: FondoResumen, campo: 'ambito' | 'categoria', v: string) => !v || r.regla.cobertura === 'todos' || r.regla.rutas.some(ru => !ru[campo] || normName(ru[campo]) === normName(v))
-  const filtrando = !!term || estado !== 'todas' || tipo !== 'todos' || !!ambito || !!categoria || !!medio
+  const cubre = (r: FondoResumen, campo: 'ambito' | 'categoria', vs: string[]) => !vs.length || r.regla.cobertura === 'todos' || r.regla.rutas.some(ru => !ru[campo] || vs.some(v => normName(ru[campo]) === normName(v)))
+  const filtrando = !!term || estado !== 'todas' || !!tipo.length || !!ambito.length || !!categoria.length || !!medio.length
   const visibles = fondos
     .filter(r => estado === 'todas' || (estado === 'activas') === r.fondo.activo)
-    .filter(r => tipo === 'todos' || r.fondo.tipo === tipo)
+    .filter(r => !tipo.length || tipo.includes(r.fondo.tipo))
     .filter(r => cubre(r, 'ambito', ambito) && cubre(r, 'categoria', categoria))
-    .filter(r => !medio || (r.regla.medios === 'todos' || (r.regla.medios === 'solo') === r.regla.listaMedios.some(m => normName(m) === normName(medio))))
+    .filter(r => !medio.length || medio.some(md => r.regla.medios === 'todos' || (r.regla.medios === 'solo') === r.regla.listaMedios.some(m => normName(m) === normName(md))))
     .filter(r => !term || normName(`${r.fondo.nombre} ${describirCobertura(r.regla)} ${describirMedios(r.regla)}`).includes(term))
   const ids = todosLosFondos.map(r => r.fondo.id)
   const ambitos = useMemo(() => [...new Set(data.catalogo.filter(c => c.activo !== false).map(c => c.ambito))], [data.catalogo])
-  const categorias = useMemo(() => otrosAlFinal([...new Set(data.catalogo.filter(c => c.activo !== false && c.categoria && (!ambito || c.ambito === ambito)).map(c => c.categoria))].sort((a, b) => a.localeCompare(b))), [data.catalogo, ambito])
+  const categorias = useMemo(() => otrosAlFinal([...new Set(data.catalogo.filter(c => c.activo !== false && c.categoria && (!ambito.length || ambito.includes(c.ambito))).map(c => c.categoria))].sort((a, b) => a.localeCompare(b))), [data.catalogo, ambito])
 
   const abrir = (fondo: Fondo | null) => setForm({ fondo, key: Date.now() })
   const clonar = (fondo: Fondo) => setForm({ fondo: null, clonDe: fondo, key: Date.now() })
@@ -110,7 +112,7 @@ export function FondosSeccion({ store, p, filters, mes, money, periodo, hoyMes, 
     if (r.fondo.activo && (r.aporta > 0 || r.count > 0)) setDesactivar(r)
     else guardarEstado(r.fondo, !r.fondo.activo)
   }
-  const limpiar = () => { setQ(''); setEstado('todas'); setTipo('todos'); setAmbito(''); setCategoria(''); setMedio('') }
+  const limpiar = () => { setQ(''); setEstado('todas'); setTipo([]); setAmbito([]); setCategoria([]); setMedio([]) }
   const rDetalle = detalle ? todosLosFondos.find(r => r.fondo.id === detalle) ?? null : null
 
   return (
@@ -158,21 +160,13 @@ export function FondosSeccion({ store, p, filters, mes, money, periodo, hoyMes, 
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
               <input aria-label="Buscar fondo" className={`${inputCls} h-11 pl-9`} placeholder="Buscar fondo…" value={q} onChange={e => setQ(e.target.value)} />
             </label>
-            <SelectField label="Filtrar fondos por estado" value={estado} onChange={v => setEstado(v as FiltroEstado)}>
-              <option value="todas">Activos e inactivos</option><option value="activas">Activos</option><option value="inactivas">Inactivos</option>
-            </SelectField>
-            <SelectField label="Filtrar fondos por tipo" value={tipo} onChange={v => setTipo(v as typeof tipo)}>
-              <option value="todos">Todos los tipos</option>{TIPOS_FONDO.map(t => <option key={t} value={t}>{TIPO_FONDO_TXT[t]}</option>)}
-            </SelectField>
-            <SelectField label="Filtrar fondos por ámbito" value={ambito} onChange={v => { setAmbito(v); setCategoria('') }}>
-              <option value="">Todos los ámbitos</option>{ambitos.map(a => <option key={a} value={a}>{a}</option>)}
-            </SelectField>
-            <SelectField label="Filtrar fondos por categoría" value={categoria} onChange={setCategoria}>
-              <option value="">Todas las categorías</option>{categorias.map(c => <option key={c} value={c}>{c}</option>)}
-            </SelectField>
-            <SelectField label="Filtrar fondos por medio" value={medio} onChange={setMedio}>
-              <option value="">Todos los medios</option>{sortMedios(data.medios.map(m => m.nombre)).map(m => <option key={m} value={m}>{m}</option>)}
-            </SelectField>
+            <Combobox label="Filtrar fondos por estado" caption="Estado" value={estado} onChange={v => setEstado((v || 'todas') as FiltroEstado)} leading={<CircleDollarSign />}
+              options={[{ value: 'todas', label: 'Activos e inactivos' }, { value: 'activas', label: 'Activos' }, { value: 'inactivas', label: 'Inactivos' }]} />
+            <MultiSelect label="Tipo" icon={<Layers />} allLabel="Todos los tipos" value={tipo} onChange={setTipo} options={TIPOS_FONDO.map(t => ({ value: t, label: TIPO_FONDO_TXT[t] }))} />
+            <MultiSelect label="Ámbito" icon={<Layers />} allLabel="Todos los ámbitos" value={ambito} options={ambitos.map(a => ({ value: a, label: a, look: ambitoLook(a, data.catalogo) }))}
+              onChange={v => { setAmbito(v); setCategoria([]) }} />
+            <MultiSelect label="Categoría" icon={<Shapes />} allLabel="Todas las categorías" value={categoria} options={categorias.map(c => ({ value: c, label: c, look: categoriaLook(c, data.catalogo) }))} onChange={setCategoria} />
+            <MultiSelect label="Medio de pago" icon={<CreditCard />} allLabel="Todos los medios" value={medio} options={sortMedios(data.medios.map(m => m.nombre)).map(m => ({ value: m, label: m, look: medioLook(m) }))} onChange={setMedio} />
             <div className="flex items-center gap-1 justify-self-end rounded-xl bg-card p-1 ring-1 ring-line" role="radiogroup" aria-label="Vista de fondos">
               {([['grid', LayoutGrid, 'Tarjetas'], ['lista', List, 'Lista']] as const).map(([v, Icon, l]) => (
                 <button key={v} type="button" role="radio" aria-checked={vista === v} aria-label={l} title={l} onClick={() => setVista(v)}
@@ -180,6 +174,13 @@ export function FondosSeccion({ store, p, filters, mes, money, periodo, hoyMes, 
               ))}
             </div>
           </div>
+        )}
+        {filtrando && (
+          <p className="-mt-1 mb-3 flex flex-wrap items-center gap-2 px-1 text-xs text-muted" data-testid="filtros-activos">
+            <span className="rounded-full bg-primary-soft px-2 py-0.5 font-semibold text-navy">{[term, estado !== 'todas', tipo.length, ambito.length, categoria.length, medio.length].filter(Boolean).length} filtro(s) activo(s)</span>
+            Mostrando {visibles.length} de {fondos.length}
+            <button type="button" className="font-semibold text-navy underline" onClick={limpiar}>Limpiar filtros</button>
+          </p>
         )}
         {fondos.length > 1 && <p className="-mt-1 mb-3 px-1 text-[11px] text-muted">{puedeArrastrar ? 'Arrastra el asa ⠿ para reordenar: entre fondos del mismo nivel, el orden decide cuál se usa primero.' : `Orden manual: ${motivoNoArrastrar.toLowerCase()}.`}</p>}
 
@@ -489,15 +490,6 @@ function DetalleFondo({ r, data, filters, money, periodo, onClose, onEditar }: {
 
 /* ============================== Crear / editar ============================== */
 
-const COBERTURAS: { value: TipoCobertura; label: string; Icon: typeof Tag }[] = [
-  { value: 'todos', label: 'Todos los gastos', Icon: Layers }, { value: 'ambito', label: 'Por ámbito', Icon: Layers },
-  { value: 'categoria', label: 'Por categoría', Icon: Shapes }, { value: 'subcategoria', label: 'Por subcategoría', Icon: Tag }, { value: 'personalizada', label: 'Personalizada', Icon: Plus },
-]
-const MODOS: { value: ModoMedios; label: string }[] = [{ value: 'todos', label: 'Todos los medios' }, { value: 'excepto', label: 'Todos excepto…' }, { value: 'solo', label: 'Solo seleccionados' }]
-const TODOS = '__todos__'
-const rutaTxt = (ru: Ruta) => [ru.ambito || 'Todos los ámbitos', ru.categoria || 'Todas las categorías', ru.subcategoria].filter(Boolean).join(' › ')
-const mismaRuta = (a: Ruta, b: Ruta) => normName(a.ambito) === normName(b.ambito) && normName(a.categoria) === normName(b.categoria) && normName(a.subcategoria) === normName(b.subcategoria)
-
 function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, monedas, money, onClose }: {
   store: AppStore; fondo: Fondo | null; clonDe?: Fondo | null; fondos: Fondo[]; meses: FondoMes[]; mes: string | null; hoyMes: string; monedas: string[]
   money: (n: number) => string; onClose: () => void
@@ -531,7 +523,6 @@ function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, mo
   const esMesBase = !!fondo && fondo.recurrencia === 'unica' && recurrencia === 'unica' && mes === mesAplic
   const otras = fondos.filter(f => f.id !== id)
   const { Icon, color } = modoMedios === 'solo' && listaMedios.length ? medioLook(listaMedios[0]) : fondoLook({ nombre: nombre || 'Fondo', medioPago: '', icono: '', color: '' }, otras)
-  const mediosCatalogo = useMemo(() => sortMedios([...new Set([...data.medios.filter(m => m.activo).map(m => m.nombre), ...listaMedios])]), [data.medios, listaMedios])
   const regla: ReglaFondo = { desde: '', medios: modoMedios, listaMedios: modoMedios === 'todos' ? [] : listaMedios, cobertura, rutas: cobertura === 'todos' ? [] : rutas, restringeMedio: modoMedios === 'solo' && restringe }
   const errorRegla = validarRegla(regla)
   const montoNum = Number(monto.trim().replace(',', '.'))
@@ -587,190 +578,102 @@ function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, mo
   const vista = errorRegla ? null
     : `Este fondo ${tipoTxt} de ${Number.isFinite(montoNum) && monto.trim() ? money(Math.round(montoNum * 100)) : '—'} cubrirá ${cobertura === 'todos' ? 'cualquier gasto compatible' : describirCobertura(regla)}, con ${modoMedios === 'todos' ? 'todos los medios' : modoMedios === 'solo' ? `solo ${listaMedios.join(', ')}` : `todos los medios excepto ${listaMedios.join(', ')}`}.${regla.restringeMedio ? ` ${listaMedios.join(', ')} solo se podrá usar en esos gastos.` : ''}`
 
+  const periodoTxt = recurrencia === 'unica' ? `Solo ${MES_RE.test(mesAplic) ? monthLabel(mesAplic, true) : '—'}` : mesAplic ? `Todos los meses desde ${monthLabel(mesAplic, true)}` : 'Todos los meses'
+  const opcionesTipo: Opcion[] = TIPOS_FONDO.map(t => ({ value: t, label: TIPO_FONDO_TXT[t], Icon: t === 'mensual' ? CalendarDays : t === 'extra' ? CalendarRange : Lock }))
+  const mediosActivos = useMemo(() => data.medios.filter(m => m.activo).map(m => m.nombre), [data.medios])
+
   return (
     <Modal open onClose={onClose} size="lg" title={editar ? `Editar ${fondo!.nombre}` : clonDe ? `Clonar ${clonDe.nombre}` : 'Nuevo fondo'} icon={<CircleDollarSign className="size-5" />}
       subtitle="Presupuesto asignado que suma a tu presupuesto consolidado. No crea gastos ni ingresos contables."
       footer={<><Button variant="outline" onClick={onClose}>Cancelar</Button><Button onClick={save}>{editar ? 'Guardar cambios' : clonDe ? 'Crear copia' : 'Crear fondo'}</Button></>}>
-      <form className="space-y-5" noValidate onSubmit={e => { e.preventDefault(); save() }} data-testid="form-fondo">
-        <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
-          <span className="grid size-11 place-items-center rounded-2xl bg-card" style={{ color }}><Icon className="size-5" /></span>
-          <div className="min-w-0"><p className="truncate text-sm font-semibold">{nombre.trim() || 'Nuevo fondo'}</p>
-            <p className="truncate text-[11px] text-muted">{recurrencia === 'unica' ? `Solo ${MES_RE.test(mesAplic) ? monthLabel(mesAplic, true) : '—'}` : mesAplic ? `Todos los meses desde ${monthLabel(mesAplic, true)}` : 'Todos los meses'}</p></div>
-        </div>
+      <form className="space-y-4" noValidate onSubmit={e => { e.preventDefault(); save() }} data-testid="form-fondo">
         {clonDe && (
           <ErrorBox tone="warning" message={activo
             ? `Al crearlo, esta copia sumará ${money(Math.round((montoNum || 0) * 100))} al presupuesto consolidado (dinero adicional). Revisa el importe o déjalo inactivo.`
             : `Es una copia de “${clonDe.nombre}”: no copia gastos ni importes por mes y nace inactiva, así que no suma dinero al presupuesto hasta que la actives.`} />
         )}
 
-        <Seccion n="A" titulo="Información del fondo">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Nombre del fondo" error={errors.nombre} htmlFor="fondo-nombre">
             <input id="fondo-nombre" className={inputCls} maxLength={40} placeholder="Ej. Auto, Bebé, Viaje a Ica" value={nombre} onChange={e => setNombre(e.target.value)} />
           </Field>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
-            <Field label={editar && !esMesBase ? (mes ? `Importe de ${monthLabel(mes, true)}` : 'Importe') : 'Importe'} error={errors.monto} htmlFor="fondo-monto"
-              hint={editar && !esMesBase ? (mes ? 'Solo cambia el mes elegido (o desde ese mes); los meses anteriores no se tocan.' : 'Elige un único mes en el período para cambiar un importe.') : undefined}>
-              <input id="fondo-monto" className={`${inputCls} tabular h-11 text-base font-semibold`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
-            </Field>
-            <Field label="Moneda" error={errors.moneda} htmlFor="fondo-moneda">
-              <Combobox id="fondo-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={monedas.map(x => ({ value: x, label: x }))} />
-            </Field>
-          </div>
-          {editar && mes && !esMesBase && recurrencia === 'mensual' && (
-            <Segmented label="Aplicar el importe" value={modo} onChange={setModo}
-              options={[{ value: 'solo', label: `Solo ${monthLabel(mes, true)}` }, { value: 'desde', label: `Desde ${monthLabel(mes, true)} en adelante` }]} />
-          )}
-          {tieneSolo && <button type="button" className="text-xs font-semibold text-navy underline" onClick={quitarAjuste}>Quitar el ajuste de {monthLabel(mes!, true)} (vuelve al importe habitual)</button>}
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">Tipo de fondo</p>
-            <Segmented label="Tipo de fondo" value={tipo} onChange={v => { setTipo(v); setTipoElegido(true) }} options={TIPOS_FONDO.map(t => ({ value: t, label: TIPO_FONDO_TXT[t] }))} />
-            <p className="mt-1 text-[11px] text-muted" data-testid="fondo-tipo-ayuda">{TIPO_FONDO_AYUDA[tipo]}</p>
-          </div>
-          <div className="rounded-xl border border-line p-3">
-            <Switch checked={activo} onChange={setActivo} label="Fondo activo" />
-            <p className="mt-1 text-[11px] text-muted">Inactivo: queda guardado pero no suma al presupuesto ni recibe gastos.</p>
-          </div>
-        </Seccion>
+          <Field label="Tipo de fondo" htmlFor="fondo-tipo">
+            <Combobox id="fondo-tipo" label="Tipo de fondo" value={tipo} onChange={v => { setTipo(v as TipoFondo); setTipoElegido(true) }} options={opcionesTipo} />
+          </Field>
+        </div>
+        <p className="-mt-2 text-[11px] text-muted" data-testid="fondo-tipo-ayuda">{TIPO_FONDO_AYUDA[tipo]}</p>
 
-        <Seccion n="B" titulo="Periodo">
-          <Segmented label="Recurrencia" value={recurrencia} onChange={v => { setRecurrencia(v); if (v === 'unica' && !mesAplic) setMesAplic(mesRef); if (!tipoElegido) setTipo(v === 'unica' ? 'extra' : 'mensual') }}
-            options={[{ value: 'mensual', label: 'Todos los meses' }, { value: 'unica', label: 'Solo un mes' }]} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={editar && !esMesBase ? (mes ? `Importe de ${monthLabel(mes, true)}` : 'Importe') : 'Importe'} error={errors.monto} htmlFor="fondo-monto"
+            hint={editar && !esMesBase ? (mes ? 'Solo cambia el mes elegido (o desde ese mes); los meses anteriores no se tocan.' : 'Elige un único mes en el período para cambiar un importe.') : undefined}>
+            <input id="fondo-monto" className={`${inputCls} tabular h-11 text-base font-semibold`} inputMode="decimal" placeholder="0.00" value={monto} onChange={e => setMonto(e.target.value.replace(/[^\d.,]/g, ''))} />
+          </Field>
+          <Field label="Moneda" error={errors.moneda} htmlFor="fondo-moneda">
+            <Combobox id="fondo-moneda" label="Moneda" value={moneda} onChange={setMoneda} options={monedas.map(x => ({ value: x, label: x }))} />
+          </Field>
+        </div>
+        {editar && mes && !esMesBase && recurrencia === 'mensual' && (
+          <Segmented label="Aplicar el importe" value={modo} onChange={setModo}
+            options={[{ value: 'solo', label: `Solo ${monthLabel(mes, true)}` }, { value: 'desde', label: `Desde ${monthLabel(mes, true)} en adelante` }]} />
+        )}
+        {tieneSolo && <button type="button" className="text-xs font-semibold text-navy underline" onClick={quitarAjuste}>Quitar el ajuste de {monthLabel(mes!, true)} (vuelve al importe habitual)</button>}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Periodo" htmlFor="fondo-recurrencia">
+            <Combobox id="fondo-recurrencia" label="Periodo del fondo" value={recurrencia}
+              onChange={v => { const r = v as Recurrencia; setRecurrencia(r); if (r === 'unica' && !mesAplic) setMesAplic(mesRef); if (!tipoElegido) setTipo(r === 'unica' ? 'extra' : 'mensual') }}
+              options={[{ value: 'mensual', label: 'Todos los meses', Icon: CalendarDays }, { value: 'unica', label: 'Solo un mes', Icon: CalendarRange }]} />
+          </Field>
           <Field label={recurrencia === 'unica' ? 'Mes de aplicación' : 'Vigencia desde'} error={errors.mes} htmlFor="fondo-mes"
-            hint={recurrencia === 'mensual' && !mesAplic ? 'Sin mes: rige en todos los meses, también los anteriores.' : recurrencia === 'unica' ? 'Ideal para un ingreso o gasto extraordinario: no se arrastra a otros meses.' : undefined}>
+            hint={recurrencia === 'mensual' && !mesAplic ? 'Sin mes: rige en todos los meses, también los anteriores.' : recurrencia === 'unica' ? 'No se arrastra a otros meses.' : undefined}>
             <span className="flex items-center gap-2">
               <span className="min-w-0 flex-1"><MonthPicker id="fondo-mes" label="Mes de aplicación" value={mesAplic} invalid={!!errors.mes} onChange={setMesAplic} /></span>
               {recurrencia === 'mensual' && mesAplic && <button type="button" className="shrink-0 text-xs text-muted underline" onClick={() => setMesAplic('')}>Todos</button>}
             </span>
           </Field>
-        </Seccion>
+        </div>
 
-        <Seccion n="C" titulo="Medios de pago">
-          <Segmented label="Medios de pago del fondo" value={modoMedios} onChange={v => { setModoMedios(v); if (v !== 'solo') setRestringe(false) }} options={MODOS} />
-          {modoMedios !== 'todos' && (
-            <div className="space-y-2">
-              <ul className="flex flex-wrap gap-1.5" aria-label="Medios elegidos" data-testid="fondo-medios-elegidos">
-                {!listaMedios.length && <li className="rounded-full border border-dashed border-line px-2.5 py-1 text-xs text-muted">{modoMedios === 'solo' ? 'Elige los medios permitidos' : 'Elige los medios a excluir'}</li>}
-                {listaMedios.map(m => { const l = medioLook(m); return (
-                  <li key={m} className="flex items-center gap-1.5 rounded-full py-1 pr-1 pl-2 text-xs font-medium" style={{ background: `${l.color}1A`, color: l.color }}>
-                    <l.Icon className="size-3.5" />{m}
-                    <button type="button" aria-label={`Quitar ${m}`} onClick={() => setListaMedios(xs => xs.filter(x => x !== m))} className="grid size-5 place-items-center rounded-full hover:bg-black/10"><X className="size-3" /></button>
-                  </li>) })}
-              </ul>
-              <Combobox id="fondo-medio" label="Agregar medio de pago" value="" onChange={v => setListaMedios(xs => xs.some(x => normName(x) === normName(v)) ? xs : [...xs, v])} placeholder="Agregar medio de pago…"
-                options={mediosCatalogo.filter(m => !listaMedios.some(e => normName(e) === normName(m))).map(x => { const l = medioLook(x); return { value: x, label: x, Icon: l.Icon, color: l.color } })} vacio="No hay más medios." />
-            </div>
-          )}
+        <MediosCampos medios={mediosActivos} modo={modoMedios} onModo={v => { setModoMedios(v); if (v !== 'solo') setRestringe(false) }} lista={listaMedios} onLista={setListaMedios} invalid={!!errors.reglas} />
+
+        <div className="space-y-2">
+          <Field label="¿Qué gastos cubre este fondo?" htmlFor="fondo-cobertura">
+            <Combobox id="fondo-cobertura" label="Cobertura del fondo" value={cobertura} onChange={v => { setCobertura(v as TipoCobertura); setRutas([]) }} options={COBERTURAS} />
+          </Field>
+          {cobertura === 'todos'
+            ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted" data-testid="cobertura-todos">Este fondo puede utilizarse para cualquier gasto compatible.</p>
+            : <EditorCobertura key={cobertura} tipo={cobertura} rutas={rutas} onRutas={setRutas} catalogo={data.catalogo} />}
+        </div>
+
+        {errors.reglas && <ErrorBox message={errors.reglas} />}
+        <div className="grid items-stretch gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+          <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-card" style={{ color }}><Icon className="size-5" /></span>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold">{nombre.trim() || 'Nuevo fondo'}</p><p className="truncate text-[11px] text-muted">{periodoTxt}</p></div>
+          </div>
+          <div className="rounded-2xl border border-line bg-bg/60 p-3 text-xs" data-testid="vista-previa-fondo">
+            <p className="mb-0.5 font-semibold text-ink">Vista previa</p>
+            <p className="text-muted">{vista ?? errorRegla}</p>
+            {editar && JSON.stringify(reglaActual(fondo!)) !== JSON.stringify({ ...regla, desde: reglaActual(fondo!).desde }) && (
+              <p className="mt-1 text-muted">Las nuevas reglas rigen desde {monthLabel(hoyMes, true)}; los meses anteriores conservan las suyas.</p>
+            )}
+          </div>
+        </div>
+
+        <div className={`grid gap-3 ${modoMedios === 'solo' ? 'sm:grid-cols-2' : ''}`}>
+          <div className="rounded-xl border border-line p-3">
+            <Switch checked={activo} onChange={setActivo} label="Fondo activo" />
+            <p className="mt-1 text-[11px] text-muted">Inactivo: queda guardado pero no suma al presupuesto ni recibe gastos.</p>
+          </div>
           {modoMedios === 'solo' && (
             <div className="rounded-xl border border-line p-3">
               <Switch checked={restringe} onChange={setRestringe} label="Restringir el uso de estos medios a lo que cubre este fondo" />
-              <p className="mt-1 text-[11px] text-muted">Activado: un gasto con {listaMedios.join(', ') || 'estos medios'} fuera de la cobertura de este fondo no se podrá guardar. Lo decides tú: la app no tiene reglas fijas por medio ni por categoría.</p>
+              <p className="mt-1 text-[11px] text-muted">Activado: un gasto con {listaMedios.join(', ') || 'estos medios'} fuera de la cobertura de este fondo no se podrá guardar.</p>
               {afectados > 0 && <p className="mt-1 text-[11px] font-medium text-warning" data-testid="restriccion-afectados">{afectados} gasto(s) de este mes ya usan ese medio fuera de la cobertura: no se modifican, quedarán marcados para revisión.</p>}
             </div>
-          )}
-        </Seccion>
-
-        <Seccion n="D" titulo="¿Qué gastos cubre este fondo?">
-          <Segmented label="Cobertura del fondo" value={cobertura} onChange={v => { setCobertura(v); setRutas([]) }} options={COBERTURAS.map(c => ({ value: c.value, label: c.label }))} />
-          {cobertura === 'todos'
-            ? <p className="rounded-xl bg-bg px-3 py-2 text-xs text-muted" data-testid="cobertura-todos">Este fondo puede utilizarse para cualquier gasto compatible.</p>
-            : <EditorCobertura tipo={cobertura} rutas={rutas} onRutas={setRutas} catalogo={data.catalogo} />}
-        </Seccion>
-
-        {errors.reglas && <ErrorBox message={errors.reglas} />}
-        <div className="rounded-2xl border border-line bg-bg/60 p-3 text-xs" data-testid="vista-previa-fondo">
-          <p className="mb-0.5 font-semibold text-ink">Vista previa</p>
-          <p className="text-muted">{vista ?? errorRegla}</p>
-          {editar && JSON.stringify(reglaActual(fondo!)) !== JSON.stringify({ ...regla, desde: reglaActual(fondo!).desde }) && (
-            <p className="mt-1 text-muted">Las nuevas reglas rigen desde {monthLabel(hoyMes, true)}; los meses anteriores conservan las suyas.</p>
           )}
         </div>
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </Modal>
-  )
-}
-
-function Seccion({ n, titulo, children }: { n: string; titulo: string; children: ReactNode }) {
-  return (
-    <fieldset className="space-y-3">
-      <legend className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink"><span className="grid size-6 place-items-center rounded-lg bg-primary-soft text-[11px] font-bold text-navy">{n}</span>{titulo}</legend>
-      {children}
-    </fieldset>
-  )
-}
-
-/** Editor jerárquico de cobertura. Las opciones salen del catálogo vigente; las rutas guardadas que ya no existan se conservan. */
-function EditorCobertura({ tipo, rutas, onRutas, catalogo }: { tipo: Exclude<TipoCobertura, 'todos'>; rutas: Ruta[]; onRutas: (r: Ruta[]) => void; catalogo: CatalogoItem[] }) {
-  const vig = useMemo(() => catalogo.filter(c => c.activo !== false), [catalogo])
-  const ambitos = useMemo(() => [...new Set(vig.map(c => c.ambito))], [vig])
-  const [amb, setAmb] = useState(tipo === 'ambito' ? '' : (rutas[0]?.ambito ?? ambitos[0] ?? ''))
-  const [cat, setCat] = useState(rutas[0]?.categoria ?? '')
-  const [sub, setSub] = useState('')
-  const cats = useMemo(() => otrosAlFinal([...new Set(vig.filter(c => c.categoria && (!amb || amb === TODOS || c.ambito === amb)).map(c => c.categoria))].sort((a, b) => a.localeCompare(b))), [vig, amb])
-  const subs = useMemo(() => otrosAlFinal([...new Set(vig.filter(c => c.subcategoria && c.categoria === cat && (!amb || amb === TODOS || c.ambito === amb)).map(c => c.subcategoria))].sort((a, b) => a.localeCompare(b))), [vig, amb, cat])
-  const ambRuta = amb === TODOS ? '' : amb
-  const tiene = (ru: Ruta) => rutas.some(x => mismaRuta(x, ru))
-  const alternar = (ru: Ruta) => onRutas(tiene(ru) ? rutas.filter(x => !mismaRuta(x, ru)) : [...rutas, ru])
-  const fichas = (opciones: string[], ruta: (v: string) => Ruta, etiqueta: string) => (
-    <div role="group" aria-label={etiqueta} className="flex flex-wrap gap-1.5" data-testid="opciones-cobertura">
-      {opciones.map(o => { const ru = ruta(o), on = tiene(ru); return (
-        <button key={o} type="button" aria-pressed={on} onClick={() => alternar(ru)}
-          className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${on ? 'border-navy bg-primary-soft text-navy' : 'border-line text-muted hover:bg-bg'}`}>{o}</button>) })}
-      {!opciones.length && <p className="text-xs text-muted">Sin opciones activas en el catálogo para esta selección.</p>}
-    </div>
-  )
-  const selAmbito = (conTodos: boolean) => (
-    <Field label="Ámbito" htmlFor="cob-ambito">
-      <SelectField id="cob-ambito" label="Ámbito" value={amb} onChange={v => { setAmb(v); setCat(''); setSub('') }}>
-        {conTodos && <option value={TODOS}>Todos los ámbitos</option>}{ambitos.map(a => <option key={a} value={a}>{a}</option>)}
-      </SelectField>
-    </Field>
-  )
-  return (
-    <div className="space-y-3 rounded-xl border border-line p-3" data-testid="editor-cobertura">
-      {tipo === 'ambito' && fichas(ambitos, a => ({ ambito: a, categoria: '', subcategoria: '' }), 'Ámbitos')}
-      {tipo === 'categoria' && <>
-        {selAmbito(true)}
-        <p className="text-[11px] text-muted">{amb === TODOS ? 'Con “Todos los ámbitos” la categoría cuenta en cada ámbito donde exista con ese nombre.' : 'Elige las categorías de este ámbito; puedes cambiar de ámbito y seguir agregando.'}</p>
-        {fichas(cats, c => ({ ambito: ambRuta, categoria: c, subcategoria: '' }), 'Categorías')}
-      </>}
-      {tipo === 'subcategoria' && <>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {selAmbito(true)}
-          <Field label="Categoría" htmlFor="cob-cat">
-            <SelectField id="cob-cat" label="Categoría" value={cat} onChange={v => { setCat(v); setSub('') }}>
-              <option value="">Elige una categoría…</option>{cats.map(c => <option key={c} value={c}>{c}</option>)}
-            </SelectField>
-          </Field>
-        </div>
-        {cat ? fichas(subs, s => ({ ambito: ambRuta, categoria: cat, subcategoria: s }), 'Subcategorías') : <p className="text-xs text-muted">Elige una categoría para ver sus subcategorías.</p>}
-      </>}
-      {tipo === 'personalizada' && <>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {selAmbito(true)}
-          <Field label="Categoría" htmlFor="cob-cat">
-            <SelectField id="cob-cat" label="Categoría" value={cat} onChange={v => { setCat(v); setSub('') }}>
-              <option value="">Todas las categorías</option>{cats.map(c => <option key={c} value={c}>{c}</option>)}
-            </SelectField>
-          </Field>
-          <Field label="Subcategoría" htmlFor="cob-sub">
-            <SelectField id="cob-sub" label="Subcategoría" value={sub} onChange={setSub}>
-              <option value="">Todas las subcategorías</option>{subs.map(s => <option key={s} value={s}>{s}</option>)}
-            </SelectField>
-          </Field>
-        </div>
-        <Button type="button" variant="soft" className="h-9 text-xs" disabled={(!ambRuta && !cat) || tiene({ ambito: ambRuta, categoria: cat, subcategoria: cat ? sub : '' })}
-          onClick={() => onRutas([...rutas, { ambito: ambRuta, categoria: cat, subcategoria: cat ? sub : '' }])}><Plus className="size-3.5" /> Agregar ruta</Button>
-      </>}
-      <ul className="flex flex-wrap gap-1.5" aria-label="Cobertura elegida" data-testid="rutas-elegidas">
-        {!rutas.length && <li className="text-xs text-muted">Aún no elegiste qué gastos cubre.</li>}
-        {rutas.map(ru => (
-          <li key={rutaTxt(ru)} className="flex items-center gap-1 rounded-full bg-bg py-1 pr-1 pl-2.5 text-xs text-ink ring-1 ring-line">
-            {rutaTxt(ru)}
-            <button type="button" aria-label={`Quitar ${rutaTxt(ru)}`} onClick={() => onRutas(rutas.filter(x => !mismaRuta(x, ru)))} className="grid size-5 place-items-center rounded-full hover:bg-black/10"><X className="size-3" /></button>
-          </li>
-        ))}
-      </ul>
-    </div>
   )
 }

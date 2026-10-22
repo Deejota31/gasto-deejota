@@ -7,7 +7,7 @@ import { ambitoLook, categoriaLook, medioLook, sortMedios, subcategoriaLook, typ
 import type { CatalogoItem, Filters, PeriodPreset } from '../lib/types'
 import { normName, otrosAlFinal } from '../lib/orden'
 import { TIPOS_GASTO } from '../lib/types'
-import { Checkbox, inputCls } from './ui'
+import { Checkbox, controlCls, inputCls } from './ui'
 import { Calendario } from './DatePicker'
 import { usePopover } from './Combobox'
 
@@ -62,9 +62,13 @@ export interface Option { value: string; label: string; group?: string; groupLoo
  * Selector múltiple con búsqueda, iconos y colores del catálogo, y casillas. Sin selección = todas.
  * El panel se pinta fuera del contenedor (nunca se corta ni se sale de la pantalla) y se maneja con teclado.
  */
-export function MultiSelect({ label, icon, options, value, onChange, allLabel }: {
-  label: string; icon: ReactNode; options: Option[]; value: string[]; onChange: (v: string[]) => void; allLabel: string
+export function MultiSelect({ label, icon, options, value, onChange, allLabel, variant = 'filtro', placeholder, id, invalid }: {
+  label: string; icon?: ReactNode; options: Option[]; value: string[]; onChange: (v: string[]) => void; allLabel?: string
+  /** `filtro`: sin selección = todas (barra de filtros). `campo`: campo de formulario; vacío = nada elegido (se muestra `placeholder`). */
+  variant?: 'filtro' | 'campo'; placeholder?: string; id?: string; invalid?: boolean
 }) {
+  const campo = variant === 'campo'
+  const todas = allLabel ?? 'Todas'
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const btn = useRef<HTMLButtonElement>(null)
@@ -82,7 +86,7 @@ export function MultiSelect({ label, icon, options, value, onChange, allLabel }:
   const groups = [...new Set(shown.map(o => o.group ?? ''))]
   const toggle = (v: string) => onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v])
   const first = value[0] ? options.find(o => o.value === value[0]) : undefined
-  const summary = !value.length ? allLabel : value.length === 1 ? (first?.label ?? value[0]) : `${value.length} seleccionadas`
+  const summary = !value.length ? (campo ? (placeholder ?? 'Elige…') : todas) : value.length === 1 ? (first?.label ?? value[0]) : `${value.length} seleccionadas`
   const SummaryIcon = value.length === 1 ? first?.look?.Icon : undefined
   // ↑ ↓ mueven el foco entre las casillas del panel.
   const onKey = (e: React.KeyboardEvent) => {
@@ -97,6 +101,15 @@ export function MultiSelect({ label, icon, options, value, onChange, allLabel }:
 
   return (
     <div className="relative">
+      {campo ? (
+        <button ref={btn} id={id} type="button" role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={label} aria-invalid={invalid || undefined} onClick={() => (open ? close(false) : setOpen(true))}
+          className={`${controlCls} flex items-center gap-2 pr-9 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`} style={{ position: 'relative' }}>
+          {SummaryIcon && <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: first?.look ? `${first.look.color}1F` : undefined, color: first?.look?.color }}><SummaryIcon className="size-3.5" /></span>}
+          <span className={`min-w-0 flex-1 truncate ${value.length ? '' : 'text-muted/80'}`} title={summary}>{summary}</span>
+          {value.length > 1 && <span className="shrink-0 rounded-full bg-primary-soft px-1.5 text-[11px] font-semibold text-navy">{value.length}</span>}
+          <ChevronDown aria-hidden className={`pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted transition ${open ? 'rotate-180 text-navy' : ''}`} />
+        </button>
+      ) : (
       <button ref={btn} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => (open ? close(false) : setOpen(true))}
         className={`flex h-10 w-full items-center gap-2 rounded-xl border px-3 text-left text-sm transition ${value.length ? 'border-navy/40 bg-primary-soft text-navy' : 'border-line bg-card text-ink hover:border-navy/30'}`}>
         <span className="shrink-0 text-muted [&>svg]:size-4">{SummaryIcon ? <SummaryIcon style={{ color: first?.look?.color }} /> : icon}</span>
@@ -106,6 +119,7 @@ export function MultiSelect({ label, icon, options, value, onChange, allLabel }:
         </span>
         <ChevronDown className={`size-4 shrink-0 text-muted transition ${open ? 'rotate-180' : ''}`} />
       </button>
+      )}
       {open && pos && createPortal(
         <div ref={panel} onKeyDown={onKey}
           style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
@@ -120,10 +134,14 @@ export function MultiSelect({ label, icon, options, value, onChange, allLabel }:
               <input autoFocus data-buscar aria-label={`Buscar ${label.toLowerCase()}`} className={`${inputCls} pl-8`} placeholder="Buscar…" value={q} onChange={e => setQ(e.target.value)} />
             </label>
           )}
-          <label className={`mb-1 flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition ${!value.length ? 'bg-primary-soft text-navy' : 'hover:bg-bg'}`}>
-            <Checkbox label={allLabel} checked={!value.length} onChange={() => onChange([])} />
-            {allLabel}
-          </label>
+          {campo
+            ? value.length > 0 && <button type="button" className="mb-1 self-start rounded-lg px-2 py-1 text-xs font-semibold text-navy hover:bg-bg" onClick={() => onChange([])}>Limpiar selección</button>
+            : (
+              <label className={`mb-1 flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition ${!value.length ? 'bg-primary-soft text-navy' : 'hover:bg-bg'}`}>
+                <Checkbox label={todas} checked={!value.length} onChange={() => onChange([])} />
+                {todas}
+              </label>
+            )}
           <div role="listbox" aria-multiselectable="true" aria-label={label} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {!shown.length && <p className="px-2 py-4 text-center text-xs text-muted">Sin resultados.</p>}
             {groups.map(gname => {
@@ -151,7 +169,7 @@ export function MultiSelect({ label, icon, options, value, onChange, allLabel }:
               )
             })}
           </div>
-          <p className="px-2 pt-2 text-[11px] text-muted">Sin selección se muestran todas.</p>
+          {!campo && <p className="px-2 pt-2 text-[11px] text-muted">Sin selección se muestran todas.</p>}
         </div>, host())}
     </div>
   )

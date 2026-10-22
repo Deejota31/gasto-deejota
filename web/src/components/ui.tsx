@@ -1,6 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentType, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, CalendarDays, ChevronDown, Info, Loader2, Pencil, Plus, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Info, Loader2, Pencil, Plus, X } from 'lucide-react'
 import { DatePicker } from './DatePicker'
 import { useModalLayer } from '../lib/toast'
 import Toaster from './Toaster'
@@ -162,18 +162,6 @@ export function DateField(props: {
   return <DatePicker {...props} />
 }
 
-export function SelectField({ id, value, onChange, children, label, invalid }: {
-  id?: string; value: string; onChange: (v: string) => void; children: ReactNode; label?: string; invalid?: boolean
-}) {
-  return (
-    <div className="relative">
-      <select id={id} aria-label={label} value={value} onChange={e => onChange(e.target.value)} aria-invalid={invalid || undefined}
-        className={`${controlCls} appearance-none pr-10 ${invalid ? 'border-danger' : ''}`}>{children}</select>
-      <ChevronDown aria-hidden className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted" />
-    </div>
-  )
-}
-
 /**
  * Casilla de selección múltiple (no es un interruptor: los interruptores activan/desactivan, las casillas seleccionan).
  * Un solo diseño para listas, filtros y plantillas; `color` tiñe el estado marcado con el color del catálogo.
@@ -199,6 +187,22 @@ export function Switch({ checked, onChange, label, compact, disabled, title, est
       </span>
       {estado ? <span className={`w-6 text-left text-[11px] font-bold ${checked ? 'text-navy' : 'text-muted'}`} aria-hidden>{checked ? 'ON' : 'OFF'}</span> : !compact && label}
     </button>
+  )
+}
+
+/** Etiqueta compacta (medios elegidos, rutas de cobertura, filtros activos). Con `onRemove` lleva una × accesible. Un solo diseño para todos los módulos. */
+export function Chip({ label, Icon, color, onRemove, removeLabel, title }: {
+  label: string; Icon?: ComponentType<{ className?: string }>; color?: string; onRemove?: () => void; removeLabel?: string; title?: string
+}) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full py-1 pl-2.5 text-xs font-medium ring-1 ring-line" title={title ?? label}
+      style={color ? { background: `${color}1A`, color, boxShadow: `inset 0 0 0 1px ${color}33` } : { background: 'var(--bg)', color: 'var(--ink)' }}>
+      {Icon && <Icon className="size-3.5 shrink-0" />}
+      <span className="truncate">{label}</span>
+      {onRemove
+        ? <button type="button" aria-label={removeLabel ?? `Quitar ${label}`} onClick={onRemove} className="mr-1 grid size-5 shrink-0 place-items-center rounded-full hover:bg-black/10"><X className="size-3" /></button>
+        : <span className="pr-1.5" />}
+    </span>
   )
 }
 

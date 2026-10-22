@@ -1,5 +1,5 @@
 import { daysInMonth, monthEnd, monthsInRange, shiftMonth } from './dates'
-import { matchesDims, subKey, type Aggregates, type FondoResumen } from './engine'
+import { matchesDims, subKey, type FondoResumen } from './engine'
 import { elegibles } from './presupuesto'
 import { toBaseCents } from './money'
 import { normName } from './orden'
@@ -316,28 +316,7 @@ export function estadoCompromiso(i: CompromisoItem): EstadoCompromiso {
   return i.aplicado > 0 ? 'parcial' : 'pendiente'
 }
 
-/* ============================== Mi presupuesto ============================== */
-
-export type NivelPresupuesto = 'sin-presupuesto' | 'ok' | 'atencion' | 'cerca' | 'excedido'
-export function nivelPresupuesto(pct: number | null): NivelPresupuesto {
-  if (pct === null) return 'sin-presupuesto'
-  return pct >= 100 ? 'excedido' : pct >= 90 ? 'cerca' : pct >= 70 ? 'atencion' : 'ok'
-}
-
-export interface MiPresupuesto {
-  presupuesto: number
-  gastado: number
-  pendiente: number
-  disponible: number                 // presupuesto − gastado
-  disponibleTrasCompromisos: number  // presupuesto − gastado − compromisos pendientes
-  pctUsado: number | null
-  pctComprometido: number | null     // compromisos pendientes / presupuesto
-  nivel: NivelPresupuesto
-  /** Fondos aplicados del período con lo que les queda tras los compromisos pendientes que les tocarían. */
-  fondos: { fondo: Fondo; asignado: number; gastado: number; pendiente: number; disponibleTrasCompromisos: number; pct: number | null; nivel: NivelPresupuesto }[]
-}
-
-const pct1 = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null)
+/* ============================== Compromisos y fondos ============================== */
 
 /**
  * Fondo que cubriría un compromiso (su clasificación y medio predeterminado), con las mismas reglas del motor de Presupuestos:
@@ -346,27 +325,6 @@ const pct1 = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 
 export function fondoDeCompromiso(p: Pick<Plantilla, 'ambito' | 'categoria' | 'subcategoria' | 'medioPago'>, fondos: FondoResumen[], mes: string): Fondo | null {
   const vivos = new Set(fondos.filter(r => r.fondo.activo && r.aplicada).map(r => r.fondo.id))
   return elegibles(p, mes, fondos.map(r => r.fondo), f => vivos.has(f.id))[0]?.f ?? null
-}
-
-/**
- * Reutiliza el resultado del motor (fondos con ajustes mensuales). Un pago de compromiso sube "gastado" y baja "pendiente" en lo
- * mismo: el disponible tras compromisos no se descuenta dos veces. Cada compromiso pendiente se cuenta en UN fondo (el que lo cubriría).
- */
-export function calcularPresupuesto(a: Aggregates, comp: Compromisos, mes: string): MiPresupuesto {
-  const P = a.presupuesto.presupuesto
-  const gastado = a.totalPeriodo
-  const pendiente = comp.pendiente
-  const pctUsado = pct1(gastado, P)
-  const dueño = new Map(comp.items.map(i => [i.plantilla.id, fondoDeCompromiso(i.plantilla, a.presupuesto.fondos, mes)?.id]))
-  const fondos = a.presupuesto.fondos.filter(r => r.fondo.activo && r.aplicada && r.aporta > 0).map(r => {
-    const pend = comp.items.filter(i => dueño.get(i.plantilla.id) === r.fondo.id).reduce((x, i) => x + i.pendiente, 0)
-    const pct = pct1(r.gastado, r.aporta)
-    return { fondo: r.fondo, asignado: r.aporta, gastado: r.gastado, pendiente: pend, disponibleTrasCompromisos: r.aporta - r.gastado - pend, pct, nivel: nivelPresupuesto(r.aporta ? pct : null) }
-  })
-  return {
-    presupuesto: P, gastado, pendiente, disponible: P - gastado, disponibleTrasCompromisos: P - gastado - pendiente,
-    pctUsado, pctComprometido: pct1(pendiente, P), nivel: nivelPresupuesto(P ? pctUsado : null), fondos,
-  }
 }
 
 /* ============================== Evolución ============================== */

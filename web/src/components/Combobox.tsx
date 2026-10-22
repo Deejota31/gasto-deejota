@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, Search } from 'lucide-react'
+import { Check, ChevronDown, Search, X } from 'lucide-react'
 import { controlCls, inputCls } from './ui'
 
 /**
@@ -51,9 +51,13 @@ const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
  * Selector desplegable único de la aplicación (monedas, medios de pago, ámbitos, categorías…): muestra icono y color de cada
  * opción, busca cuando hay muchas, se maneja con teclado (↑ ↓ Inicio Fin Enter Esc, o escribir para saltar) y marca la elegida.
  */
-export function Combobox({ id, value, onChange, options, label, placeholder = 'Elige…', invalid, disabled, searchable, className = '', compact, vacio, triggerClass, descEnTrigger, maxHeight }: {
+export function Combobox({ id, value, onChange, options, label, placeholder = 'Elige…', invalid, disabled, searchable, className = '', compact, vacio, triggerClass, descEnTrigger, maxHeight, caption, leading, clearable }: {
   id?: string; value: string; onChange: (v: string) => void; options: Opcion[]; label: string; placeholder?: string; invalid?: boolean; disabled?: boolean
   searchable?: boolean; className?: string; compact?: boolean; vacio?: ReactNode; triggerClass?: string; descEnTrigger?: boolean; maxHeight?: number
+  /** Aspecto de la barra de filtros: título pequeño sobre el valor y un icono a la izquierda. */
+  caption?: string; leading?: ReactNode
+  /** Muestra una × para volver a «sin selección» (value ''). */
+  clearable?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -124,9 +128,14 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
         aria-label={label} aria-invalid={invalid || undefined} disabled={disabled}
         onClick={() => (open ? cerrar(false) : abrir())}
         onKeyDown={e => { if (!open && ['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); abrir() } else if (open && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar() } }}
-        className={triggerClass ?? `${controlCls} ${compact ? '!h-9 !min-h-9 !px-2.5 !py-1 text-[13px]' : ''} flex items-center gap-2 pr-9 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`}
+        className={triggerClass ?? (caption
+          ? `flex h-10 w-full items-center gap-2 rounded-xl border px-3 pr-9 text-left text-sm transition ${value ? 'border-navy/40 bg-primary-soft text-navy' : 'border-line bg-card text-ink hover:border-navy/30'} ${open ? 'ring-4 ring-navy/10' : ''}`
+          : `${controlCls} ${compact ? '!h-9 !min-h-9 !px-2.5 !py-1 text-[13px]' : ''} flex items-center gap-2 pr-9 text-left shadow-[0_1px_1px_rgb(15_23_42/0.04)] hover:border-navy/40 ${open ? 'border-navy ring-4 ring-navy/10' : ''} ${invalid ? 'border-danger' : ''}`)}
         style={{ position: 'relative' }}>
-        {sel
+        {caption && <span className="shrink-0 text-muted [&>svg]:size-4">{leading}</span>}
+        {caption
+          ? <span className="min-w-0 flex-1"><span className="block text-[10px] leading-none font-medium tracking-wide text-muted uppercase">{caption}</span><span className="block truncate text-[13px] leading-tight font-medium" title={sel?.label ?? placeholder}>{sel?.label ?? placeholder}</span></span>
+          : sel
           ? <>
             {Icon && <span className="grid size-6 shrink-0 place-items-center rounded-md" style={{ background: sel.color ? `${sel.color}1F` : undefined, color: sel.color }}><Icon className="size-3.5" /></span>}
             {descEnTrigger && sel.desc
@@ -136,6 +145,10 @@ export function Combobox({ id, value, onChange, options, label, placeholder = 'E
           : <span className="min-w-0 flex-1 truncate text-muted/80">{placeholder}</span>}
         <ChevronDown aria-hidden className={`pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted transition ${open ? 'rotate-180 text-navy' : ''}`} />
       </button>
+      {clearable && value && !disabled && (
+        <button type="button" aria-label={`Quitar ${label.toLowerCase()}`} onClick={() => onChange('')}
+          className="absolute top-1/2 right-8 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted hover:bg-bg hover:text-ink"><X className="size-3.5" /></button>
+      )}
       {open && pos && createPortal(
         <div ref={panel} role="presentation" onKeyDown={onKeyPanel}
           style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}

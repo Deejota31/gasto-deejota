@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, CalendarClock, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, Copy, ExternalLink,
-  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, PiggyBank, ClipboardCheck, Receipt, Repeat, Search, ShieldCheck, Tags, TrendingUp, Wallet,
+  HelpCircle, Info, Layers, Link2, Link2Off, Lightbulb, ListChecks, ClipboardCheck, Repeat, Search, ShieldCheck, Tags, TrendingUp,
 } from 'lucide-react'
 import { type Aggregates, type FondoResumen } from '../lib/engine'
 import { formatDate, monthLabel, rangeLabel, singleMonth, shiftMonth } from '../lib/dates'
 import { formatMoney, ratesFromConfig } from '../lib/money'
 import {
-  calcularCompromisos, calcularPresupuesto, fondoDeCompromiso, estadoCompromiso, type EstadoCompromiso, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
+  calcularCompromisos, fondoDeCompromiso, estadoCompromiso, type EstadoCompromiso, compararPeriodos, evaluarCalidad, oportunidadesAhorro, periodosEquivalentes, periodosMeses,
   PESOS, PROBLEMA_TXT, REDUCCION_SIMULADA, type CalidadDatos, type CompromisoItem, type Compromisos, type Evolucion, type FilaEvolucion,
-  type GrupoSimilar, type MiPresupuesto, type NivelComparacion, type NivelPresupuesto, type Oportunidad, type Rango,
+  type GrupoSimilar, type NivelComparacion, type Oportunidad, type Rango,
 } from '../lib/salud'
 import type { AppStore } from '../lib/store'
 import type { EstadoRevision, Filters, Gasto, Plantilla } from '../lib/types'
-import { fondoLook } from '../lib/visual'
 import { RevisionPresupuesto } from './RevisionPresupuesto'
 import { MenuAcciones } from './MenuAcciones'
 import { ESTADO_REV_TXT, estadoDe, revisarPeriodo } from '../lib/revisionPresupuesto'
-import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented, SelectField } from './ui'
+import { Button, Empty, InfoTooltip, inputCls, Modal, Segmented } from './ui'
+import { Combobox } from './Combobox'
 
-type Vista = 'calidad' | 'presupuesto' | 'evolucion' | 'compromisos' | 'revision'
-let vistaSesion: Vista = 'presupuesto'
+type Vista = 'calidad' | 'evolucion' | 'compromisos' | 'revision'
+let vistaSesion: Vista = 'compromisos'
 
 /**
  * Salud financiera: calidad de los datos, presupuesto con compromisos, evolución y compromisos mensuales.
@@ -53,7 +53,6 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
     [data.gastos, data.catalogo, data.medios, monedas, data.revisiones, filters])
   const comp = useMemo(() => calcularCompromisos({ gastos: data.gastos, plantillas, vinculos, desde: filters.desde, hasta: filters.hasta, base, rates }),
     [data.gastos, plantillas, vinculos, filters.desde, filters.hasta, base, rates])
-  const pres = useMemo(() => calcularPresupuesto(a, comp, filters.hasta.slice(0, 7)), [a, comp, filters.hasta])
 
   // Evolución: por defecto, el mes del filtro (o el actual) contra el mismo tramo del mes anterior.
   const mesBase = singleMonth(filters.desde, filters.hasta) ?? today.slice(0, 7)
@@ -80,7 +79,6 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
 
   const periodo = rangeLabel(filters)
   const calTone = calidad.indice === null ? TONO.neutro : calidad.indice >= 90 ? TONO.ok : calidad.indice >= 70 ? TONO.atencion : TONO.alerta
-  const presTone = pres.presupuesto ? TONO[NIVEL[pres.nivel].tono] : TONO.neutro
   const compTone = !comp.n ? TONO.neutro : comp.pendiente > 0 ? TONO.atencion : TONO.ok
   // Tarjeta de revisión: mes actual. Misma función que el panel; solo lee, no escribe.
   const mesRev = today.slice(0, 7)
@@ -100,19 +98,6 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       info: <>
         <p>Índice de 0 a 100 = 30 % integridad + 30 % clasificación + 20 % consistencia del catálogo + 20 % duplicados confirmados.</p>
         <p>Evalúa los movimientos activos del período y filtros elegidos. Las coincidencias sin revisar o marcadas como legítimas no restan puntos.</p>
-      </>,
-    },
-    {
-      id: 'presupuesto', titulo: 'Mi presupuesto', icon: PiggyBank, tone: presTone,
-      valor: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : '—',
-      valorTxt: pres.presupuesto ? money(pres.disponibleTrasCompromisos) : 'No disponible',
-      sub: pres.presupuesto ? <>Disponible tras compromisos · <b className="font-semibold" style={{ color: presTone.fg }}>usado {pctTxt(pres.pctUsado)}</b></> : 'Aplica tus fondos del mes en Presupuestos',
-      barra: pres.presupuesto ? <Barra partes={[{ v: pres.gastado, color: presTone.fg }, { v: pres.pendiente, color: TONO.atencion.fg, rayado: true }]} total={pres.presupuesto} alto="h-1.5" /> : undefined,
-      cta: 'Ver presupuesto',
-      vacio: !pres.presupuesto,
-      info: <>
-        <p>Disponible tras compromisos = presupuesto mensual − gastos registrados − compromisos pendientes.</p>
-        <p>Es un indicador de presupuesto, no el saldo de tu cuenta: la app no conoce tus ingresos ni tu banco.</p>
       </>,
     },
     {
@@ -165,7 +150,6 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
       <div id={`salud-${vista}`} role="tabpanel" aria-labelledby={`salud-tab-${vista}`} key={vista}
         className="fade-in rounded-2xl border border-line bg-card p-4 shadow-[0_1px_2px_rgb(15_23_42/0.04),0_8px_24px_rgb(15_23_42/0.05)] sm:p-5">
         {vista === 'calidad' && <PanelCalidad c={calidad} onRevisar={() => setRevisar(true)} />}
-        {vista === 'presupuesto' && <PanelPresupuesto p={pres} comp={comp} money={money} />}
         {vista === 'evolucion' && (
           <PanelEvolucion evo={evo} ahorro={ahorro} money={money} fmt={fmt} per={per} modo={modo} setModo={setModo} nivel={nivel} setNivel={setNivel}
             mesA={mesA} mesB={mesB} setMesA={setMesA} setMesB={setMesB} meses={mesesConDatos} />
@@ -195,13 +179,6 @@ const TONO = {
   neutro: { fg: '#64748B', bg: 'var(--bg)', ring: 'var(--line)' },
 } satisfies Record<string, Tono>
 
-const NIVEL: Record<NivelPresupuesto, { txt: string; ayuda: string; tono: keyof typeof TONO }> = {
-  'sin-presupuesto': { txt: 'Sin presupuesto definido', ayuda: '', tono: 'neutro' },
-  ok: { txt: 'Dentro del presupuesto', ayuda: 'Vas bien.', tono: 'ok' },
-  atencion: { txt: 'Atención', ayuda: 'Ya usaste más del 70 %.', tono: 'atencion' },
-  cerca: { txt: 'Cerca del límite', ayuda: 'Usaste el 90 % o más.', tono: 'cerca' },
-  excedido: { txt: 'Presupuesto alcanzado', ayuda: 'Llegaste o pasaste el 100 %.', tono: 'alerta' },
-}
 const pctTxt = (n: number | null) => (n === null ? '—' : `${n.toLocaleString('es-PE', { maximumFractionDigits: 1 })}%`)
 
 type Tile = {
@@ -279,18 +256,6 @@ function Stat({ label, value, hint, tone, destacado, testid, icon: Icon }: {
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted">{Icon && <Icon className="size-3.5" style={tone ? { color: tone.fg } : undefined} />}{label}</p>
       <p className={`tabular mt-1 truncate font-bold tracking-tight ${destacado ? 'text-2xl' : 'text-lg'}`} style={tone ? { color: tone.fg } : undefined} data-testid={testid}>{value}</p>
       {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
-    </div>
-  )
-}
-
-function Aviso({ tono, icon: Icon, titulo, children, testid }: { tono: Tono; icon: typeof ShieldCheck; titulo: string; children?: ReactNode; testid?: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-2xl px-4 py-3" style={{ background: tono.bg, boxShadow: `inset 0 0 0 1px ${tono.ring}` }} data-testid={testid}>
-      <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-card/70" style={{ color: tono.fg }}><Icon className="size-4" /></span>
-      <div className="min-w-0 text-sm">
-        <p className="font-semibold" style={{ color: tono.fg }}>{titulo}</p>
-        {children && <p className="text-ink/80">{children}</p>}
-      </div>
     </div>
   )
 }
@@ -383,94 +348,6 @@ function PanelCalidad({ c, onRevisar }: { c: CalidadDatos; onRevisar: () => void
   )
 }
 
-/* ================================ Presupuesto ================================ */
-
-function PanelPresupuesto({ p, comp, money }: { p: MiPresupuesto; comp: Compromisos; money: (c: number) => string }) {
-  if (!p.presupuesto) {
-    return <Vacio icon={PiggyBank} titulo="Aún no defines tu presupuesto" tono={TONO.neutro}>Crea o aplica tus fondos en Presupuestos para fijar el presupuesto del mes y ver cuánto puedes gastar todavía.</Vacio>
-  }
-  const nivel = NIVEL[p.nivel], tono = TONO[nivel.tono]
-  const libre = Math.max(0, p.presupuesto - p.gastado - p.pendiente)
-  return (
-    <>
-      <Cabecera icon={PiggyBank} titulo="Mi presupuesto" tono={tono} texto="Cuánto puedes gastar todavía, considerando lo que ya gastaste y lo que tienes comprometido."
-        acciones={<Chip tono={tono}>{nivel.txt}</Chip>} />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
-        <div className="rounded-2xl p-4" style={{ background: `linear-gradient(150deg, ${TONO.ok.bg}, var(--card))`, boxShadow: `inset 0 0 0 1px ${TONO.ok.ring}` }}>
-          <p className="text-xs font-medium text-muted">Disponible tras compromisos</p>
-          <p className="tabular mt-1 text-3xl font-bold tracking-tight" style={{ color: p.disponibleTrasCompromisos < 0 ? TONO.alerta.fg : TONO.ok.fg }} data-testid="pres-tras">{money(p.disponibleTrasCompromisos)}</p>
-          <p className="mt-1 text-xs text-muted">de un presupuesto de <b className="tabular text-ink">{money(p.presupuesto)}</b></p>
-          <div className="mt-4">
-            <Barra partes={[{ v: p.gastado, color: tono.fg }, { v: p.pendiente, color: TONO.atencion.fg, rayado: true }]} total={p.presupuesto} alto="h-3" />
-            <div className="tabular mt-2 flex justify-between text-[11px] text-muted"><span>Usado {pctTxt(p.pctUsado)}</span><span>Comprometido {pctTxt(p.pctComprometido)}</span></div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Stat label="Presupuesto consolidado" value={money(p.presupuesto)} icon={Wallet} testid="pres-presupuesto" />
-          <Stat label="Gastado del período" value={money(p.gastado)} hint={`${pctTxt(p.pctUsado)} utilizado`} icon={Receipt} tone={tono} testid="pres-gastado" />
-          <Stat label="Compromisos pendientes" value={money(p.pendiente)} hint={`${pctTxt(p.pctComprometido)} comprometido`} icon={Repeat} tone={TONO.atencion} testid="pres-pendiente" />
-          <Stat label="Disponible consolidado" value={money(p.disponible)} hint="Presupuesto consolidado − gastado" icon={PiggyBank} tone={p.disponible < 0 ? TONO.alerta : undefined} testid="pres-disponible" />
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-        <Leyenda color={tono.fg} label="Gastado" valor={money(p.gastado)} />
-        <Leyenda color={TONO.atencion.fg} label="Compromisos pendientes" valor={money(p.pendiente)} rayado />
-        <Leyenda color="var(--line)" label="Libre" valor={money(libre)} />
-      </div>
-
-      <div className="mt-4" data-testid="pres-nivel">
-        {p.nivel === 'excedido'
-          ? <Aviso tono={TONO.alerta} icon={AlertTriangle} titulo={nivel.txt}>Superaste el presupuesto en {money(-p.disponible)}.</Aviso>
-          : <Aviso tono={tono} icon={p.nivel === 'ok' ? CheckCircle2 : AlertTriangle} titulo={`${nivel.txt}. ${nivel.ayuda}`}>
-            {comp.pendiente ? `Después de cubrir ${money(comp.pendiente)} en compromisos te quedarían ${money(p.disponibleTrasCompromisos)}.` : `Te quedan ${money(p.disponible)} del presupuesto.`}
-          </Aviso>}
-      </div>
-
-      {p.fondos.length > 1 && (
-        <div className="mt-5">
-          <Subtitulo extra={<span className="text-[11px] text-muted">Parte de cada fondo tras los compromisos que cubriría</span>}>Fondos del presupuesto</Subtitulo>
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {p.fondos.map(c => {
-              const t = c.asignado ? TONO[NIVEL[c.nivel].tono] : TONO.neutro
-              const { Icon: FondoIcon, color } = fondoLook(c.fondo, p.fondos.map(x => x.fondo))
-              return (
-                <li key={c.fondo.id} className="rounded-2xl border border-line p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
-                      <span className="grid size-8 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1A`, color }}><FondoIcon className="size-4" /></span>
-                      <span className="truncate">{c.fondo.nombre}</span>
-                    </span>
-                    <Chip tono={t}>{c.asignado ? pctTxt(c.pct) : 'Sin asignar'}</Chip>
-                  </div>
-                  <div className="my-2.5"><Barra partes={[{ v: c.gastado, color }, { v: c.pendiente, color: TONO.atencion.fg, rayado: true }]} total={c.asignado} alto="h-2" /></div>
-                  <div className="tabular flex items-end justify-between gap-2">
-                    <div className="min-w-0 text-[11px] text-muted">Gastado <b className="text-ink">{money(c.gastado)}</b> de {money(c.asignado)}{c.pendiente ? <> · pendiente {money(c.pendiente)}</> : null}</div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-[10px] text-muted">Disponible tras compromisos</p>
-                      <p className="text-sm font-bold" style={{ color: c.disponibleTrasCompromisos < 0 ? TONO.alerta.fg : 'var(--ink)' }}>{money(c.disponibleTrasCompromisos)}</p>
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
-      <p className="mt-4 text-[11px] text-muted">Indicadores de presupuesto con la fecha real de cada gasto; no son el saldo de tu cuenta. Un pago de compromiso sube “gastado” y baja “pendiente” en lo mismo: nunca se descuenta dos veces.</p>
-    </>
-  )
-}
-
-function Leyenda({ color, label, valor, rayado }: { color: string; label: string; valor: string; rayado?: boolean }) {
-  return (
-    <span className="flex items-center gap-1.5 text-muted">
-      <span className="size-2.5 rounded-full" style={{ background: rayado ? `repeating-linear-gradient(135deg, ${color}, ${color} 2px, ${color}88 2px, ${color}88 4px)` : color }} />
-      {label} <b className="tabular text-ink">{valor}</b>
-    </span>
-  )
-}
-
 /* ================================ Evolución ================================ */
 
 const variacionTxt = (r: FilaEvolucion) => (r.variacion === null ? 'nuevo' : `${r.variacion > 0 ? '+' : ''}${r.variacion.toLocaleString('es-PE', { maximumFractionDigits: 1 })}%`)
@@ -493,9 +370,9 @@ function PanelEvolucion({ evo, ahorro, money, fmt, per, modo, setModo, nivel, se
         </div>
         {modo === 'meses' && (
           <div className="flex flex-wrap items-center gap-2">
-            <div className="w-40"><SelectField label="Mes a analizar" value={mesA} onChange={setMesA}>{meses.map(m => <option key={m} value={m}>{monthLabel(m, true)}</option>)}</SelectField></div>
+            <div className="w-40"><Combobox label="Mes a analizar" value={mesA} onChange={setMesA} options={meses.map(m => ({ value: m, label: monthLabel(m, true) }))} /></div>
             <span className="text-xs text-muted">contra</span>
-            <div className="w-40"><SelectField label="Mes de comparación" value={mesB} onChange={setMesB}>{[...new Set([...meses, mesB])].sort().reverse().map(m => <option key={m} value={m}>{monthLabel(m, true)}</option>)}</SelectField></div>
+            <div className="w-40"><Combobox label="Mes de comparación" value={mesB} onChange={setMesB} options={[...new Set([...meses, mesB])].sort().reverse().map(m => ({ value: m, label: monthLabel(m, true) }))} /></div>
           </div>
         )}
         <div className="min-w-0">

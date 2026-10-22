@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ArrowRight, Hand, Plus, RotateCcw, Shuffle, Trash2, Unlink } from 'lucide-react'
+import { AlertTriangle, Hand, Plus, RotateCcw, Shuffle, Trash2, Unlink } from 'lucide-react'
 import type { AppStore } from '../lib/store'
 import type { Gasto, ParteManual } from '../lib/types'
 import { activoEnMes, asignarMes, elegibles, explicarImputacion, TIPO_PARTE_TXT, validarAsignacion, type Imputacion } from '../lib/presupuesto'
 import { ctxReparto } from '../lib/useAgregado'
 import { monthLabel, todayIn } from '../lib/dates'
 import { formatMoney } from '../lib/money'
-import { Button, Checkbox, ErrorBox, inputCls, Modal, SelectField } from './ui'
+import { Button, Checkbox, ErrorBox, inputCls, Modal } from './ui'
+import { Combobox } from './Combobox'
 
 /**
  * Indicador compacto del reparto de un gasto entre fondos (tabla de Gastos) y el detalle "Ver / cambiar asignación".
@@ -15,12 +16,12 @@ import { Button, Checkbox, ErrorBox, inputCls, Modal, SelectField } from './ui'
 
 const chip = 'inline-flex max-w-full items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap'
 
-export function IndicadorFondos({ imp, nombre, money, onClick }: { imp: Imputacion | undefined; nombre: (id: string) => string; money: (c: number) => string; onClick: () => void }) {
+export function IndicadorFondos({ imp, nombre, onClick }: { imp: Imputacion | undefined; nombre: (id: string) => string; onClick: () => void }) {
   if (!imp) return null
   let cont: { txt: React.ReactNode; fg: string; bg: string; title: string; Icon: typeof Shuffle }
   if (imp.incompatible) cont = { txt: 'Medio no permitido', fg: 'var(--danger)', bg: 'var(--danger-soft)', title: 'El medio de pago no está permitido para esta clasificación', Icon: AlertTriangle }
   else if (imp.sinFondo === imp.total) cont = { txt: 'Sin fondo', fg: 'var(--warning)', bg: 'var(--warning-soft)', title: 'Ningún fondo activo cubre este gasto', Icon: Unlink }
-  else if (imp.excedente > 0) cont = { txt: <>Excedente {money(imp.excedente)} <ArrowRight className="size-2.5" /> {imp.destino.map(nombre).join(', ')}</>, fg: 'var(--warning)', bg: 'var(--warning-soft)', title: 'Parte del gasto pasó a otro fondo', Icon: Shuffle }
+  // v1.29: el aviso de excedente ya no se muestra en la tabla de Movimientos (sigue en el Dashboard y en el detalle del fondo).
   else if (imp.manual) cont = { txt: [...new Set(imp.partes.map(p => nombre(p.fondoId)))].join(' + '), fg: '#4F6FC8', bg: '#EEF3FF', title: 'Asignación manual', Icon: Hand }
   else cont = { txt: [...new Set(imp.partes.map(p => nombre(p.fondoId)))].join(' + '), fg: '#64748B', bg: 'var(--bg)', title: 'Fondo asignado automáticamente', Icon: Shuffle }
   return (
@@ -104,10 +105,8 @@ export function AsignacionModal({ store, gasto, imp, onClose }: { store: AppStor
             <p className="text-xs text-muted">Solo aparecen los fondos activos que cubren este gasto y aceptan su medio. La suma debe ser exactamente {formatMoney(Math.round(gasto.monto * 100), gasto.moneda)}.</p>
             {filas.map((f, i) => (
               <div key={i} className="grid grid-cols-[minmax(0,1fr)_7rem_auto] items-center gap-2">
-                <SelectField label={`Fondo ${i + 1}`} value={f.fondoId} onChange={v => setFilas(xs => xs.map((x, j) => j === i ? { ...x, fondoId: v } : x))}>
-                  <option value="">Elige un fondo…</option>
-                  {opciones.map(o => <option key={o.id} value={o.id} disabled={filas.some((x, j) => j !== i && x.fondoId === o.id)}>{o.nombre}</option>)}
-                </SelectField>
+                <Combobox label={`Fondo ${i + 1}`} value={f.fondoId} placeholder="Elige un fondo…" onChange={v => setFilas(xs => xs.map((x, j) => j === i ? { ...x, fondoId: v } : x))}
+                  options={opciones.map(o => ({ value: o.id, label: o.nombre, disabled: filas.some((x, j) => j !== i && x.fondoId === o.id) }))} />
                 <input aria-label={`Importe para el fondo ${i + 1}`} className={`${inputCls} tabular h-11 text-right`} inputMode="decimal" value={f.monto}
                   onChange={e => setFilas(xs => xs.map((x, j) => j === i ? { ...x, monto: e.target.value.replace(/[^\d.,]/g, '') } : x))} />
                 <button type="button" aria-label={`Quitar fondo ${i + 1}`} disabled={filas.length === 1} onClick={() => setFilas(xs => xs.filter((_, j) => j !== i))}
