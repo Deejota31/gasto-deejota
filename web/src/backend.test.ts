@@ -479,7 +479,7 @@ describe('backend Apps Script', () => {
         { ambito: 'Personal', categoria: 'Auto', subcategoria: 'SOAT', icono: 'Bad Icon!', color: 'rojo' },
       ] })
       expect(r.ok).toBe(true)
-      expect(r.data.cajas).toBe(0)
+      expect(r.data).not.toHaveProperty('cajas')
       expect(JSON.stringify(cajas.rows)).toBe(cajas0)
       expect(r.data.fondos).toBe(1)
       expect(r.data.catalogo).toBeGreaterThan(0)
@@ -497,15 +497,15 @@ describe('backend Apps Script', () => {
       // idempotente: la segunda vez no cambia nada
       const w = [cajas.writes, cat.writes, b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.writes]
       const r2 = b.post('completarVacios', { catalogo: [{ ambito: 'Personal', categoria: '', subcategoria: '', icono: 'star', color: '#000000' }] })
-      expect(r2.data).toEqual({ cajas: 0, fondos: 0, catalogo: 0, config: 0, medios: 0 })
+      expect(r2.data).toEqual({ fondos: 0, catalogo: 0, config: 0, medios: 0 })
       expect([cajas.writes, cat.writes, b.ss.getSheetByName('FONDOS_PRESUPUESTO')!.writes]).toEqual(w)
       expect(personal[4]).toBe('user')                                                       // no pisó lo ya relleno
     })
 
-    it('la lectura ya no trae cajas ni presupuestos (listas vacías solo por compatibilidad con la web 1.27)', () => {
+    it('la lectura ya no trae cajas ni presupuestos (ni siquiera vacíos)', () => {
       b.ss.insertSheet('CAJAS').rows = [['ID'], ['general', 'Caja general', 3000, 'Todos', '', '#1e3a8a', 1]]
       const d = b.post('data', { fresh: true }).data
-      expect([d.cajas, d.presupuestos]).toEqual([[], []])
+      expect(d).not.toHaveProperty('cajas'); expect(d).not.toHaveProperty('presupuestos')
     })
   })
 
@@ -1631,6 +1631,14 @@ describe('v1.26 revisión del presupuesto (backend)', () => {
     expect(b.post('data', { fresh: true }).data.revisionesPresupuesto).toHaveLength(1)
   })
 
+  it('v1.30: los estados que necesitan explicación la exigen en el backend (y no se guarda nada si falta)', () => {
+    const antes = b.post('data', { fresh: true }).data.revisionesPresupuesto.length
+    expect(b.post('saveRevisionPresupuesto', rev(3, { estado: 'con_gastos_anteriores', pendientes: '' })).error.code).toBe('VALIDATION')
+    expect(b.post('saveRevisionPresupuesto', rev(4, { estado: 'revisado_con_observaciones', observacion: '  ' })).error.code).toBe('VALIDATION')
+    expect(b.post('data', { fresh: true }).data.revisionesPresupuesto).toHaveLength(antes)
+    expect(b.post('saveRevisionPresupuesto', rev(5, { estado: 'completo' })).ok).toBe(true)          // «completo» y «pendiente» no exigen nota
+  })
+
   it('guardar NO toca fondos, gastos, cajas, presupuestos, compromisos ni configuración', () => {
     b.post('saveGasto', gasto({ fecha: `${mesActual()}-01` }))
     const antes = snapshot()
@@ -1903,7 +1911,7 @@ describe('seguridad del backend', () => {
   let b: ReturnType<typeof load>
   beforeEach(() => { b = load(); b.g.setup() })
   const ADMIN = ['setup', 'crearTokenAtajo', 'revocarTokenAtajo', 'generarDatosPrueba', 'generarCasosEspecialesPrueba', 'borrarDatosPrueba',
-    'repararIds', 'repararHojas', 'retirarCajas']
+    'repararIds', 'repararHojas', 'retirarCajas', 'auditarHojas', 'limpiarHojasObsoletas']
   // Acciones de uso diario (no administrativas), clasificadas a propósito: una acción nueva sin clasificar rompe esta prueba.
   const DIARIAS = ['data', 'saveGasto', 'setEstado', 'setEstadoLote', 'saveCatalogo', 'renameCatalogo', 'reorderCategorias', 'deleteCategoria',
     'saveMedio', 'saveAsignacion', 'saveConfig', 'diagnose', 'backup', 'plantillas', 'savePlantilla',

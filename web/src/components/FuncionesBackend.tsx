@@ -15,7 +15,7 @@ interface Funcion {
   cambiaHoja?: boolean            // relee los datos al terminar
   confirmar?: string              // pide confirmación antes de ejecutar
   admin?: boolean                 // exige el token de administración (S-04)
-  parametros?: 'datosPrueba' | 'retirarCajas'   // abre un formulario en lugar de la confirmación simple
+  parametros?: 'datosPrueba' | 'retirarCajas' | 'limpiarHojas'   // abre un formulario en lugar de la confirmación simple
 }
 
 /** Todas las funciones de Code.gs que se ejecutaban desde el editor de Apps Script. */
@@ -30,6 +30,10 @@ export const FUNCIONES: Funcion[] = [
     confirmar: 'Reescribe todas las hojas (con respaldo previo). ¿Continuar?' },
   { grupo: 'Mantenimiento de la hoja', nombre: 'retirarCajas', admin: true, titulo: 'Retirar cajas (migración 1.28)', parametros: 'retirarCajas', cambiaHoja: true,
     desc: 'Primero simula: muestra qué cajas, subcajas y presupuestos antiguos hay y qué haría. Aplicar crea un respaldo y solo archiva esas hojas (no borra datos ni gastos).' },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'auditarHojas', admin: true, titulo: 'Auditar hojas (matriz)',
+    desc: 'Solo lectura: lista TODAS las hojas con registros, uso, dependencias y la acción recomendada (conservar, retirar, revisar).' },
+  { grupo: 'Mantenimiento de la hoja', nombre: 'limpiarHojasObsoletas', admin: true, titulo: 'Eliminar hojas obsoletas (Cajas)', parametros: 'limpiarHojas', cambiaHoja: true,
+    desc: 'Primero simula. Aplicar hace un respaldo, comprueba que lo contiene y elimina CAJAS / PRESUPUESTOS / ARCHIVO_*; luego verifica que no reaparecen. Si no puede verificarlo, no elimina nada.' },
   { grupo: 'Atajo de iPhone', nombre: 'crearTokenAtajo', admin: true, titulo: 'Crear token del atajo', desc: 'Genera un token nuevo (reemplaza al anterior). Cópialo solo en tu iPhone.', confirmar: 'Esto reemplaza el token actual del atajo. ¿Continuar?' },
   { grupo: 'Atajo de iPhone', nombre: 'revocarTokenAtajo', admin: true, titulo: 'Revocar token del atajo', desc: 'El atajo deja de funcionar hasta crear otro token.', confirmar: 'El atajo de iPhone dejará de funcionar. ¿Continuar?' },
   { grupo: 'Datos de prueba', nombre: 'generarDatosPrueba', admin: true, titulo: 'Agregar datos de prueba', desc: 'Agrega la cantidad de gastos que indiques, repartidos en el período que elijas, con un presupuesto de prueba por mes. Se marcan para poder borrarlos. Crea respaldo.', cambiaHoja: true, parametros: 'datosPrueba' },
@@ -74,12 +78,17 @@ function SelectorMes({ id, etiqueta, value, onChange, anios }: { id: string; eti
 }
 
 /** Retirar cajas: simulación por defecto; aplicar exige marcar que ya revisaste la simulación. */
-function FormRetirarCajas({ ocupado, onCancelar, onEnviar }: { ocupado: boolean; onCancelar: () => void; onEnviar: (aplicar: boolean) => void }) {
+function FormRetirarCajas({ ocupado, onCancelar, onEnviar, limpiar = false }: { ocupado: boolean; onCancelar: () => void; onEnviar: (aplicar: boolean) => void; limpiar?: boolean }) {
   const [revisado, setRevisado] = useState(false)
   return (
-    <div className="mt-2 space-y-2 rounded-lg border border-line bg-card p-2.5 text-[11px] text-muted" data-testid="form-retirar-cajas">
-      <p>1. <b>Simular</b> no escribe nada: lista las hojas antiguas y si se crearía un fondo General (solo cuando no existe ningún fondo).</p>
-      <p>2. <b>Aplicar</b> hace un respaldo completo y renombra las hojas antiguas como archivo. No toca gastos, fondos ni importes. Hazlo después de publicar el Code.gs 1.28.</p>
+    <div className="mt-2 space-y-2 rounded-lg border border-line bg-card p-2.5 text-[11px] text-muted" data-testid={limpiar ? 'form-limpiar-hojas' : 'form-retirar-cajas'}>
+      {limpiar ? (<>
+        <p>1. <b>Simular</b> no escribe nada: lista las hojas obsoletas y cuáles quedarían pendientes (p. ej. una caja con importe sin fondo creado).</p>
+        <p>2. <b>Aplicar</b> hace un respaldo completo, verifica que contiene cada hoja y la elimina; después reinicia la instalación y comprueba que no reaparecen. Ejecuta antes «Retirar cajas». No toca gastos, fondos ni hojas desconocidas.</p>
+      </>) : (<>
+        <p>1. <b>Simular</b> no escribe nada: lista las hojas antiguas y si se crearía un fondo General (solo cuando no existe ningún fondo).</p>
+        <p>2. <b>Aplicar</b> hace un respaldo completo y renombra las hojas antiguas como archivo. No toca gastos, fondos ni importes. Hazlo después de publicar el Code.gs 1.28.</p>
+      </>)}
       <label className="flex items-center gap-2"><input type="checkbox" checked={revisado} onChange={e => setRevisado(e.target.checked)} /> Ya revisé la simulación y tengo el respaldo</label>
       <div className="flex flex-wrap justify-end gap-1.5">
         <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={onCancelar}>Cancelar</Button>
@@ -224,6 +233,9 @@ export function FuncionesBackend({ store, className = '' }: { store: AppStore; c
                        </div>
                        {pide === f.nombre && f.parametros === 'retirarCajas' && (
                          <FormRetirarCajas ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={aplicar => void ejecutar(f, aplicar ? { aplicar: true } : {})} />
+                       )}
+                       {pide === f.nombre && f.parametros === 'limpiarHojas' && (
+                         <FormRetirarCajas limpiar ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={aplicar => void ejecutar(f, aplicar ? { aplicar: true } : {})} />
                        )}
                        {pide === f.nombre && f.parametros === 'datosPrueba' && (
                          <FormDatosPrueba ocupado={busy === f.nombre} onCancelar={() => setPide('')} onEnviar={p => void ejecutar(f, p)} />
