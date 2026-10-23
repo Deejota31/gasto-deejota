@@ -41,7 +41,8 @@ test.describe('Formulario de fondos', () => {
     await page.goto('/?demo=60&fondos=3&latencia=0#presupuestos')
     await page.getByRole('button', { name: 'Nuevo fondo' }).click()
     const d = dialog(page)
-    await expect(d.getByTestId('vista-previa-fondo')).toBeVisible()
+    await expect(d.getByTestId('vista-previa-fondo')).toHaveCount(0)               // v1.30: sin bloque de vista previa
+    await expect(d.getByText('Vista previa')).toHaveCount(0)
     await expect(d.locator('#fondo-modo-medios')).toBeVisible()
     await expect(d.locator('#fondo-medios')).toHaveCount(0)                      // «Elige los medios permitidos» solo con «Solo seleccionados»
     await d.locator('#fondo-modo-medios').click()
@@ -55,7 +56,7 @@ test.describe('Formulario de fondos', () => {
     await pick(page, '#cob-ambito', 'Personal')
     await elegirCobertura(page, 'Alimentación')
     await expect(d.getByTestId('rutas-elegidas').getByRole('listitem')).toHaveCount(1)
-    await expect(d.getByTestId('vista-previa-fondo')).toContainText('Sodexo')
+    await expect(d.getByTestId('fondo-medios-elegidos')).toContainText('Sodexo')
   })
 
   test('sin cobertura elegida no se guarda; con nombre e importe válidos se crea sin nombres fijos en el código', async ({ page }) => {
@@ -124,7 +125,7 @@ test.describe('Responsive', () => {
       await expect(page.getByTestId('presupuestos-resumen')).toBeVisible()
       expect(await sinScrollH(page)).toBe(true)
       await page.getByRole('button', { name: 'Nuevo fondo' }).click()
-      await expect(dialog(page).getByTestId('vista-previa-fondo')).toBeVisible()
+      await expect(dialog(page).getByTestId('form-fondo')).toBeVisible()
       expect(await sinScrollH(page)).toBe(true)
       await page.keyboard.press('Escape')
       await go(page, 'Dashboard')

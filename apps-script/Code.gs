@@ -17,7 +17,7 @@ var SHEETS = {
   CATALOGO: ['Ámbito', 'Categoría', 'Subcategoría', 'Activo', 'Icono', 'Color', 'Orden'],
   MEDIOS_PAGO: ['Nombre', 'Activo', 'Icono', 'Color'],
   // v1.28: CAJAS y PRESUPUESTOS ya no forman parte del modelo (Presupuestos = solo fondos). Si existen en una hoja anterior se
-  // conservan intactas hasta que el dueño ejecute retirarCajas (que solo las renombra como archivo, nunca borra datos).
+  // conservan hasta que el dueño ejecute retirarCajas (archivar) y luego limpiarHojasObsoletas (eliminar tras verificar el respaldo).
   CONFIG: ['Clave', 'Valor'],
   // Orden personalizado de la tabla de Gastos (por ID). Hoja aparte: reordenar nunca mueve ni reescribe GASTOS.
   ORDEN_GASTOS: ['ID', 'Orden'],
@@ -46,6 +46,29 @@ var SHEETS = {
   // 'Gastos pendientes' es texto libre. Guardar aquí NUNCA toca fondos ni gastos. 'Reservado' quedó sin uso (se escribe vacío).
   REVISIONES_PRESUPUESTO: ['ID', 'Período', 'Estado', 'Gastos pendientes', 'Observación', 'Reservado', 'Creado en']
 };
+
+/**
+ * Catálogo oficial de hojas (v1.30). Catálogo único: lo vigente sale de SHEETS (esquema) + HOJAS_USO_ (para qué sirve y quién
+ * depende de ella); lo obsoleto, de esHojaObsoleta_. Ninguna rutina de instalación o reparación recrea una hoja que no esté en SHEETS.
+ * Obsoletas: el modelo anterior de Cajas (CAJAS) y la hoja PRESUPUESTOS (importes por caja y mes), más sus archivos
+ * ARCHIVO_CAJAS / ARCHIVO_PRESUPUESTOS que deja retirarCajas. No confundir con el concepto "presupuesto", que hoy vive en
+ * FONDOS_PRESUPUESTO + FONDOS_PRESUPUESTO_MESES.
+ */
+var HOJAS_USO_ = {
+  GASTOS: ['Registro de gastos (hoja principal)', 'Todo: presupuesto, dashboard, revisiones'],
+  CATALOGO: ['Ámbitos, categorías y subcategorías', 'Formulario de gasto, filtros, reglas de cobertura'],
+  MEDIOS_PAGO: ['Medios de pago', 'Formulario de gasto, reglas de medios de los fondos'],
+  CONFIG: ['Configuración (moneda, tipos de cambio, mes de aislamiento)', 'Motor del presupuesto, Ajustes'],
+  ORDEN_GASTOS: ['Orden personalizado de la tabla de gastos', 'Tabla de Gastos'],
+  VINCULOS_PLANTILLAS: ['Qué gasto pagó qué plantilla', 'Plantillas de gasto, compromisos'],
+  REVISIONES_CALIDAD: ['Decisiones sobre alertas de calidad', 'Calidad de datos'],
+  FONDOS_PRESUPUESTO: ['Fondos del presupuesto y sus reglas', 'Presupuestos, Salud financiera, Revisión, asignaciones'],
+  ASIGNACIONES_GASTOS: ['Asignación manual de gastos a fondos', 'Motor del presupuesto'],
+  FONDOS_PRESUPUESTO_MESES: ['Importes de cada fondo por mes', 'Presupuesto consolidado de cada período'],
+  PLANTILLAS_FINANCIERAS: ['Plantillas de fondos y de gastos mensuales', 'Aplicar plantillas, Presupuestos'],
+  REVISIONES_PRESUPUESTO: ['Historial de revisiones de período (solo agrega)', 'Revisión del presupuesto, Salud financiera']
+};
+function esHojaObsoleta_(name) { return /^(ARCHIVO_)?(CAJAS|PRESUPUESTOS)(_\d+)?$/.test(String(name)); }
 
 // Columna que identifica una fila real en cada hoja (índice base 0). Una fila sin clave no es un registro.
 var KEY_COL = { GASTOS: 13, CATALOGO: 0, MEDIOS_PAGO: 0, CONFIG: 0, ASIGNACIONES_GASTOS: 0, PLANTILLAS_FINANCIERAS: 0, ORDEN_GASTOS: 0, VINCULOS_PLANTILLAS: 0, REVISIONES_CALIDAD: 0, FONDOS_PRESUPUESTO: 0, FONDOS_PRESUPUESTO_MESES: 0, REVISIONES_PRESUPUESTO: 0 };
@@ -711,9 +734,6 @@ function getData_(fresh) {
     gastos: readRows_(ss, 'GASTOS').map(function (r) { return normalizeGastoRow_(r, tz); }),
     catalogo: readRows_(ss, 'CATALOGO').map(function (r) { return [str_(r[0]), str_(r[1]), str_(r[2]), r[3] !== false && String(r[3]).toUpperCase() !== 'FALSE', str_(r[4]), str_(r[5]), str_(r[6]) === '' ? '' : num_(r[6])]; }),
     medios: readRows_(ss, 'MEDIOS_PAGO').map(function (r) { return [str_(r[0]), r[1] !== false && String(r[1]).toUpperCase() !== 'FALSE', autoVacio_(r[2]), /^#[0-9a-fA-F]{6}$/.test(str_(r[3])) ? str_(r[3]) : '']; }),
-    // Compatibilidad SOLO durante el despliegue (v1.28): una web 1.27 exige estas dos listas. Siempre vacías; quitar en la 1.29.
-    cajas: [],
-    presupuestos: [],
     config: readRows_(ss, 'CONFIG').reduce(function (acc, r) { acc[str_(r[0])] = str_(r[1]); return acc; }, {}),
     ordenGastos: ss.getSheetByName('ORDEN_GASTOS') ? readRows_(ss, 'ORDEN_GASTOS').map(function (r) { return [str_(r[0]), num_(r[1])]; }) : [],
     vinculos: ss.getSheetByName('VINCULOS_PLANTILLAS') ? readRows_(ss, 'VINCULOS_PLANTILLAS')
@@ -884,14 +904,16 @@ var ACTIONS = {
   borrarDatosPrueba: function () { return borrarDatosPrueba(); },
   repararIds: function () { return repararIds(); },
   repararHojas: function () { return repararHojas(); },
-  retirarCajas: function (p) { return retirarCajas(p); }
+  retirarCajas: function (p) { return retirarCajas(p); },
+  auditarHojas: function () { return auditarHojas(); },
+  limpiarHojasObsoletas: function (p) { return limpiarHojasObsoletas(p); }
 };
 // Estas ya toman su propio candado (withLock_ no es reentrante): doPost no las envuelve.
 // Requieren además el token de administración (checkAdmin_). completarVacios y autorizarRespaldos no: la web llama a la primera
 // sola, una vez, y solo rellena celdas vacías; la segunda solo concede permisos de lectura de Drive.
 var ADMIN_ACTIONS = { setup: true, crearTokenAtajo: true, revocarTokenAtajo: true, generarDatosPrueba: true, generarCasosEspecialesPrueba: true,
-  borrarDatosPrueba: true, repararIds: true, repararHojas: true, retirarCajas: true };
-var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, repararIds: true, repararHojas: true, retirarCajas: true };
+  borrarDatosPrueba: true, repararIds: true, repararHojas: true, retirarCajas: true, auditarHojas: true, limpiarHojasObsoletas: true };
+var SELF_LOCK = { generarDatosPrueba: true, generarCasosEspecialesPrueba: true, borrarDatosPrueba: true, repararIds: true, repararHojas: true, retirarCajas: true, limpiarHojasObsoletas: true };
 
 function saveGasto_(p, origen) {
   var ss = openSpreadsheet_(false);
@@ -2163,8 +2185,7 @@ function saveAsignacion_(p) {
 // Escribe por bloques (una escritura por hoja) y es idempotente: repetirla no cambia nada.
 function completarVacios_(p) {
   var ss = openSpreadsheet_(false);
-  // `cajas` queda siempre en 0: solo para que una web 1.27 lea la respuesta durante el despliegue (quitar en la 1.29).
-  var res = { cajas: 0, fondos: 0, catalogo: 0, config: 0, medios: 0 };
+  var res = { fondos: 0, catalogo: 0, config: 0, medios: 0 };
   var vacio = function (v) { return str_(v) === ''; };
 
   var fs = ss.getSheetByName('FONDOS_PRESUPUESTO');
@@ -2735,6 +2756,9 @@ function saveRevisionPresupuesto_(p) {
   if (REV_ESTADOS_.indexOf(estado) < 0) throw appError_('VALIDATION', 'Estado de revisión inválido.');
   var obs = str_(p.observacion), pend = str_(p.pendientes);
   if (obs.length > 500 || pend.length > 500) throw appError_('VALIDATION', 'Las notas admiten hasta 500 caracteres.');
+  // v1.30: cada estado que necesita una explicación la exige también aquí (la web ya la pedía).
+  if (estado === 'con_gastos_anteriores' && !pend) throw appError_('VALIDATION', 'Anota qué gastos faltan por registrar.');
+  if (estado === 'revisado_con_observaciones' && !obs) throw appError_('VALIDATION', 'Escribe la observación de la revisión.');
   var ss = openSpreadsheet_(false);
   var sh = revHoja_(ss);
   var rows = revLeer_(ss);
@@ -2911,6 +2935,84 @@ function retirarCajas(p) {
     archivar(pSh, 'ARCHIVO_PRESUPUESTOS');
     invalidateCache_();
     return { simulacion: false, inventario: inventario, hecho: hecho, respaldo: respaldo.url };
+  });
+}
+
+/**
+ * Matriz de TODAS las hojas del archivo (solo lectura): Hoja | Registros | Columnas | Uso actual | Dependencias | Acción.
+ * Acción: Conservar (vigente) · Crear con setup (vigente que falta) · Retirar (obsoleta) · Revisar manualmente (desconocida: nunca se toca).
+ */
+function auditarHojas() {
+  var ss = openSpreadsheet_(false);
+  var filas = ss.getSheets().map(function (sh) {
+    var name = sh.getName(), registros = Math.max(lastDataRow_(sh) - 1, 0), cols = sh.getLastColumn();
+    if (SHEETS[name]) {
+      var enc = cols ? sh.getRange(1, 1, 1, Math.min(cols, SHEETS[name].length)).getValues()[0] : [];
+      var okEnc = SHEETS[name].slice(0, enc.length).join('|') === enc.join('|');
+      return { hoja: name, registros: registros, columnas: cols, uso: HOJAS_USO_[name] ? HOJAS_USO_[name][0] : '', dependencias: HOJAS_USO_[name] ? HOJAS_USO_[name][1] : '',
+        estado: 'vigente', accion: okEnc ? 'Conservar' : 'Revisar manualmente (encabezados distintos)' };
+    }
+    if (esHojaObsoleta_(name)) {
+      return { hoja: name, registros: registros, columnas: cols, uso: 'Modelo anterior de Cajas / importes por caja (ya no se lee)',
+        dependencias: 'Ninguna en la web ni en la API; solo retirarCajas y limpiarHojasObsoletas', estado: 'obsoleta',
+        accion: /^ARCHIVO_/.test(name) ? 'Eliminar con limpiarHojasObsoletas' : 'Retirar: retirarCajas y luego limpiarHojasObsoletas' };
+    }
+    return { hoja: name, registros: registros, columnas: cols, uso: 'Desconocida', dependencias: 'No catalogada', estado: 'desconocida', accion: 'Revisar manualmente (no se toca)' };
+  });
+  var presentes = {};
+  filas.forEach(function (f) { presentes[f.hoja] = true; });
+  Object.keys(SHEETS).forEach(function (name) {
+    if (!presentes[name]) filas.push({ hoja: name, registros: 0, columnas: 0, uso: HOJAS_USO_[name][0], dependencias: HOJAS_USO_[name][1], estado: 'faltante', accion: 'Crear con setup' });
+  });
+  return { hojas: filas, vigentes: Object.keys(SHEETS), obsoletas: filas.filter(function (f) { return f.estado === 'obsoleta'; }).map(function (f) { return f.hoja; }) };
+}
+
+/**
+ * Eliminación definitiva de las hojas obsoletas (CAJAS, PRESUPUESTOS y sus ARCHIVO_*). Procedimiento seguro:
+ *   - limpiarHojasObsoletas({})             → simulación (por defecto): qué se eliminaría y qué queda pendiente y por qué.
+ *   - limpiarHojasObsoletas({aplicar:true}) → 1) respaldo completo; 2) verifica que el respaldo contiene cada hoja con el mismo número
+ *     de registros; 3) elimina solo las confirmadas; 4) vuelve a ejecutar la inicialización y comprueba que no reaparecen y que todas
+ *     las hojas vigentes siguen ahí. Si algo no se puede verificar, NO elimina y lo informa como pendiente.
+ * Queda pendiente (no se elimina) una hoja de cajas con importe cuando aún no existe ningún fondo: primero ejecuta retirarCajas({aplicar:true}),
+ * que crea el fondo General con ese importe. Las hojas desconocidas nunca se tocan.
+ */
+function limpiarHojasObsoletas(p) {
+  p = p || {};
+  var ss = openSpreadsheet_(false);
+  var obsoletas = ss.getSheets().filter(function (sh) { return esHojaObsoleta_(sh.getName()); });
+  var fSh = ss.getSheetByName('FONDOS_PRESUPUESTO');
+  var nFondos = fSh ? fondosRows_(fSh).filter(function (r) { return str_(r[0]); }).length : 0;
+  var plan = obsoletas.map(function (sh) {
+    var name = sh.getName(), n = Math.max(lastDataRow_(sh) - 1, 0), pendiente = '';
+    if (/CAJAS/.test(name) && !nFondos && n) {
+      var conImporte = sh.getRange(2, 1, n, Math.min(sh.getLastColumn(), 10)).getValues().some(function (r) { return str_(r[3]) === 'Todos' && num_(r[2]) > 0; });
+      if (conImporte && name === 'CAJAS') pendiente = 'La caja general tiene importe y aún no hay fondos: ejecuta retirarCajas({aplicar:true}) antes.';
+    }
+    return { hoja: name, registros: n, eliminar: !pendiente, pendiente: pendiente };
+  });
+  if (p.aplicar !== true) return { simulacion: true, plan: plan, hojas: auditarHojas().hojas };
+  var aEliminar = plan.filter(function (x) { return x.eliminar; });
+  if (!aEliminar.length) return { simulacion: false, plan: plan, eliminadas: [], pendientes: plan.filter(function (x) { return !x.eliminar; }) };
+  var respaldo = backup_();
+  if (!respaldo || !respaldo.url) return { simulacion: false, plan: plan, eliminadas: [], pendientes: plan, error: 'No se pudo crear el respaldo: no se eliminó nada.' };
+  var copia;
+  try { copia = SpreadsheetApp.openByUrl(respaldo.url); } catch (e) { copia = null; }
+  if (!copia) return { simulacion: false, plan: plan, eliminadas: [], pendientes: plan, respaldo: respaldo.url, error: 'No se pudo abrir el respaldo para verificarlo: no se eliminó nada.' };
+  return withLock_(function () {
+    var eliminadas = [], pendientes = plan.filter(function (x) { return !x.eliminar; });
+    aEliminar.forEach(function (x) {
+      var sh = ss.getSheetByName(x.hoja), enCopia = copia.getSheetByName(x.hoja);
+      var nCopia = enCopia ? Math.max(lastDataRow_(enCopia) - 1, 0) : -1;
+      if (!sh || !enCopia || nCopia !== x.registros) { pendientes.push({ hoja: x.hoja, registros: x.registros, eliminar: false, pendiente: 'El respaldo no coincide con la hoja (' + nCopia + ' ≠ ' + x.registros + ' registros).' }); return; }
+      ss.deleteSheet(sh);
+      eliminadas.push(x.hoja);
+    });
+    // Reejecuta la inicialización de hojas y comprueba que ninguna obsoleta reaparece y que todas las vigentes existen.
+    Object.keys(SHEETS).forEach(function (name) { asegurarHoja_(ss, name); });
+    var reaparecen = eliminadas.filter(function (n) { return !!ss.getSheetByName(n); });
+    var faltan = Object.keys(SHEETS).filter(function (n) { return !ss.getSheetByName(n); });
+    invalidateCache_();
+    return { simulacion: false, plan: plan, eliminadas: eliminadas, pendientes: pendientes, respaldo: respaldo.url, verificacion: { reaparecen: reaparecen, faltan: faltan, ok: !reaparecen.length && !faltan.length } };
   });
 }
 

@@ -522,7 +522,8 @@ function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, mo
   const tieneSolo = !!fondo && !!mes && meses.some(m => m.fondoId === fondo.id && m.mes === mes && m.modo === 'solo')
   const esMesBase = !!fondo && fondo.recurrencia === 'unica' && recurrencia === 'unica' && mes === mesAplic
   const otras = fondos.filter(f => f.id !== id)
-  const { Icon, color } = modoMedios === 'solo' && listaMedios.length ? medioLook(listaMedios[0]) : fondoLook({ nombre: nombre || 'Fondo', medioPago: '', icono: '', color: '' }, otras)
+  // Color del fondo (se guarda con él): el del primer medio permitido o el automático por nombre.
+  const { color } = modoMedios === 'solo' && listaMedios.length ? medioLook(listaMedios[0]) : fondoLook({ nombre: nombre || 'Fondo', medioPago: '', icono: '', color: '' }, otras)
   const regla: ReglaFondo = { desde: '', medios: modoMedios, listaMedios: modoMedios === 'todos' ? [] : listaMedios, cobertura, rutas: cobertura === 'todos' ? [] : rutas, restringeMedio: modoMedios === 'solo' && restringe }
   const errorRegla = validarRegla(regla)
   const montoNum = Number(monto.trim().replace(',', '.'))
@@ -574,11 +575,7 @@ function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, mo
       () => store.actions.saveFondoMes({ fondoId: id, mes: mes!, monto: 0, modo: 'solo' }, true))
     if (ok) onClose()
   }
-  const tipoTxt = tipo === 'ahorro_asignado' ? 'de ahorro asignado' : tipo
-  const vista = errorRegla ? null
-    : `Este fondo ${tipoTxt} de ${Number.isFinite(montoNum) && monto.trim() ? money(Math.round(montoNum * 100)) : '—'} cubrirá ${cobertura === 'todos' ? 'cualquier gasto compatible' : describirCobertura(regla)}, con ${modoMedios === 'todos' ? 'todos los medios' : modoMedios === 'solo' ? `solo ${listaMedios.join(', ')}` : `todos los medios excepto ${listaMedios.join(', ')}`}.${regla.restringeMedio ? ` ${listaMedios.join(', ')} solo se podrá usar en esos gastos.` : ''}`
 
-  const periodoTxt = recurrencia === 'unica' ? `Solo ${MES_RE.test(mesAplic) ? monthLabel(mesAplic, true) : '—'}` : mesAplic ? `Todos los meses desde ${monthLabel(mesAplic, true)}` : 'Todos los meses'
   const opcionesTipo: Opcion[] = TIPOS_FONDO.map(t => ({ value: t, label: TIPO_FONDO_TXT[t], Icon: t === 'mensual' ? CalendarDays : t === 'extra' ? CalendarRange : Lock }))
   const mediosActivos = useMemo(() => data.medios.filter(m => m.activo).map(m => m.nombre), [data.medios])
 
@@ -645,20 +642,6 @@ function FondoForm({ store, fondo, clonDe = null, fondos, meses, mes, hoyMes, mo
         </div>
 
         {errors.reglas && <ErrorBox message={errors.reglas} />}
-        <div className="grid items-stretch gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
-          <div className="flex items-center gap-3 rounded-2xl p-3" style={{ background: `${color}14`, boxShadow: `inset 0 0 0 1px ${color}33` }}>
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-card" style={{ color }}><Icon className="size-5" /></span>
-            <div className="min-w-0"><p className="truncate text-sm font-semibold">{nombre.trim() || 'Nuevo fondo'}</p><p className="truncate text-[11px] text-muted">{periodoTxt}</p></div>
-          </div>
-          <div className="rounded-2xl border border-line bg-bg/60 p-3 text-xs" data-testid="vista-previa-fondo">
-            <p className="mb-0.5 font-semibold text-ink">Vista previa</p>
-            <p className="text-muted">{vista ?? errorRegla}</p>
-            {editar && JSON.stringify(reglaActual(fondo!)) !== JSON.stringify({ ...regla, desde: reglaActual(fondo!).desde }) && (
-              <p className="mt-1 text-muted">Las nuevas reglas rigen desde {monthLabel(hoyMes, true)}; los meses anteriores conservan las suyas.</p>
-            )}
-          </div>
-        </div>
-
         <div className={`grid gap-3 ${modoMedios === 'solo' ? 'sm:grid-cols-2' : ''}`}>
           <div className="rounded-xl border border-line p-3">
             <Switch checked={activo} onChange={setActivo} label="Fondo activo" />

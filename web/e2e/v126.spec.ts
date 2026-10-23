@@ -101,7 +101,8 @@ test.describe('v1.26 escenarios de fondos (noviembre 2026)', () => {
     await page.getByRole('tab', { name: /Revisión del presupuesto/ }).click()
     await expect(page.getByTestId('rev-estado')).toHaveText('Pendiente de revisión')
     const f = page.getByTestId('rev-form')
-    await f.getByRole('radio', { name: /Con gastos anteriores por registrar/ }).check()
+    await f.getByText('Con gastos anteriores por registrar', { exact: true }).click()
+    await expect(f.getByRole('radio', { name: /Con gastos anteriores por registrar/ })).toBeChecked()
     await f.getByRole('button', { name: 'Guardar revisión' }).click()
     await expect(f.getByText(/Anota qué gastos faltan/)).toBeVisible()          // exige describir lo pendiente, sin inventar importes
     await f.locator('#rev-pendientes').fill('Almuerzos del 3 y 4')

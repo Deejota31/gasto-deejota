@@ -14,6 +14,7 @@ export class FakeSheet {
   /** Lecturas de una columna entera (varias filas, una columna): lo que el TextFinder evita. */
   colReads = 0
   constructor(public name: string) {}
+  getName() { return this.name }
   // Como Sheets: la última fila con cualquier valor (un FALSE de casilla cuenta, una celda vacía no).
   getLastRow() {
     for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i]?.some(v => v !== '' && v !== undefined)) return i + 1
@@ -110,10 +111,11 @@ export function load() {
   const props = new Map<string, string>()
   const cache = new Map<string, string>()
   let created = 0
+  const snapshots = new Map<string, FakeSpreadsheet>()
   let lockFree = true
   let uuid = 0
   const ctx = {
-    SpreadsheetApp: { create: () => { created++; return ss }, openById: () => ss },
+    SpreadsheetApp: { create: () => { created++; return ss }, openById: () => ss, openByUrl: (url: string) => { const c = snapshots.get(url); if (!c) throw new Error('No se pudo abrir ' + url); return c } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => props.get(k) ?? null, setProperty: (k: string, v: string) => props.set(k, v), deleteProperty: (k: string) => props.delete(k) }) },
     CacheService: { getScriptCache: () => ({
       get: (k: string) => cache.get(k) ?? null,
@@ -131,7 +133,14 @@ export function load() {
     },
     DriveApp: {
       getFileById: () => ({
-        makeCopy: (name: string, folder: FakeFolder) => { ss.copies.push(name); folder.files.push(name); return { getUrl: () => `https://copy/${encodeURIComponent(name)}` } },
+        makeCopy: (name: string, folder: FakeFolder) => {
+          ss.copies.push(name); folder.files.push(name)
+          const url = `https://copy/${encodeURIComponent(name)}`
+          const snap = new FakeSpreadsheet(); snap.sheets.clear()          // instantánea: el respaldo conserva las hojas tal como estaban
+          for (const [n, sh] of ss.sheets) { const c = new FakeSheet(n); c.ss = snap; c.rows = sh.rows.map(r => [...r]); snap.sheets.set(n, c) }
+          snapshots.set(url, snap)
+          return { getUrl: () => url }
+        },
         getParents: () => { let done = false; return { hasNext: () => !done, next: () => { done = true; return microApps } } },
       }),
       getRootFolder: () => root,
