@@ -1,5 +1,5 @@
 import { aggregate, aislaDesde } from './engine'
-import { addDays, daysInMonth, monthEnd } from './dates'
+import { addDays, monthEnd } from './dates'
 import { ratesFromConfig } from './money'
 import type { AppData, EstadoRevisionPres, Filters, RevisionPres } from './types'
 
@@ -22,7 +22,9 @@ export const ESTADO_REV_AYUDA: Record<EstadoRevisionPres, string> = {
 }
 
 export type Severidad = 'ok' | 'aviso' | 'alerta'
-export interface Chequeo { id: string; severidad: Severidad; titulo: string; detalle: string }
+/** `importe` y `items[].importe` están en céntimos de la moneda base. `items` es el detalle que se despliega (p. ej. cada fondo sobregirado). */
+export interface ItemChequeo { nombre: string; importe: number }
+export interface Chequeo { id: string; severidad: Severidad; titulo: string; detalle: string; importe?: number; items?: ItemChequeo[] }
 
 /** La revisión vigente de un período es la última registrada (la hoja solo agrega). */
 export function vigente(revisiones: readonly RevisionPres[] | undefined, periodo: string): RevisionPres | null {
@@ -48,6 +50,8 @@ export interface ResultadoRevision {
   avisos: number
   /** Días del período (hasta hoy) sin ningún movimiento: pista de gastos olvidados, sin importes. */
   diasSinMovimientos: string[]
+  /** Días del período ya transcurridos (sin contar hoy): la base para leer cuántos días no tienen gastos. */
+  diasTranscurridos: number
   movimientos: number
 }
 
@@ -61,27 +65,39 @@ export function revisarPeriodo(data: AppData, periodo: string, today: string): R
   })
   const c = a.presupuesto
   const chequeos: Chequeo[] = []
-  const add = (id: string, severidad: Severidad, titulo: string, detalle: string) => chequeos.push({ id, severidad, titulo, detalle })
+  const add = (id: string, severidad: Severidad, titulo: string, detalle: string, extra: Pick<Chequeo, 'importe' | 'items'> = {}) => chequeos.push({ id, severidad, titulo, detalle, ...extra })
 
   if (!c.presupuesto) add('sin-presupuesto', 'alerta', 'El período no tiene presupuesto', 'Ningún fondo activo suma en este período. Aplica o crea un fondo para medir el consumo.')
   if (c.incompatibles > 0) add('medio-restringido', 'alerta', 'Gastos con un medio restringido', `${c.incompatibles} gasto(s) usan un medio fuera de la cobertura que le configuraste (registrados antes de la regla). Corrige su clasificación o su medio.`)
   if (c.conflictos > 0) add('asignacion-conflicto', 'aviso', 'Asignaciones manuales por revisar', `${c.conflictos} asignación(es) manual(es) ya no son válidas (cambió el gasto o una regla); esos gastos usan la asignación automática hasta que las revises.`)
-  if (c.sinFondo.count > 0) add('sin-fondo', 'aviso', 'Gastos sin fondo asignable', `${c.sinFondo.count} gasto(s) no los cubre ningún fondo activo; igual descuentan del presupuesto consolidado.`)
-  if (c.sobregirados > 0) add('sobregiro', 'aviso', 'Fondos sobregirados', `${c.sobregirados} fondo(s) tienen imputado más que su presupuesto.`)
-  if (c.presupuesto > 0 && c.gastadoPeriodo > c.presupuesto) add('excedido', 'aviso', 'Gasto por encima del presupuesto', 'Lo gastado en el período supera el presupuesto consolidado.')
+  if (c.sinFondo.count > 0) add('sin-fondo', 'aviso', 'Gastos sin fondo asignable', `${c.sinFondo.count} gasto(s) no los cubre ningún fondo activo; igual descuentan del presupuesto consolidado.`, { importe: c.sinFondo.cents })
 
-  const ultimo = today < hasta && today >= `${periodo}-01` ? today : hasta
+  // Un excedente es una señal del presupuesto, no un error de datos. Si los fondos sobregirados explican exactamente lo que excede el
+  // consolidado, es UNA sola alerta (con el detalle por fondo); si no coinciden, son dos alertas distintas.
+  const sobre: ItemChequeo[] = c.fondos.filter(r => r.estado === 'sobregirado').map(r => ({ nombre: r.fondo.nombre, importe: Math.max(0, r.gastado - r.aporta) }))
+  const sumaSobre = sobre.reduce((x, i) => x + i.importe, 0)
+  const excede = c.presupuesto > 0 && c.gastadoPeriodo > c.presupuesto
+  if (excede && sobre.length && sumaSobre === c.exceso)
+    add('excedido', 'aviso', 'Gasto por encima del presupuesto', `Lo gastado supera el presupuesto del período; ${sobre.length === 1 ? 'el fondo indicado concentra' : 'los fondos indicados concentran'} ese exceso.`, { importe: c.exceso, items: sobre })
+  else {
+    if (sobre.length) add('sobregiro', 'aviso', sobre.length === 1 ? `Fondo sobregirado: ${sobre[0].nombre}` : `${sobre.length} fondos sobregirados`,
+      'Tienen imputado más de lo que aporta cada fondo; el resto del presupuesto no se ve afectado.', { importe: sumaSobre, items: sobre })
+    if (excede) add('excedido', 'aviso', 'Gasto por encima del presupuesto', 'Lo gastado en el período supera el presupuesto consolidado.', { importe: c.exceso })
+  }
+
+  // Días sin movimientos: solo fechas ya transcurridas (el día de hoy y los futuros no cuentan). Es información, no una irregularidad:
+  // no todos los días tienen gastos, así que no genera alertas ni suma a las observaciones.
+  const inicio = `${periodo}-01`
+  const ultimo = today < inicio ? '' : today <= hasta ? addDays(today, -1) : hasta
   const conMov = new Set(data.gastos.filter(g => g.estado === 'Activo' && g.fecha.startsWith(periodo)).map(g => g.fecha))
   const dias: string[] = []
-  if (ultimo >= `${periodo}-01`) for (let d = `${periodo}-01`; d <= ultimo && dias.length < 40; d = addDays(d, 1)) if (!conMov.has(d)) dias.push(d)
-  const total = today < `${periodo}-01` ? 0 : Math.min(daysInMonth(periodo), Number(ultimo.slice(8)))
-  if (total > 0 && dias.length >= Math.max(3, Math.ceil(total / 2))) add('dias-vacios', 'aviso', 'Muchos días sin movimientos', `${dias.length} de ${total} días no tienen gastos registrados: confirma que no olvidaste anotar alguno.`)
+  if (ultimo >= inicio) for (let d = inicio; d <= ultimo; d = addDays(d, 1)) if (!conMov.has(d)) dias.push(d)
 
   const movimientos = data.gastos.filter(g => g.estado === 'Activo' && g.fecha.startsWith(periodo)).length
   if (!chequeos.length) add('todo-en-orden', 'ok', 'Sin observaciones del presupuesto', 'Fondos y gastos del período son coherentes entre sí.')
   return {
     periodo, enCurso: today <= hasta && today >= `${periodo}-01`, chequeos,
     alertas: chequeos.filter(x => x.severidad === 'alerta').length, avisos: chequeos.filter(x => x.severidad === 'aviso').length,
-    diasSinMovimientos: dias, movimientos,
+    diasSinMovimientos: dias, diasTranscurridos: ultimo >= inicio ? Number(ultimo.slice(8)) : 0, movimientos,
   }
 }

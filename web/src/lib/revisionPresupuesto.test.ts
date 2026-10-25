@@ -48,17 +48,26 @@ describe('revisión del presupuesto: chequeos del período (solo datos del presu
     expect(revisarPeriodo(d, '2026-10', '2026-10-10').chequeos.some(c => c.id === 'sin-presupuesto')).toBe(true)
     expect(revisarPeriodo(d, '2026-11', '2026-11-10').chequeos.some(c => c.id === 'sin-presupuesto')).toBe(false)
   })
-  it('muchos días sin movimientos: aviso con la lista de fechas, sin importes inventados', () => {
+  it('días sin movimientos: solo informativo, solo fechas transcurridas (sin hoy ni futuras) y sin alertas', () => {
     const r = revisarPeriodo(datos({ gastos: [g({ fecha: '2026-10-02' })] }), '2026-10', '2026-10-10')
-    expect(r.chequeos.some(c => c.id === 'dias-vacios' && c.severidad === 'aviso')).toBe(true)
+    expect(r.chequeos.some(c => c.id === 'dias-vacios')).toBe(false)               // ya no es una alerta
     expect(r.diasSinMovimientos).toContain('2026-10-01'); expect(r.diasSinMovimientos).not.toContain('2026-10-02')
-    expect(r.diasSinMovimientos.every(d => d <= '2026-10-10')).toBe(true)
+    expect(r.diasSinMovimientos.every(d => d <= '2026-10-09')).toBe(true)          // hoy (10) todavía no cuenta
+    expect(r.diasTranscurridos).toBe(9)
+    expect(r.alertas + r.avisos).toBe(0)                                             // un día vacío no es una irregularidad
+    // período futuro: ninguna fecha pendiente; período cerrado: todos sus días
+    expect(revisarPeriodo(datos({}), '2026-12', '2026-10-10')).toMatchObject({ diasSinMovimientos: [], diasTranscurridos: 0 })
+    expect(revisarPeriodo(datos({ gastos: [g({ fecha: '2026-10-02' })] }), '2026-10', '2026-11-05').diasTranscurridos).toBe(31)
   })
   it('gasto por encima del presupuesto: aviso; un gasto anulado no cuenta como movimiento', () => {
     const d = datos({ fondos: [fondo('general', 100)], gastos: [g({ monto: 150 }), g({ monto: 999, estado: 'Anulado', fecha: '2026-10-06' })] })
     const r = revisarPeriodo(d, '2026-10', '2026-10-31')
     expect(r.chequeos.some(c => c.id === 'excedido')).toBe(true)
     expect(r.movimientos).toBe(1)
+    // el mismo exceso explicado por un solo fondo es UNA alerta con el importe y el detalle por fondo (no dos bloques)
+    const ex = r.chequeos.find(c => c.id === 'excedido')!
+    expect(r.chequeos.some(c => c.id === 'sobregiro')).toBe(false)
+    expect(ex.importe).toBe(5000); expect(ex.items).toEqual([{ nombre: 'general', importe: 5000 }])
   })
   it('revisar no modifica los datos de entrada', () => {
     const d = datos({ gastos: [g({})] }); const antes = JSON.stringify(d)

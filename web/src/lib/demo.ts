@@ -474,7 +474,7 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
         if (!r[5] && d.color) { r[5] = d.color; cambio = true }
         if (cambio) catalogo++
       }
-      return { cajas: 0, fondos: 0, catalogo, config: 0, medios: 0 }
+      return { fondos: 0, catalogo, config: 0, medios: 0 }
     },
     saveConfig: p => { db.config[String(p.clave)] = String(p.valor); return [p.clave, p.valor] },
     plantillas: () => [...db.plantillas].sort((a, b) => Number(a[10]) - Number(b[10])),
@@ -546,6 +546,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.periodo))) throw fail('VALIDATION', 'Período inválido.')
       if (!['pendiente', 'completo', 'con_gastos_anteriores', 'revisado_con_observaciones'].includes(String(p.estado))) throw fail('VALIDATION', 'Estado de revisión inválido.')
       if (String(p.observacion ?? '').length > 500 || String(p.pendientes ?? '').length > 500) throw fail('VALIDATION', 'Las notas admiten hasta 500 caracteres.')
+      if (p.estado === 'con_gastos_anteriores' && !String(p.pendientes ?? '').trim()) throw fail('VALIDATION', 'Anota qué gastos faltan por registrar.')
+      if (p.estado === 'revisado_con_observaciones' && !String(p.observacion ?? '').trim()) throw fail('VALIDATION', 'Escribe la observación de la revisión.')
       const row = [p.id, p.periodo, p.estado, String(p.pendientes ?? ''), String(p.observacion ?? ''), '', new Date().toISOString()]
       db.revisionesPresupuesto.push(row)
       return [...row]
@@ -601,6 +603,8 @@ export function demoTransport(today: string, n = 400, latencyMs = 250, nFondos =
     repararHojas: () => ({ url: 'https://docs.google.com/spreadsheets/', demo: true }),
     // En demostración no hay hojas de cajas que retirar: se informa el inventario vacío y no se cambia nada.
     retirarCajas: () => ({ simulacion: true, inventario: { cajas: 0, subcajas: 0, cajaGeneral: null, ajustesMensuales: 0, plantillasSubcaja: 0, fondos: db.fondos.length, acciones: [] }, demo: true }),
+    auditarHojas: () => ({ hojas: ['GASTOS', 'CATALOGO', 'MEDIOS_PAGO', 'CONFIG', 'FONDOS_PRESUPUESTO', 'FONDOS_PRESUPUESTO_MESES', 'REVISIONES_PRESUPUESTO'].map(hoja => ({ hoja, estado: 'vigente', accion: 'Conservar' })), obsoletas: [], demo: true }),
+    limpiarHojasObsoletas: () => ({ simulacion: true, plan: [], hojas: [], demo: true }),
     diagnose: () => ({ version: '1.0.0-demo', modo: 'demostración', filas: { GASTOS: db.gastos.length } }),
     backup: () => ({ nombre: 'Respaldo (demo)', url: 'https://docs.google.com/spreadsheets/', carpeta: carpeta.nombre, carpetaUrl: carpeta.url }),
     carpetaRespaldo: () => ({ ...carpeta }),

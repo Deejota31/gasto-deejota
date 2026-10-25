@@ -253,3 +253,72 @@ describe('retirarCajas (migración de hojas, solo con token de administración)'
     expect(filas(b, 'FONDOS_PRESUPUESTO')).toHaveLength(1)
   })
 })
+
+describe('limpieza de hojas obsoletas (v1.30)', () => {
+  let b: B
+  const admin = () => { (b.g as unknown as { crearTokenAdmin: () => string }).crearTokenAdmin() }
+  const cajas = () => {
+    b.ss.insertSheet('CAJAS').rows = [['ID', 'Nombre', 'Presupuesto', 'Filtro campo', 'Filtro valor', 'Color', 'Orden', 'Activo', 'Descripción', 'Icono'],
+      ['general', 'Caja general', 3500, 'Todos', '', '#1e3a8a', 1, true, '', '']]
+    b.ss.insertSheet('PRESUPUESTOS').rows = [['Periodo', 'Caja ID', 'Monto'], ['2026-09', 'general', 3200]]
+  }
+  beforeEach(() => { b = load(); b.g.setup(); admin() })
+
+  it('setup y repararHojas nunca crean CAJAS ni PRESUPUESTOS', () => {
+    b.g.setup(); b.post('repararHojas', {})
+    for (const n of ['CAJAS', 'PRESUPUESTOS', 'ARCHIVO_CAJAS', 'ARCHIVO_PRESUPUESTOS']) expect(b.ss.getSheetByName(n)).toBeNull()
+  })
+
+  it('la matriz lista todas las hojas con su acción y marca las obsoletas y las desconocidas', () => {
+    cajas(); b.ss.insertSheet('MIS_NOTAS').rows = [['x'], ['y']]
+    const r = b.post('auditarHojas', {}).data
+    const por = Object.fromEntries(r.hojas.map((h: { hoja: string }) => [h.hoja, h]))
+    expect(por.GASTOS).toMatchObject({ estado: 'vigente', accion: 'Conservar' })
+    expect(por.CAJAS).toMatchObject({ estado: 'obsoleta', registros: 1 })
+    expect(por.MIS_NOTAS).toMatchObject({ estado: 'desconocida', accion: 'Revisar manualmente (no se toca)' })
+    expect(r.obsoletas.sort()).toEqual(['CAJAS', 'PRESUPUESTOS'])
+    expect(r.vigentes).toContain('REVISIONES_PRESUPUESTO')
+    expect(r.vigentes).not.toContain('CAJAS')
+  })
+
+  it('simulación por defecto: no escribe ni crea respaldo', () => {
+    cajas()
+    const r = b.post('limpiarHojasObsoletas', {}).data
+    expect(r.simulacion).toBe(true)
+    expect(b.ss.getSheetByName('CAJAS')).not.toBeNull()
+    expect(b.ss.copies).toHaveLength(0)
+  })
+
+  it('con importe en la caja general y sin fondos queda pendiente: no elimina nada', () => {
+    cajas()
+    const r = b.post('limpiarHojasObsoletas', { aplicar: true }).data
+    expect(r.pendientes.map((x: { hoja: string }) => x.hoja)).toContain('CAJAS')
+    expect(b.ss.getSheetByName('CAJAS')).not.toBeNull()
+  })
+
+  it('tras retirarCajas: respaldo verificado, elimina las obsoletas y no reaparecen al reinicializar', () => {
+    cajas()
+    b.post('retirarCajas', { aplicar: true })
+    const antes = b.ss.copies.length
+    const r = b.post('limpiarHojasObsoletas', { aplicar: true }).data
+    expect(b.ss.copies.length).toBe(antes + 1)
+    expect(r.eliminadas.sort()).toEqual(['ARCHIVO_CAJAS', 'ARCHIVO_PRESUPUESTOS'])
+    expect(r.verificacion).toEqual({ reaparecen: [], faltan: [], ok: true })
+    b.g.setup(); b.post('repararHojas', {})
+    expect(b.ss.getSheets().filter(s => /CAJAS|^PRESUPUESTOS/.test(s.name))).toHaveLength(0)
+    expect(filas(b, 'FONDOS_PRESUPUESTO')).toHaveLength(1)           // los datos migrados siguen
+  })
+
+  it('no toca hojas desconocidas ni vigentes', () => {
+    b.ss.insertSheet('MIS_NOTAS').rows = [['x']]
+    cajas(); fondo(b, 'f-1', 'General', 3000)
+    b.post('limpiarHojasObsoletas', { aplicar: true })
+    expect(b.ss.getSheetByName('MIS_NOTAS')).not.toBeNull()
+    expect(b.ss.getSheetByName('GASTOS')).not.toBeNull()
+  })
+
+  it('exige token de administración', () => {
+    const ad = b.props.get('ADMIN_TOKEN')!
+    expect(b.post('limpiarHojasObsoletas', { aplicar: true }, undefined, 'x'.repeat(ad.length)).error.code).toBe('ADMIN_UNAUTHORIZED')
+  })
+})

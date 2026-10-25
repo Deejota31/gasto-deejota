@@ -138,7 +138,7 @@ export default function SaludFinanciera({ store, a, filters, today, onRevisarGas
 
   return (
     <section className="space-y-4" aria-label={`Salud financiera — ${periodo}`}>
-      <div role="tablist" aria-label="Vistas de salud financiera" className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 [&>*:last-child:nth-child(odd)]:min-[420px]:max-md:col-span-2">
+      <div role="tablist" aria-label="Vistas de salud financiera" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {tiles.map(t => <TileKpi key={t.id} t={t} on={vista === t.id} onClick={() => setVista(t.id)} />)}
       </div>
 
@@ -189,7 +189,7 @@ type Tile = {
 function TileKpi({ t, on, onClick }: { t: Tile; on: boolean; onClick: () => void }) {
   const Icon = t.icon
   return (
-    <div className="relative">
+    <div className="relative h-full min-w-0">
       <button type="button" role="tab" aria-selected={on} aria-controls={`salud-${t.id}`} id={`salud-tab-${t.id}`} onClick={onClick}
         className={`group relative flex h-full w-full flex-col overflow-hidden rounded-2xl border bg-card p-4 pr-10 text-left transition duration-200 outline-none focus-visible:ring-2 focus-visible:ring-navy/40 ${on ? 'border-transparent shadow-[0_6px_20px_rgb(15_23_42/0.08)]' : 'border-line hover:-translate-y-0.5 hover:shadow-[0_6px_18px_rgb(15_23_42/0.06)]'}`}
         style={on ? { boxShadow: `0 0 0 2px ${t.tone.fg}55, 0 8px 22px rgb(15 23 42 / 0.08)` } : undefined}>
@@ -198,7 +198,7 @@ function TileKpi({ t, on, onClick }: { t: Tile; on: boolean; onClick: () => void
           <span className="grid size-8 place-items-center rounded-xl" style={{ background: t.tone.bg, color: t.tone.fg }}><Icon className="size-4" /></span>
           <span className={`text-xs font-semibold ${on ? 'text-ink' : 'text-muted'}`}>{t.titulo}</span>
         </span>
-        <span className={`tabular mt-3 block truncate font-bold tracking-tight text-ink ${t.vacio ? 'text-base text-muted' : 'text-2xl'}`} data-testid={`salud-valor-${t.id}`} aria-label={t.valorTxt}>{t.valor}</span>
+        <span className={`tabular mt-3 block font-bold leading-tight tracking-tight text-ink [overflow-wrap:anywhere] ${t.vacio ? 'text-base text-muted' : 'text-2xl'}`} data-testid={`salud-valor-${t.id}`} aria-label={t.valorTxt}>{t.valor}</span>
         <span className="mt-0.5 block text-xs leading-snug text-muted">{t.sub}</span>
         {t.barra && <span className="mt-3 block">{t.barra}</span>}
         <span className="mt-auto flex items-center gap-1 pt-3 text-[11px] font-semibold transition group-hover:gap-1.5" style={{ color: on ? t.tone.fg : 'var(--muted)' }}>
